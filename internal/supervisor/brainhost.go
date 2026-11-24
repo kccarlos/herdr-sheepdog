@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
@@ -145,6 +146,9 @@ func (h brainHost) ReadSession(ctx context.Context, paneID string) (brain.Sessio
 	if !ok {
 		return brain.SessionRead{}, errors.New("that agent is gone")
 	}
+	if hc.IsRemote(paneID) {
+		return brain.SessionRead{}, errors.New("read_screen: the agent runs on another machine; read its screen instead")
+	}
 	alias := aliasOr(row.Alias)
 	roots := h.s.paneRoots(ctx, row)
 	d, err := h.s.cfg.WorkerLog.Tail(workerSessionWithRoots(row, roots))
@@ -187,6 +191,9 @@ func (h brainHost) RunCLI(ctx context.Context, paneID, question string) (string,
 	row, ok := h.s.store.Get(paneID)
 	if !ok {
 		return "", errors.New("that agent is gone")
+	}
+	if hc.IsRemote(paneID) {
+		return "", errors.New("run_cli: the agent runs on another machine; read its screen instead")
 	}
 	h.s.touch(paneID)
 	h.s.setSubject(paneID)

@@ -77,7 +77,7 @@ reads `Marks.Turn`, never `StateChangeSeq`.
   for that terminal (D2).
 - `Pinned` is a non-empty `labels["herdr.pinned"]`.
 - The backend keeps one `events.subscribe` connection with no filter and
-  caches marks per local terminal. It applies `turn` and `labels` events and
+  caches marks per live terminal. It applies `turn` and `labels` events and
   sends the address on `MarkChanges`. A `missed` event or a reconnect
   re-reads the snapshot.
 - Writes use a new `hc.Client.Label(ctx, terminal, map[string]string)`
@@ -87,8 +87,8 @@ reads `Marks.Turn`, never `StateChangeSeq`.
   - `SetPinned(false)` writes `herdr.pinned=` (removes it).
 - `StartAgent` and the phone shell pass `Labels{"herdr.seen":"0"}` in
   `RunParams` ("A terminal a client starts gets `herdr.seen=0`").
-- Remote terminals (`mac/t7`) are not panes for sheepdog (`isLocal`) and get
-  no marks.
+- Remote terminals (`mac/t7`, pane id `mac~t7`) share the same `herdr.seen`
+  and `herdr.pinned` label marks over `hc.Client.Label`.
 
 **herdr-tui and mock (`internal/attention.Local`).**
 

@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Factory web, life cycle — the settings panel, light</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Outfit:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.sd-light{--bg:#FAF8F3;--card:#FFFFFF;--code:#F1EEE7;--line:#E4E0D7;--fg:#1F1F22;--muted:#6B6E75;--mof:#5C5F66;--primary:#D98718;--ptext:#8A5700;--onp:#1F1F22;--psoft:#FDF1DC;--blocked:#D99417;--working:#1F5F9E;--done:#1D6B46;--idle:#5C6370;--thinking:#6A46B0;--dash:#8E8A80;--wsoft:#E1EAF4;--dsoft:#DDEEE4;--track:#ECE8DF;--danger:#B42318;--dbg:#FEF3F2;--dline:#F4C7C3;--shadow:0 1px 2px rgba(31,31,34,0.12)}
+.sd-dark{--bg:#16181C;--card:#1F2126;--code:#26292F;--line:#2E3138;--fg:#F5F2EA;--muted:#A3A7AF;--mof:#A3A7AF;--primary:#F39C1F;--ptext:#F5B83D;--onp:#1F1F22;--psoft:#2A2416;--blocked:#F0A92A;--working:#6AA8EB;--done:#5CC792;--idle:#9AA1AD;--thinking:#B195F0;--dash:#6B707A;--wsoft:#22303F;--dsoft:#1E3428;--track:#26292F;--danger:#F28B8B;--dbg:#2A1C1C;--dline:#5A2A2A;--shadow:0 1px 2px rgba(0,0,0,0.5)}
+.sd-light .logo-d,.sd-dark .logo-l{display:none}
+.sd{min-height:100vh;background:var(--bg);color:var(--fg);font-family:Inter,system-ui,-apple-system,sans-serif;font-size:15px;line-height:1.5}
+.sd *{box-sizing:border-box}
+.sd a{color:var(--ptext)}.sd a:hover{color:var(--fg)}
+.sd :focus-visible,.sd .focus{outline:3px solid #F39C1F;outline-offset:2px;box-shadow:0 0 0 2px var(--fg)}
+.sd h1,.sd h2,.sd h3,.sd p,.sd ul,.sd ol,.sd pre,.sd fieldset,.sd legend{margin:0;padding:0}
+.sd fieldset{border:0;min-width:0}
+.sd ul,.sd ol{list-style:none}
+.sd code,.sd .mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.board{max-width:1440px;margin:0 auto;padding:24px max(8px,min(32px,calc((100% - 400px) * 0.1))) 40px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,500px),1fr));gap:28px 24px;align-items:start}
+.page{container-type:inline-size;container-name:pg;max-width:1360px;margin:0 auto;padding:20px max(16px,min(32px,calc((100% - 400px) * 0.1))) 48px;display:flex;flex-direction:column;gap:20px}
+.panel{display:flex;flex-direction:column;gap:10px;min-width:0}
+.panel.wide{grid-column:1 / -1}
+.cap{font-size:13px;font-weight:600;letter-spacing:0.2px;text-transform:uppercase;color:var(--muted)}
+.win{container-type:inline-size;container-name:win;display:flex;flex-direction:column;gap:14px;padding:14px 10px;background:var(--bg);border:1px solid var(--line);border-radius:22px;min-width:0}
+.anno{font-size:13px;color:var(--muted)}
+.col{display:flex;flex-direction:column;gap:10px;min-width:0}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;min-width:0}
+.between{justify-content:space-between}
+.base{align-items:baseline}
+.grow{flex:999 1 220px;min-width:0}
+.cols{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}
+.main{flex:999 1 600px;min-width:0;display:flex;flex-direction:column;gap:14px}
+.aside{flex:1 1 340px;min-width:0;display:flex;flex-direction:column;gap:16px}
+.card{display:flex;flex-direction:column;gap:10px;padding:14px;background:var(--card);border:1px solid var(--line);border-radius:14px;min-width:0;overflow-wrap:anywhere}
+.card.dashed{border-style:dashed;border-color:var(--dash)}
+.h1{font-family:Outfit,Inter,sans-serif;font-weight:600;font-size:24px;line-height:1.2}
+.h2{font-family:Outfit,Inter,sans-serif;font-weight:600;font-size:18px;line-height:1.3}
+.h3{font-size:15px;font-weight:600}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.b{font-weight:500}
+.dot{flex:none;display:inline-block;width:8px;height:8px;border-radius:999px;background:var(--idle)}
+.dot.working{background:var(--working)}.dot.blocked{background:var(--blocked)}.dot.done{background:var(--done)}.dot.thinking{background:var(--thinking)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:6px 16px;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:22px;font:inherit;font-size:14px;font-weight:500;cursor:pointer;text-decoration:none;text-align:center}
+.sd a.btn{color:var(--fg)}
+.btn.rec{border:1.5px solid var(--fg);font-weight:600}
+.btn.pri{background:var(--primary);color:var(--onp);border-color:var(--primary);font-weight:600}
+.btn.danger{border-color:var(--danger);color:var(--danger)}
+.btn.off{background:var(--track);color:var(--muted);border-color:var(--track);cursor:default}
+.btn.sm{min-height:44px;padding:4px 12px;font-size:13px}
+.linkbtn{display:inline-flex;align-items:center;min-height:44px;padding:0;background:none;border:0;color:var(--ptext);font:inherit;font-size:14px;text-decoration:underline;cursor:pointer}
+.tag{font-size:12px;font-weight:500;color:var(--muted)}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.label{font-size:14px;font-weight:500}
+.in{width:100%;min-height:44px;padding:8px 12px;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:10px;font:inherit}
+.in.num{width:88px;flex:none;font-variant-numeric:tabular-nums}
+.in.bad{border-color:var(--danger);border-width:1.5px}
+textarea.in{resize:none;min-height:88px}
+.err{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;background:var(--dbg);color:var(--danger);border:1px solid var(--dline);border-radius:8px;font-size:14px;overflow-wrap:anywhere}
+.ok{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;background:var(--dsoft);color:var(--fg);border-radius:8px;font-size:14px}
+.status{display:flex;gap:8px;align-items:center;font-size:14px}
+.ico{flex:none;margin-top:2px}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;font-size:12px;background:var(--code);color:var(--mof);border-radius:4px}
+.chip.chg{background:var(--wsoft);color:var(--working);font-weight:500}
+.chip.bad{background:var(--dbg);color:var(--danger);font-weight:500}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;font-size:13px;font-weight:500;background:var(--code);color:var(--fg)}
+.pair{display:flex;flex-direction:column;gap:8px;padding:12px;background:var(--psoft);border:1px solid var(--line);border-radius:14px;font-size:14px;min-width:0}
+.well{padding:8px 10px;background:var(--code);border-radius:8px;min-width:0;overflow-wrap:anywhere}
+.cmd{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 10px;padding:6px 6px 6px 10px;background:var(--code);border-radius:8px}
+.cmd code{flex:1 1 180px;min-width:0;color:var(--fg);overflow-wrap:anywhere;font-size:13px}
+.rows{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.rows.alert{border-color:var(--blocked)}
+.trow{display:flex;flex-wrap:wrap;align-items:flex-start;gap:8px 12px;min-height:44px;padding:10px 14px;color:var(--fg);text-decoration:none;border-bottom:1px solid var(--line)}
+.sd a.trow{color:var(--fg)}
+.trow.last{border-bottom:0}
+.trow>.dot{margin-top:7px}
+.trow>.chips{align-self:center}
+.what{flex:999 1 260px;min-width:0;display:flex;flex-direction:column;gap:3px;overflow-wrap:anywhere}
+.chips{flex:1 0 auto;display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.proj{display:flex;flex-direction:column;min-height:44px;padding:6px 10px;border-radius:8px;color:var(--fg);text-decoration:none}
+.sd a.proj{color:var(--fg)}
+.proj.cur{background:var(--psoft)}
+.srow{display:flex;flex-direction:column;gap:8px;padding:12px 0;border-bottom:1px solid var(--line);min-width:0}
+.srow.last{border-bottom:0}
+.sname{flex:999 1 170px;min-width:0;font-size:15px;font-weight:500;overflow-wrap:anywhere}
+.ask{display:flex;flex-direction:column;gap:10px;padding:12px 14px;background:var(--psoft);border:1.5px solid var(--blocked);border-radius:14px;min-width:0}
+.q{font-size:15px;font-weight:500;line-height:1.4;overflow-wrap:anywhere}
+.seg{display:inline-flex;padding:3px;background:var(--track);border-radius:22px}
+.seg button{min-height:38px;min-width:64px;padding:0 14px;background:none;border:0;border-radius:19px;color:var(--fg);font:inherit;font-size:14px;cursor:pointer}
+.seg button.on{background:var(--card);font-weight:600;box-shadow:var(--shadow)}
+.steps{display:flex;flex-direction:column}
+.step{display:flex;gap:12px;align-items:flex-start;padding:8px 0;min-width:0}
+.sm-mark{flex:none;width:22px;height:22px;border-radius:999px;display:flex;align-items:center;justify-content:center;border:1.5px solid var(--dash);color:var(--muted);background:var(--card);margin-top:1px}
+.sm-mark.done{background:var(--dsoft);border-color:var(--done);color:var(--done)}
+.sm-mark.now{background:var(--working);border-color:var(--working);color:var(--card)}
+.sm-mark.skip{border-style:dashed}
+.sm-mark.end{background:var(--code);border-color:var(--idle);color:var(--fg)}
+.bar{display:flex;align-items:center;gap:3px}
+.bar span{display:block;width:18px;height:6px;border-radius:3px;background:var(--track)}
+.bar span.done{background:var(--done)}
+.bar span.now{background:var(--working);height:10px;outline:1.5px solid var(--fg);outline-offset:1px}
+.bar span.skip{background:none;border:1px dashed var(--dash)}
+.bar span.end{background:var(--idle)}
+.day{padding-top:6px;font-size:13px;font-weight:600;color:var(--muted)}
+.log{display:flex;flex-direction:column;gap:2px}
+.ll{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;padding:5px 0;font-size:13px;min-width:0;overflow-wrap:anywhere}
+.ll time{flex:none;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.ll .txt{flex:999 1 200px;min-width:0}
+.mark{display:inline-flex;align-items:center;gap:4px;padding:0 7px;border-radius:4px;font-size:12px;font-weight:600;white-space:nowrap}
+.mark.merged{background:var(--dsoft);color:var(--done)}
+.mark.needs{background:var(--psoft);color:var(--ptext);border:1px solid var(--blocked)}
+.mark.asked{background:var(--wsoft);color:var(--working)}
+.mark.yours{background:var(--code);color:var(--fg)}
+.gbox{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--card)}
+.gnode rect{fill:var(--card);stroke:var(--dash);stroke-width:1}
+.gnode.dim{opacity:0.35}
+.gedge.dim,.garrow.dim{opacity:0.25}
+.gedge.hot{stroke:var(--fg);stroke-width:2.5}
+.garrow.hot{fill:var(--fg)}
+.gnode.hot rect.box{stroke:var(--fg);stroke-width:2}
+.gnode.focus rect.box{stroke:#F39C1F;stroke-width:3}
+.gnode text{fill:var(--fg);font-family:Inter,system-ui,sans-serif;font-size:12px}
+.gnode text.ref{fill:var(--muted);font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.gnode text.st{fill:var(--muted);font-size:12px}
+.gedge{fill:none;stroke:var(--dash);stroke-width:1.5}
+.garrow{fill:var(--dash)}
+.sk{display:block;background:var(--track);border-radius:14px}
+details>summary{display:flex;align-items:center;gap:6px;min-height:44px;color:var(--ptext);font-size:14px;cursor:pointer;list-style:none}
+details>summary::-webkit-details-marker{display:none}
+.sugg{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;background:var(--card);overflow:hidden}
+.sugg button{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:2px 10px;min-height:44px;padding:6px 12px;background:none;border:0;border-bottom:1px solid var(--line);color:var(--fg);font:inherit;font-size:14px;text-align:left;cursor:pointer;overflow-wrap:anywhere}
+.sugg button.last{border-bottom:0}
+.cand{display:flex;flex-direction:column;gap:8px;padding:10px;background:var(--bg);border:1px solid var(--line);border-radius:10px;min-width:0}
+.cand .field{flex:1 1 120px}
+.cand .field.wide{flex:3 1 200px}
+.part{display:flex;flex-direction:column;gap:14px;min-width:0}
+@container pg (max-width:760px){.cols.re{flex-direction:column} .cols.re>.main,.cols.re>.aside{display:contents} .cols.re .o1{order:1} .cols.re .o2{order:2} .cols.re .o3{order:3} .cols.re .o4{order:4} .cols.re .o5{order:5} .cols.re .o6{order:6} .cols.re .o7{order:7} }
+@container win (min-width:1160px){.gh20{display:none} }
+</style>
+</helmet>
+<div class="{{rootClass}}">
+<div class="board"><section class="panel" aria-label="the panel, all settings open"><h2 class="cap">the panel, all settings open</h2><div class="win"><section class="card" aria-label="settings"><div class="col" style="gap: 2px"><h2 class="h2">settings</h2><p class="small muted">For this project only. A change is read back to you and saved when you confirm.</p></div><div><div class="srow"><div class="row"><div class="col grow" style="gap: 4px"><span class="sname" style="flex: none">coordinator models</span><ol class="row" style="gap: 4px 12px"><li class="row small" style="gap: 6px"><span class="muted">1.</span><span class="chip mono" style="font-size: 12px">claude / opus / medium</span></li></ol></div><button type="button" class="btn" aria-label="Edit coordinator models">Edit</button></div><div class="row small muted"><span>default claude/opus/medium</span></div></div><div class="srow"><div class="row"><div class="col grow" style="gap: 4px"><span class="sname" style="flex: none">worker models</span><ol class="row" style="gap: 4px 12px"><li class="row small" style="gap: 6px"><span class="muted">1.</span><span class="chip mono" style="font-size: 12px">claude / sonnet / medium</span></li></ol></div><button type="button" class="btn" aria-label="Edit worker models">Edit</button></div><div class="row small muted"><span>default claude/sonnet/medium</span></div></div><div class="srow"><div class="row"><div class="col grow" style="gap: 4px"><span class="sname" style="flex: none">reviewer models</span><ol class="row" style="gap: 4px 12px"><li class="row small" style="gap: 6px"><span class="muted">1.</span><span class="chip mono" style="font-size: 12px">agy / gemini-4-carbon / high</span></li><li class="row small" style="gap: 6px"><span class="muted">2.</span><span class="chip mono" style="font-size: 12px">claude / opus / medium</span></li></ol></div><button type="button" class="btn" aria-label="Edit reviewer models">Edit</button></div><div class="row small muted"><span>default claude/opus/medium then claude/sonnet/medium</span><span class="chip chg">changed</span></div></div><div class="srow"><div class="row"><div class="col grow" style="gap: 4px"><span class="sname" style="flex: none">retro models</span><ol class="row" style="gap: 4px 12px"><li class="row small" style="gap: 6px"><span class="muted">1.</span><span class="chip mono" style="font-size: 12px">claude / opus / high</span></li></ol></div><button type="button" class="btn" aria-label="Edit retro models">Edit</button></div><div class="row small muted"><span>default claude/opus/high</span></div></div><div class="srow last"><div class="row"><label class="sname" for="f1">max running</label><input id="f1" class="in num" type="number" value="4"><button type="button" class="btn" aria-label="Set max running back to the default, 3">Back to the default</button></div><div class="row small muted"><span>default 3 · allowed 1–20</span><span class="chip chg">changed</span></div></div></div><details open="open"><summary><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 6l6 6-6 6"></path></svg>all settings (38)</summary><div><div class="srow"><div class="row"><label class="sname" for="f2">review rounds</label><input id="f2" class="in num" type="number" value="3"><button type="button" class="btn" aria-label="Set review rounds back to the default, 2">Back to the default</button></div><div class="row small muted"><span>default 2 · allowed 1–5</span><span class="chip chg">changed</span></div></div><div class="srow"><div class="row"><label class="sname" for="f3">max rounds</label><input id="f3" class="in num" type="number" value="5"></div><div class="row small muted"><span>default 5 · allowed 2–10</span></div></div><div class="srow"><div class="row"><label class="sname" for="f4">plan review rounds</label><input id="f4" class="in num" type="number" value="1"></div><div class="row small muted"><span>default 1 · allowed 0–1</span></div></div><div class="srow"><div class="row"><label class="sname" for="f5">retro after rounds with majors</label><input id="f5" class="in num" type="number" value="2"></div><div class="row small muted"><span>default 2 · allowed 2–4</span></div></div><div class="srow"><div class="row"><label class="sname" for="f6">retro from round</label><input id="f6" class="in num" type="number" value="3"></div><div class="row small muted"><span>default 3 · allowed 2–6</span></div></div><div class="srow"><div class="row"><label class="sname" for="f7">retros per task</label><input id="f7" class="in num" type="number" value="1"></div><div class="row small muted"><span>default 1 · allowed 0–2</span></div></div><div class="srow"><div class="row"><label class="sname" for="f8">checks grace minutes</label><input id="f8" class="in num" type="number" value="5"></div><div class="row small muted"><span>default 5 · allowed 1–60</span></div></div><div class="srow"><div class="row"><label class="sname" for="f9">ci stalled minutes</label><input id="f9" class="in num bad" type="number" value="0"></div><div class="row small muted"><span>default 90 · allowed 10–600</span><span class="chip bad">not allowed</span></div><p class="err" role="alert"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l9 16H3z"></path><path d="M12 10v4"></path><path d="M12 17v.5"></path></svg><span>The stored value 0 is not allowed (allowed 10–600). Change it before the next start.</span></p></div><div class="srow"><div class="row"><label class="sname" for="f10">main red minutes</label><input id="f10" class="in num" type="number" value="60"></div><div class="row small muted"><span>default 60 · allowed 5–600</span></div></div><div class="srow"><div class="row"><label class="sname" for="f11">ci fails per hour</label><input id="f11" class="in num" type="number" value="3"></div><div class="row small muted"><span>default 3 · allowed 1–10</span></div></div><div class="srow"><div class="row"><label class="sname" for="f12">build hours</label><input id="f12" class="in num" type="number" value="4"></div><div class="row small muted"><span>default 4 · allowed 1–48</span></div></div><div class="srow"><div class="row"><label class="sname" for="f13">flake reruns</label><input id="f13" class="in num" type="number" value="1"></div><div class="row small muted"><span>default 1 · allowed 0–3</span></div></div><div class="srow"><div class="row"><label class="sname" for="f14">start minutes</label><input id="f14" class="in num" type="number" value="2"></div><div class="row small muted"><span>default 2 · allowed 1–15</span></div></div><div class="srow"><div class="row"><label class="sname" for="f15">idle grace seconds</label><input id="f15" class="in num" type="number" value="20"></div><div class="row small muted"><span>default 20 · allowed 5–120</span></div></div><div class="srow"><div class="row"><label class="sname" for="f16">quiet minutes</label><input id="f16" class="in num" type="number" value="20"></div><div class="row small muted"><span>default 20 · allowed 5–120</span></div></div><div class="srow"><div class="row"><label class="sname" for="f17">interrupt seconds</label><input id="f17" class="in num" type="number" value="90"></div><div class="row small muted"><span>default 90 · allowed 10–600</span></div></div><div class="srow"><div class="row"><label class="sname" for="f18">review minutes</label><input id="f18" class="in num" type="number" value="45"></div><div class="row small muted"><span>default 45 · allowed 10–240</span></div></div><div class="srow"><div class="row"><label class="sname" for="f19">blocked minutes</label><input id="f19" class="in num" type="number" value="10"></div><div class="row small muted"><span>default 10 · allowed 1–120</span></div></div><div class="srow"><div class="row"><label class="sname" for="f20">worker restarts</label><input id="f20" class="in num" type="number" value="3"></div><div class="row small muted"><span>default 3 · allowed 0–10</span></div></div><div class="srow"><div class="row"><label class="sname" for="f21">reviewer retries</label><input id="f21" class="in num" type="number" value="2"></div><div class="row small muted"><span>default 2 · allowed 0–5</span></div></div><div class="srow"><div class="row"><label class="sname" for="f22">ensure failures</label><input id="f22" class="in num" type="number" value="3"></div><div class="row small muted"><span>default 3 · allowed 1–10</span></div></div><div class="srow"><div class="row"><label class="sname" for="f23">ensure backoff minutes</label><input id="f23" class="in num" type="number" value="1"></div><div class="row small muted"><span>default 1 · allowed 1–60</span></div></div><div class="srow"><div class="row"><label class="sname" for="f24">coordinator starts per hour</label><input id="f24" class="in num" type="number" value="3"></div><div class="row small muted"><span>default 3 · allowed 1–10</span></div></div><div class="srow"><div class="row"><label class="sname" for="f25">coordinator gap minutes</label><input id="f25" class="in num" type="number" value="10"></div><div class="row small muted"><span>default 10 · allowed 1–60</span></div></div><div class="srow"><div class="row"><label class="sname" for="f26">coordinator silent minutes</label><input id="f26" class="in num" type="number" value="30"></div><div class="row small muted"><span>default 30 · allowed 5–240</span></div></div><div class="srow"><div class="row"><label class="sname" for="f27">handoff minutes</label><input id="f27" class="in num" type="number" value="5"></div><div class="row small muted"><span>default 5 · allowed 1–30</span></div></div><div class="srow"><div class="row"><label class="sname" for="f28">heartbeat minutes</label><input id="f28" class="in num" type="number" value="60"></div><div class="row small muted"><span>default 60 · allowed 10–600</span></div></div><div class="srow"><div class="row"><label class="sname" for="f29">continues per task</label><input id="f29" class="in num" type="number" value="1"></div><div class="row small muted"><span>default 1 · allowed 0–3</span></div></div><div class="srow"><div class="row"><label class="sname" for="f30">continue lines</label><input id="f30" class="in num" type="number" value="60"></div><div class="row small muted"><span>default 60 · allowed 0–500</span></div></div><div class="srow"><div class="row"><label class="sname" for="f31">task size limit</label><input id="f31" class="in num" type="number" value="400"></div><div class="row small muted"><span>default 400 · allowed 50–2000</span></div></div><div class="srow"><div class="row"><label class="sname" for="f32">size cap factor</label><input id="f32" class="in num" type="number" value="2"></div><div class="row small muted"><span>default 2 · allowed 1–5</span></div></div><div class="srow"><div class="row"><label class="sname" for="f33">sweep minutes</label><input id="f33" class="in num" type="number" value="5"></div><div class="row small muted"><span>default 5 · allowed 1–60</span></div></div><div class="srow"><div class="row"><label class="sname" for="f34">pool floor percent</label><input id="f34" class="in num" type="number" value="5"></div><div class="row small muted"><span>default 5 · allowed 0–50</span></div></div><div class="srow"><div class="row"><label class="sname" for="f35">pool minutes</label><input id="f35" class="in num" type="number" value="5"></div><div class="row small muted"><span>default 5 · allowed 1–60</span></div></div><div class="srow"><div class="row"><label class="sname" for="f36">disk full percent</label><input id="f36" class="in num" type="number" value="90"></div><div class="row small muted"><span>default 90 · allowed 50–99</span></div></div><div class="srow"><div class="row"><label class="sname" for="f37">second reviewer</label><select id="f37" class="in" style="width: auto; flex: 0 1 150px"><option>opus</option><option>codex</option></select></div><div class="row small muted"><span>default opus · allowed opus, codex</span><span class="chip ">not used</span></div><p class="small muted">not used while reviewer models are set</p></div><div class="srow"><div class="row"><label class="sname" for="f38">dispatch workflow</label><input id="f38" class="in" style="flex: 1 1 150px; width: auto" type="text" value="" placeholder="not set"></div><div class="row small muted"><span>default not set · allowed a workflow file name</span></div></div><div class="srow last"><div class="row"><label class="sname" for="f39">design gate</label><select id="f39" class="in" style="width: auto; flex: 0 1 150px"><option>not set</option><option>owner</option><option>review</option></select></div><div class="row small muted"><span>default not set · allowed owner, review, not set</span></div></div></div></details></section></div><p class="anno">On top: the rows a new project is asked for. The rest is behind one fold, in the order the engine keeps them. Each row: its plain name, the value, the default, the allowed range. Drawn here: a changed value (max running, review rounds), a stored value that is not allowed (ci stalled minutes), a row that is not used (second reviewer, because reviewer models are set). A row has no Change button until its field is edited. With the fold closed the panel is the five top rows, as on the page board.</p></section><div class="col" style="gap: 28px"><section class="panel" aria-label="loading"><h2 class="cap">loading</h2><div class="win"><section class="card" aria-label="settings"><h2 class="h2">settings</h2><p class="status" role="status"><span class="dot working" aria-hidden="true"></span><span>Loading the settings…</span></p><span class="sk" aria-hidden="true" style="height: 56px"></span><span class="sk" aria-hidden="true" style="height: 56px"></span><span class="sk" aria-hidden="true" style="height: 56px"></span></section></div></section><section class="panel" aria-label="cannot load"><h2 class="cap">cannot load</h2><div class="win"><section class="card dashed" aria-label="settings"><h2 class="h2">settings</h2><p class="status" role="status"><span class="dot " aria-hidden="true"></span><span>Can&#x27;t load the settings. Trying again.</span></p><p class="small muted">The rest of the page still works.</p></section></div><p class="anno">Dashed, not an error colour: nothing you did broke.</p></section></div></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme": {"editor": "enum", "options": ["light", "dark"], "default": "light"}, "$preview": {"width": 1440, "height": 4589}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { rootClass: 'sd sd-' + (this.props.theme ?? 'light') };
+  }
+}
+</script>
+</body>
+</html>

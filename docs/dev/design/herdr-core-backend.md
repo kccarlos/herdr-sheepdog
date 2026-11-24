@@ -98,11 +98,11 @@ type Backend interface {               // what the daemon needs
 
 | herdr (old) | herdr-core (hc) | v1 rule |
 |---|---|---|
-| pane id `p_…` | terminal address `t7` | pane id = address, so `pane_id` in `/api/state` (agents and the pending question) is the hc address a herdr-app mod passes to hc to focus it. Terminals on added machines (`rohan/t7`) are left out: a `/` breaks `/api/agents/{pane_id}/…`. |
-| agent (a pane where herdr detected one) | terminal | an agent is a live local terminal with a current status, or whose program is a known agent kind (foreground or start `argv[0]` is `claude`, `codex`, `agy`, …). `reported` alone is not enough: after a cleared status with the shell in front, the terminal is a shell again. A plain shell is not an agent and a phone shell becomes one if an agent program runs in it or it has a status; the `sheepdog=shell` label does not suppress that. |
+| pane id `p_…` | terminal address `t7` (or `rohan/t7` on an added machine) | pane id = `hc.PaneID(address)` (`t7` unchanged; `rohan/t7` → `rohan~t7` so `/` does not break `/api/agents/{pane_id}/…`, mapped back with `hc.Address` on outgoing hc calls and `focusTarget` in the herdr-app panel). |
+| agent (a pane where herdr detected one) | terminal | an agent is a live terminal with a current status, or whose program is a known agent kind (foreground or start `argv[0]` is `claude`, `codex`, `agy`, …). `reported` alone is not enough: after a cleared status with the shell in front, the terminal is a shell again. A plain shell is not an agent and a phone shell becomes one if an agent program runs in it or it has a status; the `sheepdog=shell` label does not suppress that. |
 | agent kind (`claude`, `codex`) | `status.app` (`claude-code`, `codex`), else `argv[0]` | `claude-code` → `claude`; otherwise the app or program name. |
 | agent name | terminal `name` | as is; no rename on hc (the name is set at `terminal.run`). |
-| workspace | none in core; herdr-app's space, which it shows for terminals labelled `herdr.space=<id>` | `WorkspaceID` = the `herdr.space` label (empty for an unlabeled terminal, which herdr-app does not show either), on panes, agents and status events. The snapshot lists one workspace per space id seen on a live local terminal, in order of first appearance, with its pane count and its most urgent agent's state (blocked, done, working, idle). |
+| workspace | none in core; herdr-app's space, which it shows for terminals labelled `herdr.space=<id>` | `WorkspaceID` = the `herdr.space` label (empty for an unlabeled terminal, which herdr-app does not show either), on panes, agents and status events. The snapshot lists one workspace per space id seen on a live terminal, in order of first appearance, with its pane count and its most urgent agent's state (blocked, done, working, idle). |
 | workspace label | herdr-app's space name, in its document | not read. The label follows herdr-app's rule for a space nobody named: its first (oldest) terminal's repo (the git checkout's folder name, from `.git`), else its folder, `~` at home. A name the user gave in herdr-app is not seen. |
 | tab | herdr-app's tab, shown for `herdr.tab=<id>` | `TabID` = the `herdr.tab` label. |
 | `idle`, `working`, `done`, `blocked` | the same words | as is. |
@@ -118,7 +118,7 @@ type Backend interface {               // what the daemon needs
 | `pane_agent_detected` | the first `status` event of a terminal, `created` of a known kind, or the cleared-status release above | → `FleetAgentDetected`, with `Released` on the exit. |
 | `pane_exited` / `pane_closed` | `finished`, `lost` / `removed` | → `FleetPaneExited` / `FleetPaneClosed`. |
 | resubscribe after `events_lost` | `missed`, a reconnect | → `Resync`. |
-| `session.snapshot` | `terminal.list` | → `Snapshot` (panes = live local terminals, agents = the ones above). |
+| `session.snapshot` | `terminal.list` | → `Snapshot` (panes = live terminals, agents = the ones above; remote `Cwd` is stripped via `hc.LocalCwd` so local folder features never probe remote paths). |
 | `agent_session` (the worker's transcript) | not reported | none on hc: no worker history digest. |
 | `ping` version | `hello` version | → `Pong`. |
 
@@ -198,7 +198,7 @@ Not in v1, each refused with the message the app already shows:
 - scrollback in the live terminal for a program that does not use the
   mouse;
 - the worker's own transcript (no `agent_session` on hc);
-- terminals on machines added to the core.
+- local-folder features (Spaces, phone shell, files, Changes, attachments, local investigations) for terminals on machines added to herdr-core with `hc machine add` — those terminals are watched and controllable, but their folders live on the other machine.
 
 ## Choosing the backend
 
@@ -271,7 +271,7 @@ starts gets `herdr.seen=0`", herdr-app's `docs/labels.md`), and `StartAgent`
 writes `herdr.seen=<turn>` into a terminal that has no such label. The seen
 and pinned marks are the `herdr.seen` and `herdr.pinned` labels, shared with
 every Herdr window: `Backend` is the `herdr.Marker` (`marks.go`). `RunMarks`
-holds one unfiltered `events.subscribe`, caches the marks of every local
+holds one unfiltered `events.subscribe`, caches the marks of every live
 terminal from its snapshot and from `turn`, `labels`, `status`, `created`,
 `removed` and `finished` events, and re-reads everything after a `missed`
 notification or a reconnect. `MarkSeen` writes only `herdr.seen`, only when it

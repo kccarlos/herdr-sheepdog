@@ -114,6 +114,11 @@ func TestPlanReviewSlotProbeExcludesUnreviewed(t *testing.T) {
 	}
 	setTerminalStatusAt(t, w.srv, w.client, w1, "idle", w.now.Add(-time.Minute))
 
+	w.srv.Add(hc.Terminal{
+		Address: "plan-1", Name: planReviewerName(w.id, 1), State: "live",
+		Labels: map[string]string{"sheepdog.project": w.id, "sheepdog.role": flow.RolePlanReviewer, "sheepdog.run": "run-plan-1"},
+		Status: &hc.Status{App: "claude-code", State: "working"}, Reported: true,
+	})
 	inFlight := []flow.PlanReview{{N: 1, Tasks: []string{"T2"}, Started: w.now, Run: &flow.ReviewRun{Kind: flow.RoundPlan, Round: 1, RunID: "plan-1"}}}
 	w.edit(func(s *flow.State) {
 		s.Settings.MaxRunning, s.Settings.PlanReviewRounds = 1, 1
@@ -201,7 +206,7 @@ func TestStore_AcceptPlanLockedFailedWriteKeepsMarks(t *testing.T) {
 // plan apply -> N10 hold + J16 fail-open (planReviewerReady + acceptPlanLocked)
 // -> N11 only after accept, plus PlanReviewRounds=0 writing no PlanReview.
 func TestPlanReviewApplyJ16UnavailableThenN11(t *testing.T) {
-	models := map[string][]flow.Candidate{flow.RolePlanReviewer: {{CLI: "claude", Model: "sonnet", Effort: "medium"}}}
+	models := map[string][]flow.Candidate{flow.RolePlanReviewer: {{CLI: world.CodexCLI, Model: "gpt-6.2-sol", Effort: "medium"}}}
 	w, tok := seedPlanCoord(t, "Plan review fail-open e2e", 1, models)
 	plan := `{"tasks":[{"id":"T1","title":"feat: needed","estimate_lines":40,` + testPlanJSON + `}]}`
 	if err := w.eng.Report(tok, "plan apply", json.RawMessage(plan)); err != nil {

@@ -153,6 +153,11 @@ func SweepTerminals(ctx context.Context, client *hc.Client, s flow.State) flow.S
 		}
 	}
 	add(s.Project.RunID, s.Project.Run)
+	for _, pr := range s.Project.PlanReviews {
+		if pr.Run != nil {
+			add(pr.Run.RunID, pr.Run.Run)
+		}
+	}
 	for _, t := range s.Tasks {
 		for _, a := range t.Attempts {
 			add(a.RunID, a.Run)
@@ -169,6 +174,9 @@ func SweepTerminals(ctx context.Context, client *hc.Client, s flow.State) flow.S
 	}
 	p := flow.SweepProbe{Probe: "terminals"}
 	for _, t := range list.Terminals {
+		if hc.IsRemote(t.Address) {
+			continue
+		}
 		if t.Labels["sheepdog.project"] == s.Project.ID && !owned(t) {
 			p.Items = append(p.Items, flow.SweepItem{Kind: "stray_terminal", Key: fmt.Sprintf("%s@%d", t.Address, t.CreatedMS), Summary: fmt.Sprintf("a stray agent terminal %s with factory labels", t.Address)})
 		}

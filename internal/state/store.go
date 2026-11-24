@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 )
 
@@ -93,6 +94,7 @@ func Open(path string, opts Options) (*Store, error) {
 		if a.PaneID == "" {
 			a.PaneID = id
 		}
+		a.Cwd = hc.LocalCwd(a.PaneID, a.Cwd)
 		if alias, ok := s.opts.Aliases[id]; ok && alias != "" && a.Alias != alias {
 			a.Alias, a.AliasAuto = s.uniqueFor(id, alias), false
 		}
@@ -172,8 +174,8 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 			a.SessionSource, a.SessionKind, a.SessionValue, changed = sess.Source, sess.Kind, sess.Value, true
 		}
 	}
-	if t.Cwd != "" && a.Cwd != t.Cwd {
-		a.Cwd, changed = t.Cwd, true
+	if cwd := hc.LocalCwd(t.PaneID, t.Cwd); cwd != "" && a.Cwd != cwd {
+		a.Cwd, changed = cwd, true
 	}
 	if len(t.Labels) > 0 && !maps.Equal(a.Labels, t.Labels) {
 		a.Labels, changed = maps.Clone(t.Labels), true

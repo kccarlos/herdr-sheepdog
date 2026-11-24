@@ -195,6 +195,52 @@ func TestClaudeRetroArgvRules(t *testing.T) {
 	})
 }
 
+// TestClaudePlanReviewerArgvRules checks plan.md 11.2: only report plan-review
+// and one Edit(//<findingsPath>) rule in dontAsk mode.
+func TestClaudePlanReviewerArgvRules(t *testing.T) {
+	const bin, fp = "/opt/bin/sheepdog", "/tmp/sd-factory/projects/p1/reports/plan-r1.draft.md"
+	argv := ClaudePlanReviewerArgv("sonnet", "medium", bin, fp)
+	joined := strings.Join(argv, " ")
+	if len(argv) == 0 || !strings.Contains(joined, "DISABLE_AUTOUPDATER=1") || !strings.Contains(joined, "--permission-mode dontAsk") {
+		t.Fatalf("ClaudePlanReviewerArgv = %q, want dontAsk with DISABLE_AUTOUPDATER=1", argv)
+	}
+	allowed := ""
+	for _, a := range argv {
+		if v, ok := strings.CutPrefix(a, "--allowedTools="); ok && allowed == "" {
+			allowed = v
+		} else if strings.HasPrefix(a, "--allowedTools") {
+			t.Fatalf("duplicate or bare --allowedTools in %q", argv)
+		}
+	}
+	if !strings.Contains(allowed, "Bash("+bin+" factory report plan-review:*)") {
+		t.Errorf("missing Bash(report plan-review:*):\n%s", allowed)
+	}
+	var edits []string
+	for _, tok := range splitAllowedTools(allowed) {
+		if strings.HasPrefix(tok, "Edit(") {
+			edits = append(edits, tok)
+		} else if strings.HasPrefix(tok, "Write(") {
+			t.Errorf("must not include Write rule %q", tok)
+		}
+	}
+	if len(edits) != 1 || !matchesClaudeAbsEditRule(edits[0], fp) {
+		t.Errorf("Edit rules = %q, want single Edit(//%s)", edits, fp)
+	}
+	for _, bad := range []string{"report review", "report retro", "Bash(sheepdog ", "report ask", "report ready", "factory plan", "factory task", "factory answer"} {
+		if strings.Contains(allowed, bad) {
+			t.Errorf("--allowedTools= must not contain %q", bad)
+		}
+	}
+	if got := strings.Join(ClaudePlanReviewerArgv("sonnet", "medium", "", fp), " "); !strings.Contains(got, "Bash(sheepdog factory report plan-review:*)") {
+		t.Errorf("empty bin argv = %q", got)
+	}
+	for _, got := range [][]string{ClaudePlanReviewerArgv("", "medium", bin, fp), ClaudePlanReviewerArgv("sonnet", "", bin, fp), ClaudePlanReviewerArgv("sonnet", "medium", bin, ""), ClaudePlanReviewerArgv("sonnet", "medium", bin, "reports/plan-r1.draft.md")} {
+		if got != nil {
+			t.Errorf("invalid args returned %q, want nil", got)
+		}
+	}
+}
+
 // splitAllowedTools splits a space-separated Claude --allowedTools= string
 // while keeping parenthesized arguments like Bash(git diff:*) intact.
 func splitAllowedTools(s string) []string {

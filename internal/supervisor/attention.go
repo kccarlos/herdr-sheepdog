@@ -12,6 +12,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/attention"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/fsaccess"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
@@ -599,6 +600,9 @@ type paneCwder interface {
 // folderOfPane is the folder of the agent's space. A pane in no workspace
 // (a synthetic one) falls back to the folder it was given.
 func (s *Supervisor) folderOfPane(idx *folderIndex, row state.Agent) string {
+	if hc.IsRemote(row.PaneID) {
+		return ""
+	}
 	if f := idx.folderOf(row); f != "" {
 		return f
 	}

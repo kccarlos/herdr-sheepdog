@@ -42,6 +42,9 @@ var reviewerCmdTemplate string
 //go:embed retro.md
 var retroTemplate string
 
+//go:embed plan_reviewer.md
+var planReviewerTemplate string
+
 var lockGitTimeout = world.GitStageTimeout
 
 // ghTimeout bounds one GitHub executor or snapshot (a push plus gh calls).
@@ -323,6 +326,11 @@ func (e *Engine) Stop(project string) error {
 		return err
 	}
 	var runs []string
+	for _, pr := range s.Project.PlanReviews {
+		if pr.Run != nil {
+			runs = append(runs, cmp.Or(pr.Run.RunID, planReviewerName(id, pr.N)))
+		}
+	}
 	for ti := range s.Tasks {
 		runs = append(runs, taskRuns(id, s.Tasks[ti])...)
 	}
@@ -335,6 +343,12 @@ func (e *Engine) Stop(project string) error {
 	now := e.now()
 	for ti := range s.Tasks {
 		stopTaskRuns(&s.Tasks[ti], s.Settings, now)
+	}
+	for i := range s.Project.PlanReviews {
+		stopReviewRec(s.Project.PlanReviews[i].Run, s.Settings, now)
+	}
+	if n := len(s.Project.PlanReviews); n > 0 && s.Project.PlanReviews[n-1].Verdict == "" {
+		s.Project.PlanReviews = s.Project.PlanReviews[:n-1]
 	}
 	if s.Project.Run != nil {
 		stopRec(&s.Project.Run, flow.RoleCoordinator, s.Settings, now)
@@ -416,9 +430,11 @@ func (e *Engine) passProject(ctx context.Context, id string, _ ...bool) {
 	defer cancel()
 	dt := e.passDelta(id)
 	hcChecked, coordErr := e.observeCoordLocked(ctx, id, &s)
-	hcErr := coordErr
-	if coordErr != nil {
-		e.logError("factory.hc_error", id, coordErr)
+	planRun, prChecked, prErr := e.observePlanReviewLocked(ctx, id, &s, dt)
+	hcChecked = hcChecked || prChecked
+	hcErr := cmp.Or(coordErr, prErr)
+	if hcErr != nil {
+		e.logError("factory.hc_error", id, hcErr)
 	}
 	e.passCoordFallback = e.observeCoordSignInLocked(ctx, id, &s, e.now())
 	e.observeBaseLocked(ctx, id, &s)
@@ -550,7 +566,7 @@ func (e *Engine) passProject(ctx context.Context, id string, _ ...bool) {
 			e.emitOverrideResultsLocked(id, &s, now)
 		}
 		if coordErr == nil {
-			e.passProjectRulesLocked(ctx, id, &s, now)
+			e.passProjectRulesLocked(ctx, id, &s, now, planRun)
 		}
 		e.checkInvariantsLocked(id, &s, skipped, now)
 	}
@@ -703,7 +719,7 @@ func (e *Engine) observeCoordLocked(ctx context.Context, id string, s *flow.Stat
 }
 
 // passProjectRulesLocked evaluates flow.ProjectRows and executes the matched coordinator action.
-func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.State, now time.Time) {
+func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.State, now time.Time, planRun ...flow.Run) {
 	if !e.cleanLocked(id) {
 		return
 	}
@@ -712,7 +728,7 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 		prReady, prWhy = e.planReviewerReady(ctx, *s)
 	}
 	match := func() (flow.Row[flow.ProjectIn], flow.Decision) {
-		return flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now, CoordFallbackReady: e.passCoordFallback, PlanReviewerReady: prReady})
+		return flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now, CoordFallbackReady: e.passCoordFallback, PlanReviewerReady: prReady, PlanRun: append(planRun, flow.Run{})[0]})
 	}
 	r, d := match()
 	if len(d.Asked) > 0 && d.Asked[0] == flow.AskCoordDialogStuck {
@@ -794,8 +810,17 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 		commit("stopped coordinator")
 	case flow.AskDeliverWakes:
 		e.deliverWakesLocked(ctx, id, s, now)
-	case flow.AskAcceptPlan, flow.AskStartPlanReviewer:
-		e.acceptPlanLocked(id, s, d.Asked, cmp.Or(prWhy, map[string]string{flow.AskStartPlanReviewer: "plan reviewer unavailable"}[ask], d.Why), now)
+	case flow.AskStartPlanReviewer:
+		e.startPlanReviewLocked(ctx, id, s, d.Asked, now)
+	case flow.AskStopPlanReviewer:
+		pr := s.Project.PlanReviews[len(s.Project.PlanReviews)-1]
+		if err := e.stopRuns(ctx, []string{cmp.Or(pr.Run.RunID, planReviewerName(id, pr.N))}); err != nil {
+			e.logError("factory.hc_error", id, err)
+			return
+		}
+		e.acceptPlanLocked(id, s, r.ID, d.Asked, d.Why, now)
+	case flow.AskAcceptPlan:
+		e.acceptPlanLocked(id, s, r.ID, d.Asked, cmp.Or(prWhy, d.Why), now)
 	default:
 		msg := map[string]string{flow.AskFinalJournal: "All tasks in this plan have ended. Write one final journal line summarizing what landed and any open risks.", flow.AskCoordGoOn: "Your last turn ended with an error. Check your state and go on with the work.", flow.AskHeartbeat: coordSummary(*s, "", true)}[ask]
 		if e.sendCoordLocked(ctx, id, s, msg, now, ask != flow.AskFinalJournal) == nil {
@@ -830,11 +855,20 @@ func (e *Engine) planReviewerReady(ctx context.Context, s flow.State) (bool, str
 	return r.Why == "", r.Why
 }
 
-func (e *Engine) acceptPlanLocked(id string, s *flow.State, asked []string, why string, now time.Time) {
+func (e *Engine) acceptPlanLocked(id string, s *flow.State, rule string, asked []string, why string, now time.Time) {
 	next, dec := *s, "plan accepted"
 	next.Tasks, next.Project.PlanReviews = slices.Clone(s.Tasks), slices.Clone(s.Project.PlanReviews)
 	if n := len(next.Project.PlanReviews); n > 0 && next.Project.PlanReviews[n-1].Accepted.IsZero() {
 		pr := &next.Project.PlanReviews[n-1]
+		if pr.Run != nil {
+			rev := *pr.Run
+			stopReviewRec(&rev, next.Settings, now)
+			pr.Run = &rev
+		}
+		if pr.Verdict == "" {
+			why, dec = cmp.Or(why, "plan reviewer unavailable"), "plan accepted unreviewed (unavailable)"
+			pr.Verdict, pr.Why, pr.At = flow.VerdictUnavailable, why, now
+		}
 		pr.Accepted = now
 		for i := range next.Tasks {
 			next.Tasks[i].Unreviewed = next.Tasks[i].Unreviewed && !slices.Contains(pr.Tasks, next.Tasks[i].ID)
@@ -850,9 +884,99 @@ func (e *Engine) acceptPlanLocked(id string, s *flow.State, asked []string, why 
 		}
 		next.Project.PlanReviews = append(next.Project.PlanReviews, flow.PlanReview{N: len(next.Project.PlanReviews) + 1, Tasks: tasks, Verdict: flow.VerdictUnavailable, Why: why, At: now, Accepted: now})
 	}
-	if e.commitLogLocked(id, &next, LogLine{By: "engine", Rule: "J16", Asked: asked, Decision: dec, Why: why}) {
+	if e.commitLogLocked(id, &next, LogLine{By: "engine", Rule: rule, Asked: asked, Decision: dec, Why: why}) {
 		*s = next
 	}
+}
+
+func (e *Engine) observePlanReviewLocked(ctx context.Context, id string, s *flow.State, dt time.Duration) (flow.Run, bool, error) {
+	n := len(s.Project.PlanReviews)
+	if n == 0 || !s.Project.PlanReviews[n-1].Accepted.IsZero() || s.Project.PlanReviews[n-1].Verdict != "" || s.Project.PlanReviews[n-1].Run == nil {
+		return flow.Run{}, false, nil
+	}
+	rev := s.Project.PlanReviews[n-1].Run
+	wasLive := rev.Run != nil && rev.Run.State != "" && rev.Run.State != flow.PhaseEnded
+	checked := e.HC != nil && rev.RunID != "" && (rev.Run == nil || rev.Run.State != flow.PhaseEnded)
+	r, err := e.advanceRunLocked(ctx, id, "", s, rev.RunID, flow.RolePlanReviewer, cmp.Or(rev.Reviewer.CLI, "claude"), &rev.Run)
+	if err != nil {
+		return flow.Run{}, checked, err
+	}
+	if dt > 0 && wasLive {
+		rev.Age += dt
+		e.saveLocked(id, *s)
+	}
+	r.State = cmp.Or(r.State, flow.RunGone)
+	return r, checked, nil
+}
+
+func (e *Engine) startPlanReviewLocked(ctx context.Context, id string, s *flow.State, asked []string, now time.Time) {
+	var avoid []string
+	if s.Project.Run != nil && s.Project.Run.Model != "" {
+		avoid = []string{cmp.Or(s.Project.Run.CLI, "claude") + "/" + s.Project.Run.Model}
+	}
+	in, env, reason := e.resolveLaunch(ctx, id, flow.RolePlanReviewer, flow.Task{}, *s, launchCapability(flow.RolePlanReviewer), func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
+		in, _, r := reviewChoiceReason(flow.RolePlanReviewer, flow.Task{}, s.Settings, flow.Attempt{}, "", f, avoid)
+		return in, r
+	})
+	if reason.Why != "" {
+		e.acceptPlanLocked(id, s, "J16", asked, reason.Why, now)
+		return
+	}
+	choice, bin, n, code := intentCandidate(in), cmp.Or(e.Bin, "sheepdog"), len(s.Project.PlanReviews)+1, strings.ToLower(rand.Text()[:10])
+	var tasks []string
+	for _, t := range s.Tasks {
+		if t.Unreviewed && !flow.Ended(t) {
+			tasks = append(tasks, t.ID)
+		}
+	}
+	draftPath := e.reviewDraftPath(id, "plan", n, code)
+	if draftPath != "" && guardTestPath(draftPath) == nil {
+		_ = os.MkdirAll(filepath.Dir(draftPath), 0o700)
+	}
+	argv := launchArgv(flow.RolePlanReviewer, choice, s.Project.Folder, "", false)
+	if choice.CLI == "claude" {
+		argv = world.ClaudePlanReviewerArgv(choice.Model, choice.Effort, bin, draftPath)
+	}
+	prompt := planReviewPrompt(planReviewerTemplate, *s, code, bin, draftPath)
+	if choice.CLI == world.AgyCLI {
+		prompt = "Do not modify, create or delete any files; read and run tests only (except writing findings to " + draftPath + ").\n\n" + prompt
+	}
+	s.Project.PlanReviews = append(s.Project.PlanReviews, flow.PlanReview{
+		N: n, Tasks: tasks, Reviewer: flow.Reviewer(choice), Started: now,
+		Run: &flow.ReviewRun{Round: n, Kind: flow.RoundPlan, Code: code, Reviewer: flow.Reviewer(choice)},
+	})
+	pr := &s.Project.PlanReviews[n-1]
+	termID, _, abort, err := e.launchRunLocked(ctx, id, s, &pr.Run.RunTokenHash, &pr.Run.Run, false, flow.RunRecord{Role: flow.RolePlanReviewer, CLI: choice.CLI}, world.RunSpec{
+		Name: planReviewerName(id, n), Cwd: s.Project.Folder, ClaudeConfig: e.Paths.ClaudeConfig, Argv: argv, Prompt: prompt, Env: env,
+		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RolePlanReviewer, "sheepdog.model": choice.Model, "sheepdog.effort": choice.Effort},
+	}, hc.Terminal{})
+	if err != nil {
+		s.Project.PlanReviews = s.Project.PlanReviews[:n-1]
+		if !abort {
+			e.acceptPlanLocked(id, s, "J16", asked, err.Error(), now)
+		}
+		return
+	}
+	pr.Run.RunID = termID
+	e.commitLogLocked(id, s, LogLine{By: "engine", Rule: "J16", Asked: []string{fmt.Sprintf("%s@%d", flow.AskStartPlanReviewer, n)}, Decision: fmt.Sprintf("started %s %s (round %d, %s/%s)", flow.RolePlanReviewer, termID, n, choice.CLI, choice.Model), Why: "unreviewed tasks waiting"})
+}
+
+func planReviewPrompt(tmpl string, s flow.State, code, bin, findingsPath string) string {
+	var under, accepted []string
+	for _, t := range s.Tasks {
+		if flow.Ended(t) {
+			continue
+		}
+		if t.Unreviewed {
+			under = append(under, fmt.Sprintf("- %s %s (for_whom: %s; if_skipped: %s; smallest: %s; not_doing: %s; estimate: %d)\n  brief: %s\n  outcomes:\n%s",
+				t.ID, t.Title, t.ForWhom, t.IfSkipped, t.Smallest, t.NotDoing, t.EstimateLines, cmp.Or(strings.TrimSpace(t.Brief), "(none)"), bullets(t.Outcomes)))
+		} else {
+			accepted = append(accepted, "- "+t.ID+" "+t.Title)
+		}
+	}
+	facts := fmt.Sprintf("Goal: %s\nTasks under review:\n%s\nAccepted tasks:\n%s",
+		s.Project.Goal, cmp.Or(strings.Join(under, "\n"), "(none)"), cmp.Or(strings.Join(accepted, "\n"), "(none)"))
+	return fill(tmpl, "{facts}", facts, "{findings_path}", findingsPath, "{sheepdog}", bin, "{code}", code)
 }
 
 type launchWait struct{ Why, Key string }
@@ -929,7 +1053,7 @@ func launchCapability(role string) func(flow.Candidate) flow.ResolveReason {
 			if c.CLI == "claude" || c.CLI == world.CodexCLI || c.CLI == world.AgyCLI {
 				return flow.ResolveReason{}
 			}
-		case flow.RoleRetro:
+		case flow.RoleRetro, flow.RolePlanReviewer:
 			if c.CLI == "claude" || c.CLI == world.AgyCLI {
 				return flow.ResolveReason{}
 			}
@@ -976,7 +1100,7 @@ func launchArgv(role string, c flow.Candidate, cwd, session string, resume bool)
 		}
 	case world.AgyCLI:
 		switch role {
-		case flow.RoleReviewer, flow.RoleRetro:
+		case flow.RoleReviewer, flow.RoleRetro, flow.RolePlanReviewer:
 			return world.AgyArgv(c.Model, "", "")
 		case flow.RoleWorker, flow.RoleCoordinator:
 			if !resume {
@@ -1083,6 +1207,9 @@ func (e *Engine) coordTerminalsLocked(ctx context.Context, id string, rec *flow.
 	}
 	var owned []hc.Terminal
 	for _, t := range list.Terminals {
+		if hc.IsRemote(t.Address) {
+			continue
+		}
 		label := t.Labels["sheepdog.run"]
 		known := rec != nil && rec.ID != "" && label == rec.ID
 		if known && rec.CreatedMS != 0 && rec.CreatedMS != t.CreatedMS {
@@ -1380,7 +1507,7 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 func (e *Engine) lookupLaunchTerminal(ctx context.Context, name string, adopt bool) (hc.Terminal, error) {
 	if e.HC != nil && adopt {
 		t, err := e.HC.Get(ctx, name)
-		if err == nil {
+		if err == nil && !hc.IsRemote(t.Address) {
 			return t, nil
 		}
 		if err != nil && !errors.Is(err, hc.ErrNotFound) {
@@ -2881,6 +3008,9 @@ func workerName(id, task string, n int) string {
 }
 func reviewerName(id, task string, attempt, round int) string {
 	return hcName(fmt.Sprintf("rev-%s-%s-%d-%d", strings.TrimPrefix(id, "proj-"), task, attempt, round))
+}
+func planReviewerName(id string, n int) string {
+	return hcName(fmt.Sprintf("planrev-%s-%d", strings.TrimPrefix(id, "proj-"), n))
 }
 
 // hcName fits a terminal name to herdr-core's rule: 1-32 of a-z 0-9 - _ .

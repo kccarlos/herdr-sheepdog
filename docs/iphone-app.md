@@ -133,6 +133,18 @@ instead of adding it twice.
 
 With one computer, none of this shows: no names and no Talk to.
 
+### Agents on other machines
+
+If a Mac runs herdr-core with machines added via `hc machine add`, agents on
+those machines appear in the conversation, the Agents list and the live agent
+window alongside agents on that Mac. Features that use a local folder on that
+Mac — Spaces, **Open shell here**, **Files**, **Changes** and **📎 Attach** —
+are unavailable for remote agents because their folders live on the other
+machine (remote-only spaces and **Open shell here** are omitted; tapping
+**Files**, **Changes** or **📎 Attach** reports that there is no local folder).
+See also [Agents on other machines](desktop.md#agents-on-other-machines) for the
+Mac panel.
+
 ## What it does
 
 - **The main screen.** At the top, **Conversation | Agents** (the badge

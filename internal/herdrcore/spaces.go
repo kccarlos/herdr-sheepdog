@@ -48,7 +48,7 @@ type spaceSet struct {
 
 func newSpaceSet() *spaceSet { return &spaceSet{byID: map[string]*space{}} }
 
-// add counts t, a live local terminal in state, into its space. A terminal
+// add counts t, a live terminal in state, into its space. A terminal
 // with no space label is no one's.
 func (s *spaceSet) add(t hc.Terminal, state herdr.State) {
 	id := spaceOf(t)
@@ -61,7 +61,8 @@ func (s *spaceSet) add(t hc.Terminal, state herdr.State) {
 		s.byID[id] = sp
 		s.order = append(s.order, id)
 	}
-	if t.CreatedMS < sp.first.CreatedMS {
+	spRemote, tRemote := hc.IsRemote(sp.first.Address), hc.IsRemote(t.Address)
+	if (spRemote && !tRemote) || (spRemote == tRemote && t.CreatedMS < sp.first.CreatedMS) {
 		sp.first = t
 	}
 	sp.panes++
@@ -110,11 +111,13 @@ func spaceName(first hc.Terminal) string {
 	if dir == "" {
 		return ""
 	}
-	if g, ok := herdr.GitInfo(dir); ok {
-		return g.Repo
-	}
-	if home, err := os.UserHomeDir(); err == nil && filepath.Clean(dir) == filepath.Clean(home) {
-		return "~"
+	if local := hc.LocalCwd(first.Address, dir); local != "" {
+		if g, ok := herdr.GitInfo(local); ok {
+			return g.Repo
+		}
+		if home, err := os.UserHomeDir(); err == nil && filepath.Clean(local) == filepath.Clean(home) {
+			return "~"
+		}
 	}
 	return filepath.Base(dir)
 }

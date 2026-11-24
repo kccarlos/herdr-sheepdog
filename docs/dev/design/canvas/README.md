@@ -24,3 +24,12 @@ is re-exported after every change.
   the PNGs are exported again.
 - Images referenced as `/_blob/…` live in the artifact and are not
   exported.
+- **Part 4b** (slice 14 of [../../engine-v2/plan.md](../../engine-v2/plan.md),
+  PR 14.0) is the factory page's whole life cycle: eleven `FactoryWeb…`
+  boards (`LifeHome`, `NewProject`, `StartChecks`, `Pairing`,
+  `ProjectActions`, `Settings`, `ReadBack`, `Models`, `TaskLife`, `Log`,
+  `Graph`), each with a `…Dark` and a `…360` copy.
+  [slice14-wording.md](slice14-wording.md) is their wording table, with the
+  tab order, the screen-reader labels and the open questions. Their PNGs
+  were rendered from the board sources in headless Chrome, not exported
+  from the canvas; the logo in them is the repository's.

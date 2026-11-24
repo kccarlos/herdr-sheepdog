@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 	"github.com/kccarlos/herdr-sheepdog/internal/termproto"
@@ -86,7 +87,7 @@ func (t *termServer) shellDir(want string) (string, error) {
 		}
 	}
 	for _, a := range t.s.deps.Store.List() {
-		if a.Cwd != "" && realDir(a.Cwd) == path {
+		if cwd := hc.LocalCwd(a.PaneID, a.Cwd); cwd != "" && realDir(cwd) == path {
 			return path, nil
 		}
 	}
@@ -144,8 +145,10 @@ func (b *ShellBook) Open(ctx context.Context, h ShellHost, dir string) (herdr.Pa
 		}
 	}
 	for id, p := range alive {
-		if _, ok := b.panes[id]; !ok && p.Cwd != "" {
-			b.panes[id] = realDir(p.Cwd)
+		if _, ok := b.panes[id]; !ok {
+			if cwd := hc.LocalCwd(id, p.Cwd); cwd != "" {
+				b.panes[id] = realDir(cwd)
+			}
 		}
 	}
 	for id, d := range b.panes {

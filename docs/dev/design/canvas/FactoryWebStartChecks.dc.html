@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Factory web, life cycle — start checks, light</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Outfit:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.sd-light{--bg:#FAF8F3;--card:#FFFFFF;--code:#F1EEE7;--line:#E4E0D7;--fg:#1F1F22;--muted:#6B6E75;--mof:#5C5F66;--primary:#D98718;--ptext:#8A5700;--onp:#1F1F22;--psoft:#FDF1DC;--blocked:#D99417;--working:#1F5F9E;--done:#1D6B46;--idle:#5C6370;--thinking:#6A46B0;--dash:#8E8A80;--wsoft:#E1EAF4;--dsoft:#DDEEE4;--track:#ECE8DF;--danger:#B42318;--dbg:#FEF3F2;--dline:#F4C7C3;--shadow:0 1px 2px rgba(31,31,34,0.12)}
+.sd-dark{--bg:#16181C;--card:#1F2126;--code:#26292F;--line:#2E3138;--fg:#F5F2EA;--muted:#A3A7AF;--mof:#A3A7AF;--primary:#F39C1F;--ptext:#F5B83D;--onp:#1F1F22;--psoft:#2A2416;--blocked:#F0A92A;--working:#6AA8EB;--done:#5CC792;--idle:#9AA1AD;--thinking:#B195F0;--dash:#6B707A;--wsoft:#22303F;--dsoft:#1E3428;--track:#26292F;--danger:#F28B8B;--dbg:#2A1C1C;--dline:#5A2A2A;--shadow:0 1px 2px rgba(0,0,0,0.5)}
+.sd-light .logo-d,.sd-dark .logo-l{display:none}
+.sd{min-height:100vh;background:var(--bg);color:var(--fg);font-family:Inter,system-ui,-apple-system,sans-serif;font-size:15px;line-height:1.5}
+.sd *{box-sizing:border-box}
+.sd a{color:var(--ptext)}.sd a:hover{color:var(--fg)}
+.sd :focus-visible,.sd .focus{outline:3px solid #F39C1F;outline-offset:2px;box-shadow:0 0 0 2px var(--fg)}
+.sd h1,.sd h2,.sd h3,.sd p,.sd ul,.sd ol,.sd pre,.sd fieldset,.sd legend{margin:0;padding:0}
+.sd fieldset{border:0;min-width:0}
+.sd ul,.sd ol{list-style:none}
+.sd code,.sd .mono{font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.board{max-width:1440px;margin:0 auto;padding:24px max(8px,min(32px,calc((100% - 400px) * 0.1))) 40px;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,500px),1fr));gap:28px 24px;align-items:start}
+.page{container-type:inline-size;container-name:pg;max-width:1360px;margin:0 auto;padding:20px max(16px,min(32px,calc((100% - 400px) * 0.1))) 48px;display:flex;flex-direction:column;gap:20px}
+.panel{display:flex;flex-direction:column;gap:10px;min-width:0}
+.panel.wide{grid-column:1 / -1}
+.cap{font-size:13px;font-weight:600;letter-spacing:0.2px;text-transform:uppercase;color:var(--muted)}
+.win{container-type:inline-size;container-name:win;display:flex;flex-direction:column;gap:14px;padding:14px 10px;background:var(--bg);border:1px solid var(--line);border-radius:22px;min-width:0}
+.anno{font-size:13px;color:var(--muted)}
+.col{display:flex;flex-direction:column;gap:10px;min-width:0}
+.row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;min-width:0}
+.between{justify-content:space-between}
+.base{align-items:baseline}
+.grow{flex:999 1 220px;min-width:0}
+.cols{display:flex;flex-wrap:wrap;gap:20px;align-items:flex-start}
+.main{flex:999 1 600px;min-width:0;display:flex;flex-direction:column;gap:14px}
+.aside{flex:1 1 340px;min-width:0;display:flex;flex-direction:column;gap:16px}
+.card{display:flex;flex-direction:column;gap:10px;padding:14px;background:var(--card);border:1px solid var(--line);border-radius:14px;min-width:0;overflow-wrap:anywhere}
+.card.dashed{border-style:dashed;border-color:var(--dash)}
+.h1{font-family:Outfit,Inter,sans-serif;font-weight:600;font-size:24px;line-height:1.2}
+.h2{font-family:Outfit,Inter,sans-serif;font-weight:600;font-size:18px;line-height:1.3}
+.h3{font-size:15px;font-weight:600}
+.muted{color:var(--muted)}
+.small{font-size:13px}
+.b{font-weight:500}
+.dot{flex:none;display:inline-block;width:8px;height:8px;border-radius:999px;background:var(--idle)}
+.dot.working{background:var(--working)}.dot.blocked{background:var(--blocked)}.dot.done{background:var(--done)}.dot.thinking{background:var(--thinking)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:6px 16px;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:22px;font:inherit;font-size:14px;font-weight:500;cursor:pointer;text-decoration:none;text-align:center}
+.sd a.btn{color:var(--fg)}
+.btn.rec{border:1.5px solid var(--fg);font-weight:600}
+.btn.pri{background:var(--primary);color:var(--onp);border-color:var(--primary);font-weight:600}
+.btn.danger{border-color:var(--danger);color:var(--danger)}
+.btn.off{background:var(--track);color:var(--muted);border-color:var(--track);cursor:default}
+.btn.sm{min-height:44px;padding:4px 12px;font-size:13px}
+.linkbtn{display:inline-flex;align-items:center;min-height:44px;padding:0;background:none;border:0;color:var(--ptext);font:inherit;font-size:14px;text-decoration:underline;cursor:pointer}
+.tag{font-size:12px;font-weight:500;color:var(--muted)}
+.field{display:flex;flex-direction:column;gap:6px;min-width:0}
+.label{font-size:14px;font-weight:500}
+.in{width:100%;min-height:44px;padding:8px 12px;background:var(--card);color:var(--fg);border:1px solid var(--line);border-radius:10px;font:inherit}
+.in.num{width:88px;flex:none;font-variant-numeric:tabular-nums}
+.in.bad{border-color:var(--danger);border-width:1.5px}
+textarea.in{resize:none;min-height:88px}
+.err{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;background:var(--dbg);color:var(--danger);border:1px solid var(--dline);border-radius:8px;font-size:14px;overflow-wrap:anywhere}
+.ok{display:flex;gap:8px;align-items:flex-start;padding:8px 10px;background:var(--dsoft);color:var(--fg);border-radius:8px;font-size:14px}
+.status{display:flex;gap:8px;align-items:center;font-size:14px}
+.ico{flex:none;margin-top:2px}
+.chip{display:inline-flex;align-items:center;gap:4px;padding:1px 8px;font-size:12px;background:var(--code);color:var(--mof);border-radius:4px}
+.chip.chg{background:var(--wsoft);color:var(--working);font-weight:500}
+.chip.bad{background:var(--dbg);color:var(--danger);font-weight:500}
+.pill{display:inline-flex;align-items:center;gap:6px;padding:2px 10px;border-radius:999px;font-size:13px;font-weight:500;background:var(--code);color:var(--fg)}
+.pair{display:flex;flex-direction:column;gap:8px;padding:12px;background:var(--psoft);border:1px solid var(--line);border-radius:14px;font-size:14px;min-width:0}
+.well{padding:8px 10px;background:var(--code);border-radius:8px;min-width:0;overflow-wrap:anywhere}
+.cmd{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:6px 10px;padding:6px 6px 6px 10px;background:var(--code);border-radius:8px}
+.cmd code{flex:1 1 180px;min-width:0;color:var(--fg);overflow-wrap:anywhere;font-size:13px}
+.rows{display:flex;flex-direction:column;background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.rows.alert{border-color:var(--blocked)}
+.trow{display:flex;flex-wrap:wrap;align-items:flex-start;gap:8px 12px;min-height:44px;padding:10px 14px;color:var(--fg);text-decoration:none;border-bottom:1px solid var(--line)}
+.sd a.trow{color:var(--fg)}
+.trow.last{border-bottom:0}
+.trow>.dot{margin-top:7px}
+.trow>.chips{align-self:center}
+.what{flex:999 1 260px;min-width:0;display:flex;flex-direction:column;gap:3px;overflow-wrap:anywhere}
+.chips{flex:1 0 auto;display:flex;flex-wrap:wrap;justify-content:flex-end;align-items:center;gap:6px;font-size:12px;color:var(--muted)}
+.proj{display:flex;flex-direction:column;min-height:44px;padding:6px 10px;border-radius:8px;color:var(--fg);text-decoration:none}
+.sd a.proj{color:var(--fg)}
+.proj.cur{background:var(--psoft)}
+.srow{display:flex;flex-direction:column;gap:8px;padding:12px 0;border-bottom:1px solid var(--line);min-width:0}
+.srow.last{border-bottom:0}
+.sname{flex:999 1 170px;min-width:0;font-size:15px;font-weight:500;overflow-wrap:anywhere}
+.ask{display:flex;flex-direction:column;gap:10px;padding:12px 14px;background:var(--psoft);border:1.5px solid var(--blocked);border-radius:14px;min-width:0}
+.q{font-size:15px;font-weight:500;line-height:1.4;overflow-wrap:anywhere}
+.seg{display:inline-flex;padding:3px;background:var(--track);border-radius:22px}
+.seg button{min-height:38px;min-width:64px;padding:0 14px;background:none;border:0;border-radius:19px;color:var(--fg);font:inherit;font-size:14px;cursor:pointer}
+.seg button.on{background:var(--card);font-weight:600;box-shadow:var(--shadow)}
+.steps{display:flex;flex-direction:column}
+.step{display:flex;gap:12px;align-items:flex-start;padding:8px 0;min-width:0}
+.sm-mark{flex:none;width:22px;height:22px;border-radius:999px;display:flex;align-items:center;justify-content:center;border:1.5px solid var(--dash);color:var(--muted);background:var(--card);margin-top:1px}
+.sm-mark.done{background:var(--dsoft);border-color:var(--done);color:var(--done)}
+.sm-mark.now{background:var(--working);border-color:var(--working);color:var(--card)}
+.sm-mark.skip{border-style:dashed}
+.sm-mark.end{background:var(--code);border-color:var(--idle);color:var(--fg)}
+.bar{display:flex;align-items:center;gap:3px}
+.bar span{display:block;width:18px;height:6px;border-radius:3px;background:var(--track)}
+.bar span.done{background:var(--done)}
+.bar span.now{background:var(--working);height:10px;outline:1.5px solid var(--fg);outline-offset:1px}
+.bar span.skip{background:none;border:1px dashed var(--dash)}
+.bar span.end{background:var(--idle)}
+.day{padding-top:6px;font-size:13px;font-weight:600;color:var(--muted)}
+.log{display:flex;flex-direction:column;gap:2px}
+.ll{display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 8px;padding:5px 0;font-size:13px;min-width:0;overflow-wrap:anywhere}
+.ll time{flex:none;font-family:ui-monospace,Menlo,monospace;font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.ll .txt{flex:999 1 200px;min-width:0}
+.mark{display:inline-flex;align-items:center;gap:4px;padding:0 7px;border-radius:4px;font-size:12px;font-weight:600;white-space:nowrap}
+.mark.merged{background:var(--dsoft);color:var(--done)}
+.mark.needs{background:var(--psoft);color:var(--ptext);border:1px solid var(--blocked)}
+.mark.asked{background:var(--wsoft);color:var(--working)}
+.mark.yours{background:var(--code);color:var(--fg)}
+.gbox{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--card)}
+.gnode rect{fill:var(--card);stroke:var(--dash);stroke-width:1}
+.gnode.dim{opacity:0.35}
+.gedge.dim,.garrow.dim{opacity:0.25}
+.gedge.hot{stroke:var(--fg);stroke-width:2.5}
+.garrow.hot{fill:var(--fg)}
+.gnode.hot rect.box{stroke:var(--fg);stroke-width:2}
+.gnode.focus rect.box{stroke:#F39C1F;stroke-width:3}
+.gnode text{fill:var(--fg);font-family:Inter,system-ui,sans-serif;font-size:12px}
+.gnode text.ref{fill:var(--muted);font-family:ui-monospace,Menlo,monospace;font-size:12px}
+.gnode text.st{fill:var(--muted);font-size:12px}
+.gedge{fill:none;stroke:var(--dash);stroke-width:1.5}
+.garrow{fill:var(--dash)}
+.sk{display:block;background:var(--track);border-radius:14px}
+details>summary{display:flex;align-items:center;gap:6px;min-height:44px;color:var(--ptext);font-size:14px;cursor:pointer;list-style:none}
+details>summary::-webkit-details-marker{display:none}
+.sugg{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:10px;background:var(--card);overflow:hidden}
+.sugg button{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:2px 10px;min-height:44px;padding:6px 12px;background:none;border:0;border-bottom:1px solid var(--line);color:var(--fg);font:inherit;font-size:14px;text-align:left;cursor:pointer;overflow-wrap:anywhere}
+.sugg button.last{border-bottom:0}
+.cand{display:flex;flex-direction:column;gap:8px;padding:10px;background:var(--bg);border:1px solid var(--line);border-radius:10px;min-width:0}
+.cand .field{flex:1 1 120px}
+.cand .field.wide{flex:3 1 200px}
+.part{display:flex;flex-direction:column;gap:14px;min-width:0}
+@container pg (max-width:760px){.cols.re{flex-direction:column} .cols.re>.main,.cols.re>.aside{display:contents} .cols.re .o1{order:1} .cols.re .o2{order:2} .cols.re .o3{order:3} .cols.re .o4{order:4} .cols.re .o5{order:5} .cols.re .o6{order:6} .cols.re .o7{order:7} }
+@container win (min-width:1160px){.gh20{display:none} }
+</style>
+</helmet>
+<div class="{{rootClass}}">
+<div class="board"><section class="panel" aria-label="before the first check"><h2 class="cap">before the first check</h2><div class="win"><section class="card" aria-label="start checks"><h2 class="h2">start checks</h2><p class="small muted">Every check must pass before a project can start. A warning does not stop it.</p></section><div class="col"><div class="row"><button type="button" class="btn rec">Check this folder</button><button type="button" class="btn off" aria-disabled="true">Start the project and its agents</button><span class="small muted">Start turns on when no check fails.</span></div><p class="small muted">Starting runs agents on your model accounts. They use your quota.</p></div></div></section><section class="panel" aria-label="checks running"><h2 class="cap">checks running</h2><div class="win"><section class="card" aria-label="start checks"><h2 class="h2">start checks</h2><p class="status" role="status"><span class="dot working" aria-hidden="true"></span><span>Checking the folder…</span></p><span class="sk" aria-hidden="true" style="height: 44px"></span><span class="sk" aria-hidden="true" style="height: 44px"></span><span class="sk" aria-hidden="true" style="height: 44px"></span></section><div class="col"><div class="row"><button type="button" class="btn rec">Check this folder</button><button type="button" class="btn off" aria-disabled="true">Start the project and its agents</button><span class="small muted">Start turns on when no check fails.</span></div><p class="small muted">Starting runs agents on your model accounts. They use your quota.</p></div></div></section><section class="panel" aria-label="a failed check"><h2 class="cap">a failed check</h2><div class="win"><section class="card" aria-label="start checks"><h2 class="h2">start checks</h2><p class="err" role="alert"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l9 16H3z"></path><path d="M12 10v4"></path><path d="M12 17v.5"></path></svg><span>2 checks failed. Fix them, then check again.</span></p><p class="small muted">Is a failed check for a CLI you do not use? Change the models above, then check again.</p><ul><li class="srow" style="gap: 6px"><div class="row base"><span class="row small b" style="gap: 4px; color: var(--done); flex: none; min-width: 78px"><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>pass</span><span class="b grow">git version</span></div><p class="small muted">git version 2.47.1</p></li><li class="srow" style="gap: 6px"><div class="row base"><span class="row small b" style="gap: 4px; color: var(--ptext); flex: none; min-width: 78px"><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l9 16H3z"></path><path d="M12 10v4"></path><path d="M12 17v.5"></path></svg>warning</span><span class="b grow">start fetch</span></div><p class="small muted">git failed to fetch origin, so the refs below may be stale</p><div class="col" style="gap: 4px"><span class="small b">Fix, in a terminal:</span><div class="cmd"><code>git fetch origin</code><button type="button" class="btn sm" aria-label="Copy the command git fetch origin"><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>Copy</button></div><p class="small">(sign in to git if it asks)</p></div></li><li class="srow" style="gap: 6px"><div class="row base"><span class="row small b" style="gap: 4px; color: var(--done); flex: none; min-width: 78px"><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>pass</span><span class="b grow">start claude</span></div><p class="small muted">claude is signed in</p></li><li class="srow" style="gap: 6px"><div class="row base"><span class="row small b" style="gap: 4px; color: var(--danger); flex: none; min-width: 78px"><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>fail</span><span class="b grow">start agy</span></div><p class="small muted">agy is not signed in</p><p class="small"><span class="b">Fix:</span> run agy without arguments and sign in</p></li><li class="srow" style="gap: 6px"><div class="row base"><span class="row small b" style="gap: 4px; color: var(--danger); flex: none; min-width: 78px"><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>fail</span><span class="b grow">gh push access</span></div><p class="small muted">cannot read you/notes with gh (not signed in or no access): HTTP 401</p><div class="col" style="gap: 4px"><span class="small b">Fix, in a terminal:</span><div class="cmd"><code>gh auth login</code><button type="button" class="btn sm" aria-label="Copy the command gh auth login"><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>Copy</button></div><p class="small">(an account with push access to the repo)</p></div></li><li class="srow" style="gap: 6px"><div class="row base"><span class="row small b" style="gap: 4px; color: var(--muted); flex: none; min-width: 78px"><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"></path></svg>skipped</span><span class="b grow">github remote</span></div><p class="small muted">you/notes: needs the gh check above to pass</p></li><li class="srow last" style="gap: 6px"><div class="row base"><span class="row small b" style="gap: 4px; color: var(--done); flex: none; min-width: 78px"><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>pass</span><span class="b grow">pr workflow</span></div><p class="small muted">ci.yml on origin/main runs on pull requests</p></li></ul></section><div class="col"><div class="row"><button type="button" class="btn rec">Check again</button><button type="button" class="btn off" aria-disabled="true">Start the project and its agents</button><span class="small muted">Start turns on when no check fails.</span></div><p class="small muted">Starting runs agents on your model accounts. They use your quota.</p></div></div><p class="anno">Check names, details and fixes are shown as the start checks write them. Each has its mark as an icon and a word, its detail and its fix. A fix that starts &quot;run:&quot; is a command: the command alone sits in a block with Copy, marked &quot;in a terminal&quot;, and any words after it (&quot;(sign in to git if it asks)&quot;) go under the block as text. Other fixes are plain text. One line under the summary points back to the models rows. Start stays off. Once the checks have run, Check this folder reads Check again.</p></section><section class="panel" aria-label="no failed check: start is on"><h2 class="cap">no failed check: start is on</h2><div class="win"><section class="card" aria-label="start checks"><h2 class="h2">start checks</h2><p class="ok" role="status"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg><span>6 pass, 1 warning. You can start.</span></p><ul><li class="srow" style="gap: 6px"><div class="row base"><span class="row small b" style="gap: 4px; color: var(--done); flex: none; min-width: 78px"><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>pass</span><span class="b grow">git version</span></div><p class="small muted">git version 2.47.1</p></li><li class="srow" style="gap: 6px"><div class="row base"><span class="row small b" style="gap: 4px; color: var(--ptext); flex: none; min-width: 78px"><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l9 16H3z"></path><path d="M12 10v4"></path><path d="M12 17v.5"></path></svg>warning</span><span class="b grow">start fetch</span></div><p class="small muted">git failed to fetch origin, so the refs below may be stale</p><div class="col" style="gap: 4px"><span class="small b">Fix, in a terminal:</span><div class="cmd"><code>git fetch origin</code><button type="button" class="btn sm" aria-label="Copy the command git fetch origin"><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="8" y="8" width="12" height="12" rx="2"></rect><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"></path></svg>Copy</button></div><p class="small">(sign in to git if it asks)</p></div></li><li class="srow" style="gap: 6px"><div class="row base"><span class="row small b" style="gap: 4px; color: var(--done); flex: none; min-width: 78px"><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>pass</span><span class="b grow">start claude</span></div><p class="small muted">claude is signed in</p></li><li class="srow" style="gap: 6px"><div class="row base"><span class="row small b" style="gap: 4px; color: var(--done); flex: none; min-width: 78px"><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>pass</span><span class="b grow">start agy</span></div><p class="small muted">agy is signed in</p></li><li class="srow" style="gap: 6px"><div class="row base"><span class="row small b" style="gap: 4px; color: var(--done); flex: none; min-width: 78px"><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>pass</span><span class="b grow">gh push access</span></div><p class="small muted">signed in; push access to you/notes</p></li><li class="srow" style="gap: 6px"><div class="row base"><span class="row small b" style="gap: 4px; color: var(--done); flex: none; min-width: 78px"><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>pass</span><span class="b grow">github remote</span></div><p class="small muted">origin is you/notes; its default branch main is the base</p></li><li class="srow last" style="gap: 6px"><div class="row base"><span class="row small b" style="gap: 4px; color: var(--done); flex: none; min-width: 78px"><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>pass</span><span class="b grow">pr workflow</span></div><p class="small muted">ci.yml on origin/main runs on pull requests</p></li></ul></section><div class="col"><div class="row"><button type="button" class="btn">Check again</button><button type="button" class="btn pri">Start the project and its agents</button></div><p class="small muted">Starting runs agents on your model accounts. They use your quota.</p></div></div><p class="anno">A warning does not stop the start. Start is now the one filled button.</p></section><section class="panel" aria-label="a typed folder that is not a git repository"><h2 class="cap">a typed folder that is not a git repository</h2><div class="win"><section class="card" aria-label="start checks"><h2 class="h2">start checks</h2><p class="err" role="alert"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l9 16H3z"></path><path d="M12 10v4"></path><path d="M12 17v.5"></path></svg><span>1 check failed. Fix it, then check again.</span></p><ul><li class="srow" style="gap: 6px"><div class="row base"><span class="row small b" style="gap: 4px; color: var(--done); flex: none; min-width: 78px"><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>pass</span><span class="b grow">git version</span></div><p class="small muted">git version 2.47.1</p></li><li class="srow last" style="gap: 6px"><div class="row base"><span class="row small b" style="gap: 4px; color: var(--danger); flex: none; min-width: 78px"><svg class="" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"></path></svg>fail</span><span class="b grow">start git</span></div><p class="small muted">git failed: fatal: not a git repository (or any of the parent directories): .git</p><p class="small"><span class="b">Fix:</span> run git rev-parse --show-toplevel in the project folder and resolve the error</p></li></ul></section><div class="col"><div class="row"><button type="button" class="btn rec">Check again</button><button type="button" class="btn off" aria-disabled="true">Start the project and its agents</button><span class="small muted">Start turns on when no check fails.</span></div><p class="small muted">Starting runs agents on your model accounts. They use your quota.</p></div></div></section><section class="panel" aria-label="the daemon cannot run the checks"><h2 class="cap">the daemon cannot run the checks</h2><div class="win"><section class="card" aria-label="start checks"><h2 class="h2">start checks</h2><p class="err" role="alert"><svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l9 16H3z"></path><path d="M12 10v4"></path><path d="M12 17v.5"></path></svg><span>Can&#x27;t run the start checks: sheepdog did not answer in time. Check that sheepdog is running, then check again.</span></p></section><div class="col"><div class="row"><button type="button" class="btn rec">Check again</button><button type="button" class="btn off" aria-disabled="true">Start the project and its agents</button><span class="small muted">Start turns on when no check fails.</span></div><p class="small muted">Starting runs agents on your model accounts. They use your quota.</p></div></div></section></div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme": {"editor": "enum", "options": ["light", "dark"], "default": "light"}, "$preview": {"width": 1440, "height": 2068}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { rootClass: 'sd sd-' + (this.props.theme ?? 'light') };
+  }
+}
+</script>
+</body>
+</html>

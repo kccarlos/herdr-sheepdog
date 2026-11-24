@@ -42,7 +42,8 @@ export function displayTitle(card) {
 // the terminal address of the agent's pane (with herdr-core, the hc terminal
 // address), which is what herdr-app's `agent.focus` takes. Null when the card
 // is not about one.
-export const focusTarget = (card) => trimmed(card.pane_id) || null;
+// A pane id on an added machine ("box~t4") is the hc address "box/t4".
+export const focusTarget = (card) => trimmed(card.pane_id).replace("~", "/") || null;
 
 // The command that shows that agent in herdr-app, in place of the phone's agent
 // window.

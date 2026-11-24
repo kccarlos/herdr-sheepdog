@@ -33,6 +33,9 @@ func WithProcessTable(ctx context.Context, startGrace time.Duration) context.Con
 }
 
 func agentPID(t hc.Terminal) int {
+	if hc.IsRemote(t.Address) {
+		return 0
+	}
 	if t.Foreground != nil && t.Foreground.PID > 0 {
 		return t.Foreground.PID
 	}
