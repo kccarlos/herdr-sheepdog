@@ -23,7 +23,7 @@ concurrency:
 # Do not use workflow-level paths-ignore: it leaves required checks pending.
 jobs:
   changes:
-    runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.CI_RUNNER || 'cloudrun' }}
     outputs:
       code: ${{ steps.filter.outputs.code }}
     steps:
@@ -41,7 +41,7 @@ jobs:
 
   test:
     needs: changes
-    runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.CI_RUNNER || 'cloudrun' }}
     steps:
       # Checkout, Go and the docs check run for every change, ios/ included
       # (ios/**/*.md links and ios/README.md's sheepdog commands are checked).
@@ -73,7 +73,7 @@ jobs:
 
   lint:
     needs: changes
-    runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.CI_RUNNER || 'cloudrun' }}
     steps:
       - if: needs.changes.outputs.code == 'true'
         uses: actions/checkout@v7
@@ -90,7 +90,7 @@ jobs:
   eval:
     needs: changes
     # Offline brain eval: fake model, no network, no API keys (make eval).
-    runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.CI_RUNNER || 'cloudrun' }}
     steps:
       - if: needs.changes.outputs.code == 'true'
         uses: actions/checkout@v7
@@ -106,7 +106,7 @@ jobs:
     # Where macOS runners, Xcode and secrets may appear (scripts/workflow-policy.sh):
     # ios.yml (simulator unit and UI tests, no secrets at all), and release.yml's
     # jobs that declare `environment: release` (signing; maintainer approval).
-    runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.CI_RUNNER || 'cloudrun' }}
     steps:
       - uses: actions/checkout@v7
       - name: The policy script's tests
@@ -116,7 +116,7 @@ jobs:
 
   web:
     needs: changes
-    runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.CI_RUNNER || 'cloudrun' }}
     steps:
       - if: needs.changes.outputs.code == 'true'
         uses: actions/checkout@v7
@@ -129,7 +129,7 @@ jobs:
 
   cross:
     needs: changes
-    runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.CI_RUNNER || 'cloudrun' }}
     strategy:
       matrix:
         include:

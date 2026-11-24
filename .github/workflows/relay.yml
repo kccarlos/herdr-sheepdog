@@ -23,7 +23,7 @@ concurrency:
 
 jobs:
   test:
-    runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.CI_RUNNER || 'cloudrun' }}
     defaults:
       run:
         working-directory: relay
@@ -41,7 +41,7 @@ jobs:
   deploy:
     needs: test
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
-    runs-on: ${{ vars.CI_RUNNER || 'cloudrun' }}
+    runs-on: ${{ github.event.pull_request.head.repo.fork && 'ubuntu-latest' || vars.CI_RUNNER || 'cloudrun' }}
     # The Cloudflare token is a secret of the relay environment (main only).
     environment: relay
     steps:
