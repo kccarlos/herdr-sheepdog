@@ -119,6 +119,7 @@ type Project struct {
 	Folder             string            `json:"folder,omitempty"`
 	Goal               string            `json:"goal,omitempty"`
 	Started            bool              `json:"started,omitempty"`
+	Finished           bool              `json:"finished,omitempty"`         // J4: project finished with no live coordinator
 	RunID              string            `json:"run_id,omitempty"`           // coordinator terminal identity
 	RunTokenHash       string            `json:"run_token_sha256,omitempty"` // SHA-256 hex of the coordinator's SHEEPDOG_RUN_TOKEN
 	Run                *RunRecord        `json:"run,omitempty"`

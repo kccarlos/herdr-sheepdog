@@ -460,9 +460,6 @@ func TestPassProjectLogsErrorsAndSkipsDeadRunState(t *testing.T) {
 	if len(srv.Requests()) != reqsAfterFirst {
 		t.Fatalf("expected no hc RPC once coordinator run ended, got %+v", srv.Requests()[reqsAfterFirst:])
 	}
-	if !strings.Contains(logBuf.String(), "factory.trim_error") {
-		t.Fatalf("expected factory.trim_error in engine log, got %q", logBuf.String())
-	}
 
 	// Force commitLocked failure by replacing log.jsonl with a directory while RunID is empty.
 	st.Project.RunID, st.Project.Acts = "", nil
@@ -475,9 +472,15 @@ func TestPassProjectLogsErrorsAndSkipsDeadRunState(t *testing.T) {
 	if err := os.MkdirAll(paths.Log(projID), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	logBuf.Reset()
 	eng.passProject(ctx, projID, false)
 	if !strings.Contains(logBuf.String(), "factory.commit_error") {
 		t.Fatalf("expected factory.commit_error in engine log, got %q", logBuf.String())
+	}
+	// Next pass on the dirty store (or with trim) hits the directory I/O error in TrimLog.
+	eng.passProject(ctx, projID, true)
+	if !strings.Contains(logBuf.String(), "factory.trim_error") {
+		t.Fatalf("expected factory.trim_error in engine log, got %q", logBuf.String())
 	}
 }
 

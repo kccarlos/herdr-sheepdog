@@ -1269,11 +1269,10 @@ func TestPR5b8_MainRedDoesNotStopKeepsN38AndClearsOnlyOnGoodCompletedBase(t *tes
 			}}
 		})
 
-		baseHead1 := "deadbeef1234567890deadbeef1234567890dead"
 		writePRJSON(t, w.gh, "view.json", c1, greenRollup)
 		writeGHFile(t, w.gh, "compare.json", `{"behind_by":1}`)
-		writeGHFile(t, w.gh, "base-ref.json", fmt.Sprintf(`{"object":{"sha":%q}}`, baseHead1))
-		writeBaseRuns(t, w.gh, fmt.Sprintf(`{"workflow_runs":[{"id":101,"head_sha":%q,"status":"completed","conclusion":"failure"}]}`, baseHead1))
+		baseHead1 := commitBaseHead(t, w.repo, w.gh, "red1")
+		writeCountedBaseRun(t, w.gh, 101, baseHead1, "failure")
 
 		mainRedDur := time.Duration(w.state().Settings.MainRedMinutes) * time.Minute
 		w.pass() // first red observation; N38 holds T1, main_red not yet raised
@@ -1333,9 +1332,11 @@ func TestPR5b8_MainRedDoesNotStopKeepsN38AndClearsOnlyOnGoodCompletedBase(t *tes
 		_ = os.Remove(filepath.Join(w.gh, "fail"))
 
 		// 2) In-progress run on base head must NOT clear main_red.
-		baseHead2 := "cafebabe1234567890cafebabe1234567890cafe"
-		writeGHFile(t, w.gh, "base-ref.json", fmt.Sprintf(`{"object":{"sha":%q}}`, baseHead2))
-		writeBaseRuns(t, w.gh, fmt.Sprintf(`{"workflow_runs":[{"id":102,"head_sha":%q,"status":"completed","conclusion":"success"},{"id":103,"head_sha":%q,"status":"in_progress","conclusion":null}]}`, baseHead2, baseHead2))
+		baseHead2 := commitBaseHead(t, w.repo, w.gh, "green2")
+		writeBaseRuns(t, w.gh, fmt.Sprintf(
+			`{"workflow_runs":[{"id":102,"path":%q,"head_sha":%q,"status":"completed","conclusion":"success"},{"id":103,"path":%q,"head_sha":%q,"status":"in_progress","conclusion":null}]}`,
+			testCIWorkflowPath, baseHead2, testCIWorkflowPath, baseHead2,
+		))
 		w.advance(time.Minute)
 		w.pass()
 		if _, active := statusAlert(t, w.paths, w.repo, "main_red"); !active {
@@ -1351,7 +1352,7 @@ func TestPR5b8_MainRedDoesNotStopKeepsN38AndClearsOnlyOnGoodCompletedBase(t *tes
 		}
 
 		// 4) Positively known completed good base snapshot -> clears main_red!
-		writeBaseRuns(t, w.gh, fmt.Sprintf(`{"workflow_runs":[{"id":102,"head_sha":%q,"status":"completed","conclusion":"success"}]}`, baseHead2))
+		writeCountedBaseRun(t, w.gh, 102, baseHead2, "success")
 		w.advance(time.Minute)
 		w.pass()
 		if ts, active := statusAlert(t, w.paths, w.repo, "main_red"); active {
@@ -1503,4 +1504,69 @@ func TestPR5b8_OutageEpisodesGitHubAndHCUnavailable(t *testing.T) {
 			}
 		})
 	})
+}
+
+// TestFinishedProjectSignedOutNoAgentsDown verifies finding 11 (alerts.go:192):
+// once a project has finished through J4, a held wake combined with a signed-out
+// coordinator CLI must not raise agents_down or start a coordinator.
+func TestFinishedProjectSignedOutNoAgentsDown(t *testing.T) {
+	w := newAlertWorld(t, "Finished sign-out check", false)
+	w.edit(func(s *flow.State) {
+		s.Settings.Models = map[string][]flow.Candidate{
+			flow.RoleCoordinator: {{CLI: "claude", Model: "opus", Effort: "high"}},
+		}
+	})
+	w.pass() // J7 starts coord 1
+	coord1 := w.state().Project.RunID
+	if coord1 == "" {
+		t.Fatal("expected initial coordinator launch")
+	}
+
+	w.edit(func(s *flow.State) {
+		s.Tasks = []flow.Task{{
+			ID: "T1", Title: "feat: done", Brief: "b", EstimateLines: 20,
+			Done:     &flow.Merged{MergedCommit: "m1"},
+			Outcomes: []flow.Outcome{{Text: "ok", ProvedBy: "manual: t1"}},
+		}}
+	})
+
+	// Finish through J4: ask final journal, stop coordinator, log finished.
+	w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "idle"})
+	w.advance(5 * time.Second)
+	w.pass()
+	w.advance(25 * time.Second)
+	w.pass() // J4 asks final journal
+	w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+	w.advance(5 * time.Second)
+	w.pass()
+	w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "idle"})
+	w.advance(5 * time.Second)
+	w.pass()
+	w.advance(25 * time.Second)
+	w.pass() // J4 stops coordinator
+	w.advance(15 * time.Second)
+	w.pass() // J4 logs finished
+
+	if st := w.state(); st.Project.RunID != "" || w.roleRunCount(flow.RoleCoordinator) != 1 {
+		t.Fatalf("project did not finish cleanly: runID=%q coordRuns=%d", st.Project.RunID, w.roleRunCount(flow.RoleCoordinator))
+	}
+
+	// Hold a wake after the finish and sign out the coordinator CLI.
+	w.edit(func(s *flow.State) {
+		s.Project.Wakes = []flow.Wake{{Key: "sweep@orphan", Why: "leftover branch", Facts: "task/orphan", At: w.now}}
+	})
+	w.setClaudeProbe(scriptedProbe{signedIn: false})
+	w.advance(time.Duration(w.state().Settings.PoolMinutes+w.state().Settings.CoordinatorGapMinutes+1) * time.Minute)
+	w.pass()
+	w.pass()
+
+	if st := w.state(); st.Project.HasAlert(flow.AlertAgentsDown) {
+		t.Fatalf("finished project with held wake raised agents_down: %+v", st.Project.Alerts)
+	}
+	if ts, active := statusAlert(t, w.paths, w.repo, "agents_down"); active {
+		t.Fatalf("finished project status showed agents_down: %+v", ts)
+	}
+	if w.roleRunCount(flow.RoleCoordinator) != 1 || w.state().Project.RunID != "" {
+		t.Fatalf("finished project restarted coordinator: runs=%d runID=%q", w.roleRunCount(flow.RoleCoordinator), w.state().Project.RunID)
+	}
 }

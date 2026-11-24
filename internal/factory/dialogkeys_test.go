@@ -132,10 +132,14 @@ func newDialogRig(t *testing.T, cli, screen string, status *hc.Status) *dialogRi
 	r.proxy = startHCProxy(t, r.srv.Path)
 	r.eng = r.newEngine()
 	r.putTerminal(dialogRunID, 100, screen, status)
-	r.st = flow.State{Seq: 1, Settings: flow.DefaultSettings(), Project: flow.Project{ID: r.id, Started: true, Run: &flow.RunRecord{
+	r.st = flow.State{Seq: 1, Settings: flow.DefaultSettings(), Project: flow.Project{ID: r.id, Started: false, Run: &flow.RunRecord{
 		ID: dialogRunID, Address: "t1", CreatedMS: 100, Role: flow.RoleWorker, CLI: cli,
 		State: flow.PhaseStarting, StartedAt: r.now, LastActivity: r.now,
 	}}}
+	if err := SaveState(r.paths.State(r.id), r.st); err != nil {
+		t.Fatal(err)
+	}
+	r.eng.passProject(context.Background(), r.id, true)
 	return r
 }
 
@@ -171,6 +175,7 @@ func (r *dialogRig) restart() {
 		r.t.Fatalf("saved state has no run: %+v", st.Project)
 	}
 	r.st, r.eng = st, r.newEngine()
+	r.eng.passProject(context.Background(), r.id, true)
 }
 
 // delivered returns the key lists that reached the terminal.

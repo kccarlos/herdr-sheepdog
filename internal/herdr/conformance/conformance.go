@@ -753,18 +753,21 @@ func unsentDesktopInputBlocksPrompts(t *testing.T, newDriver NewDriver) {
 	cases := []struct {
 		kind        string
 		placeholder string
+		suggestion  string
 		empty       string
 		typed       string
 	}{
 		{
 			kind:        "claude",
 			placeholder: "────────\n\x1b[0m❯\u00a0\x1b[2mTry \"create a util logging.py that...\"\x1b[0m\n────────\n  ⏵⏵ auto mode on",
+			suggestion:  "────────\n\x1b[0m❯\u00a0\x1b[2mcommit it\x1b[0m\n────────\n  ⏵⏵ auto mode on",
 			empty:       "────────\n\x1b[0m❯\u00a0\n────────\n  ⏵⏵ auto mode on",
 			typed:       "────────\n\x1b[0m❯\u00a0halftyped\n────────\n  ⏵⏵ auto mode on",
 		},
 		{
 			kind:        "codex",
 			placeholder: "\x1b[0m› \x1b[2mAsk Codex to do anything\x1b[0m\n\n  gpt-5.6-luna max · ~/repo",
+			suggestion:  "\x1b[0m› \x1b[2mcommit it\x1b[0m\n\n  gpt-5.6-luna max · ~/repo",
 			empty:       "\x1b[0m› \n\n  gpt-5.6-luna max · ~/repo",
 			typed:       "\x1b[0m› halftyped\n\n  gpt-5.6-luna max · ~/repo",
 		},
@@ -772,6 +775,7 @@ func unsentDesktopInputBlocksPrompts(t *testing.T, newDriver NewDriver) {
 	for _, tc := range cases {
 		t.Run(tc.kind, func(t *testing.T) {
 			d := newDriver(t)
+			_, hasANSI := d.Backend().(supervisor.ANSIReader)
 			ctx := testContext(t)
 			store := watchState(t, ctx, d.Backend())
 			pane, err := d.NewAgent(ctx, t.TempDir(), tc.kind)
@@ -783,12 +787,27 @@ func unsentDesktopInputBlocksPrompts(t *testing.T, newDriver NewDriver) {
 
 			log := &recordingLogger{}
 			ih := inject.NewHerdr(d.Backend(), log)
-			model := braintest.NewModel(
-				braintest.Step{Calls: []*genai.FunctionCall{
-					braintest.FC(brain.ToolPrompt, map[string]any{"agent": say, "text": "VOICE-TEXT"}),
-				}},
-				braintest.Step{Text: braintest.Reply("Not sent: desktop input is being typed.", "")},
-			)
+			var steps []braintest.Step
+			if hasANSI {
+				steps = []braintest.Step{
+					{Calls: []*genai.FunctionCall{
+						braintest.FC(brain.ToolPrompt, map[string]any{"agent": say, "text": "VOICE-TEXT"}),
+					}},
+					{Text: braintest.Reply("Not sent: desktop input is being typed.", "")},
+				}
+			} else {
+				steps = []braintest.Step{
+					{Calls: []*genai.FunctionCall{
+						braintest.FC(brain.ToolPrompt, map[string]any{"agent": say, "text": "VOICE-TEXT"}),
+					}},
+					{Text: braintest.Reply("Sent.", "")},
+					{Calls: []*genai.FunctionCall{
+						braintest.FC(brain.ToolPrompt, map[string]any{"agent": say, "text": "VOICE-TEXT"}),
+					}},
+					{Text: braintest.Reply("Sent.", "")},
+				}
+			}
+			model := braintest.NewModel(steps...)
 			logRoot := t.TempDir()
 			b, err := brain.New(brain.Config{DataDir: logRoot, RunID: "conformance"}, model, log)
 			if err != nil {
@@ -806,6 +825,42 @@ func unsentDesktopInputBlocksPrompts(t *testing.T, newDriver NewDriver) {
 			})
 			if err != nil {
 				t.Fatal(err)
+			}
+
+			if !hasANSI {
+				// On backends without ANSIReader (herdr-core), checkTypedInput skips
+				// the screen read and relies on hc send's quiet wait: both WindowPrompt
+				// and voice sends must go through even when the plain input box shows
+				// a dim prompt suggestion (stripped of SGR codes) or unstyled text,
+				// without logging supervisor.typing_check_unavailable.
+				for i, screen := range []string{tc.suggestion, tc.typed} {
+					log.reset()
+					if err := d.SetScreen(ctx, pane.PaneID, screen); err != nil {
+						t.Fatal(err)
+					}
+					if _, err := sup.WindowPrompt(ctx, pane.PaneID, "VOICE-TEXT"); err != nil {
+						t.Fatalf("WindowPrompt on non-ANSIReader backend (%q): err = %v, want nil", screen, err)
+					}
+					words := "tell " + say + " to run VOICE-TEXT"
+					sup.OnVoiceEvent(voice.EventTranscript{Dir: voice.DirIn, Text: words, Final: true})
+					if _, err := sup.ToSupervisor(ctx, words); err != nil {
+						t.Fatalf("ToSupervisor on non-ANSIReader backend (%q): %v", screen, err)
+					}
+					calls := model.Calls()
+					wantCalls := 2 * (i + 1)
+					if len(calls) < wantCalls {
+						t.Fatalf("model calls = %d, want >= %d", len(calls), wantCalls)
+					}
+					if got := calls[2*i+1].Text(); strings.Contains(got, "being typed") || !strings.Contains(got, "Sent.") {
+						t.Fatalf("tool result on non-ANSIReader backend (%q) = %q, want send to succeed", screen, got)
+					}
+					for _, entry := range log.snapshot() {
+						if strings.HasPrefix(entry, "supervisor.typing_check_unavailable ") {
+							t.Fatalf("non-ANSIReader send unexpectedly logged %q", entry)
+						}
+					}
+				}
+				return
 			}
 
 			// Half-typed desktop text must block both window input and voice prompt.
@@ -828,8 +883,8 @@ func unsentDesktopInputBlocksPrompts(t *testing.T, newDriver NewDriver) {
 				t.Fatalf("tool result = %q, want typing refusal", got)
 			}
 
-			// Placeholder and empty input boxes must allow prompts through.
-			for _, screen := range []string{tc.placeholder, tc.empty} {
+			// Placeholder, dim suggestion, and empty input boxes must allow prompts through.
+			for _, screen := range []string{tc.placeholder, tc.suggestion, tc.empty} {
 				if err := d.SetScreen(ctx, pane.PaneID, screen); err != nil {
 					t.Fatal(err)
 				}

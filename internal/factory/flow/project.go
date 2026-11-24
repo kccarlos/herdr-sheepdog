@@ -28,6 +28,11 @@ func AllTasksEnded(tasks []Task) bool {
 	return len(tasks) > 0 && !slices.ContainsFunc(tasks, func(t Task) bool { return !Ended(t) })
 }
 
+// ProjectFinished reports whether J4's finished condition holds (design.md section 6).
+func ProjectFinished(p Project, tasks []Task) bool {
+	return AllTasksEnded(tasks) && !p.NewGoal && (len(p.Wakes) == 0 || p.Finished)
+}
+
 // IsCoordR29 reports whether r ended as stuck at a dialog via R29 (J10).
 func IsCoordR29(r *RunRecord) bool {
 	return r != nil && r.State == PhaseEnded && r.Result == EndStuck && !r.BlockedSince.IsZero()
@@ -112,7 +117,7 @@ var ProjectRows = []Row[ProjectIn]{
 		a := StoppingAlert(in.Alerts)
 		return pdec("Stopped: " + cmp.Or(a.Fix, a.Cause))
 	}),
-	prow("J4", "none", "finished", func(in ProjectIn) bool { return AllTasksEnded(in.Tasks) && !in.NewGoal && len(in.Wakes) == 0 }, func(in ProjectIn) Decision {
+	prow("J4", "none", "finished", func(in ProjectIn) bool { return ProjectFinished(in.Project, in.Tasks) }, func(in ProjectIn) Decision {
 		if !in.alive() || !in.idle() {
 			return pdec(map[bool]string{true: "Finished: all tasks ended", false: "Finished: waiting for coordinator to finish final journal line"}[!in.alive()])
 		}

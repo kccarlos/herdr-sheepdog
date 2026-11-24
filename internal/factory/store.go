@@ -139,8 +139,8 @@ func AppendLog(path string, l LogLine) error {
 	return f.Close()
 }
 
-// TrimLog drops log lines past seq, left by a crash between the log write
-// and the state write (design.md 14). A torn last line is dropped too.
+// TrimLog drops log lines past seq, a torn last line, and any line that does
+// not parse (design.md 14).
 func TrimLog(path string, seq int64) error {
 	data, err := readGuarded(path)
 	if os.IsNotExist(err) {
@@ -149,8 +149,7 @@ func TrimLog(path string, seq int64) error {
 		return err
 	}
 	var keep bytes.Buffer
-	lines := bytes.SplitAfter(data, []byte("\n"))
-	for i, ln := range lines {
+	for _, ln := range bytes.SplitAfter(data, []byte("\n")) {
 		if len(ln) == 0 {
 			continue
 		}
@@ -158,10 +157,7 @@ func TrimLog(path string, seq int64) error {
 			break // torn last line: an append that did not finish
 		}
 		var l LogLine
-		if err := json.Unmarshal(ln, &l); err != nil {
-			return fmt.Errorf("factory: %s line %d: %w", path, i+1, err)
-		}
-		if l.Seq <= seq {
+		if json.Unmarshal(ln, &l) == nil && l.Seq <= seq {
 			keep.Write(ln)
 		}
 	}

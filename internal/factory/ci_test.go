@@ -366,8 +366,11 @@ func TestCIRerunNotRepeatedAfterFailedCommit(t *testing.T) {
 	t.Parallel()
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("FAILURE", "44714", "100"))
-	if err := os.Chmod(l.paths.Log(l.id), 0o400); err != nil { // the commit's log append fails
-		t.Fatal(err)
+	l.eng.writeLog = func(path string, line LogLine) error {
+		if line.Rule == "N33" {
+			return os.ErrPermission
+		}
+		return AppendLog(path, line)
 	}
 	l.pass()
 	l.pass()
@@ -695,5 +698,241 @@ func TestN13OldAttemptCIFailsDoNotCarryOver(t *testing.T) {
 	l.pass()
 	if got := l.state().Tasks[0]; len(got.Recaps) != 0 || len(got.Attempts[1].CIFails) != 1 {
 		t.Fatalf("attempt 2 after 1 fail: recaps=%d ci_fails=%d, want 0 and 1", len(got.Recaps), len(got.Attempts[1].CIFails))
+	}
+}
+
+// TestCIRedBehindUpdatesBranchNoRerun verifies finding 9 (seq 139: run
+// 45337206494, checks red, behind base, base green): N33 does not re-run
+// failed jobs on a behind PR (which would re-use the old merge and workflow
+// files); the task falls to N40 to update the branch once without telling the
+// worker.
+func TestCIRedBehindUpdatesBranchNoRerun(t *testing.T) {
+	t.Parallel()
+	l := newLanding(t)
+	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("FAILURE", "45337206494", "100"))
+	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
+	l.pass()
+	updates := ghCalls(t, l.gh, "api -X PUT")
+	wantUpdate := "api -X PUT repos/acme/demo/pulls/7/update-branch -f expected_head_sha=" + l.c1
+	if len(updates) != 1 || updates[0] != wantUpdate {
+		t.Fatalf("update calls = %q, want [%q]", updates, wantUpdate)
+	}
+	if reruns := ghCalls(t, l.gh, "run rerun"); len(reruns) != 0 {
+		t.Fatalf("behind red PR must not re-run: %q", reruns)
+	}
+	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 0 {
+		t.Fatalf("behind red PR must not tell worker before update: %q", sends)
+	}
+	st := l.state()
+	if st.Tasks[0].LastRow != "N40" || !flow.Done(st.Tasks[0].Attempts[0].Acts, flow.AskUpdateBranch+"@"+l.c1) {
+		t.Fatalf("task row=%s acts=%+v, want N40 with %s@%s done", st.Tasks[0].LastRow, st.Tasks[0].Attempts[0].Acts, flow.AskUpdateBranch, l.c1)
+	}
+}
+
+// TestCIRedBehindAgainAfterUpdateTellsWorker verifies the one-update-per-head
+// bound for finding 9: after N40 updates a red, behind PR and N20 moves H to
+// the clean merge-only head m1, if m1 is red and behind again (base kept
+// moving), N33 tells the worker once ("Pull first") with no second update and
+// no re-run.
+func TestCIRedBehindAgainAfterUpdateTellsWorker(t *testing.T) {
+	t.Parallel()
+	l := newLanding(t)
+	if err := os.WriteFile(filepath.Join(l.repo, "base.go"), []byte("package demo\nvar Base = 1\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, l.repo, "add", "base.go")
+	gitIn(t, l.repo, "commit", "-m", "feat: base moves")
+	gitIn(t, l.repo, "push", "origin", "main")
+	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("FAILURE", "45337206494", "100"))
+	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
+
+	// Pass 1: N40 updates branch for c1, no re-run, no worker tell.
+	l.pass()
+	if updates := ghCalls(t, l.gh, "api -X PUT"); len(updates) != 1 {
+		t.Fatalf("pass 1 update calls = %q, want 1", updates)
+	}
+	if reruns := ghCalls(t, l.gh, "run rerun"); len(reruns) != 0 {
+		t.Fatalf("pass 1 reruns = %q, want none", reruns)
+	}
+
+	// Simulate GitHub creating a clean merge commit m1 on origin/<branch>
+	// without touching the worker worktree l.wt.
+	sim := t.TempDir()
+	rawURL := gitIn(t, l.repo, "remote", "get-url", "--push", "origin")
+	gitIn(t, sim, "clone", rawURL, "repo")
+	simRepo := filepath.Join(sim, "repo")
+	gitIn(t, simRepo, "config", "user.name", "GitHub")
+	gitIn(t, simRepo, "config", "user.email", "noreply@example.com")
+	gitIn(t, simRepo, "checkout", l.branch)
+	gitIn(t, simRepo, "merge", "--no-edit", "origin/main")
+	m1 := gitIn(t, simRepo, "rev-parse", "HEAD")
+	gitIn(t, simRepo, "push", "origin", m1+":refs/heads/"+l.branch)
+
+	// New head m1 is red and behind again (base moved again).
+	writePRJSON(t, l.gh, "view.json", m1, checkRollup("FAILURE", "45337206500", "200"))
+	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
+
+	l.pass() // N20 moves H to merge-only m1 (records move_h_merge_only@m1)
+	l.pass() // N33 at updated head m1: skips rerunOrWait, tells worker once
+	l.pass() // repeat pass: no second tell, no second update, no re-run
+
+	a := l.state().Tasks[0].Attempts[0]
+	if flow.H(a) != m1 || !flow.Done(a.Acts, flow.AskMergeOnly+"@"+m1) {
+		t.Fatalf("after merge-only move: H=%s acts=%+v, want %s with move_h_merge_only done", flow.H(a), a.Acts, m1)
+	}
+	if updates := ghCalls(t, l.gh, "api -X PUT"); len(updates) != 1 {
+		t.Fatalf("total update calls = %q, want 1 (no second update at updated head)", updates)
+	}
+	if reruns := ghCalls(t, l.gh, "run rerun"); len(reruns) != 0 {
+		t.Fatalf("total reruns = %q, want none (never re-run a behind PR)", reruns)
+	}
+	sends := sendsTo(t, l.srv.Requests(), l.worker)
+	if len(sends) != 1 || !strings.Contains(sends[0], "45337206500") || !strings.HasPrefix(sends[0], "Pull first") {
+		t.Fatalf("worker sends = %q, want 1 mentioning 45337206500 with Pull first prefix", sends)
+	}
+	if !flow.Done(a.Acts, flow.AskTellCI+"@45337206500@"+m1) {
+		t.Fatalf("acts = %+v, want %s@45337206500@%s done", a.Acts, flow.AskTellCI, m1)
+	}
+}
+
+// TestCICancelledBehindUpdatesBranch verifies N34 does not act on a behind PR
+// whose head is not an updated head: both an external cancel and a time-limit
+// cancel fall through to N40 (update_branch@H), with no re-run and no wake.
+func TestCICancelledBehindUpdatesBranch(t *testing.T) {
+	t.Parallel()
+	t.Run("external cancel", func(t *testing.T) {
+		l := newLanding(t)
+		writeGHFile(t, l.gh, "annotations.json", `[{"message":"The run was canceled by @example-user."}]`)
+		writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("CANCELLED", "55001", "10"))
+		writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
+		l.pass()
+		updates := ghCalls(t, l.gh, "api -X PUT")
+		wantUpdate := "api -X PUT repos/acme/demo/pulls/7/update-branch -f expected_head_sha=" + l.c1
+		if len(updates) != 1 || updates[0] != wantUpdate {
+			t.Fatalf("update calls = %q, want [%q]", updates, wantUpdate)
+		}
+		if reruns := ghCalls(t, l.gh, "run rerun"); len(reruns) != 0 {
+			t.Fatalf("behind external cancel must not re-run: %q", reruns)
+		}
+		if wakes := l.state().Project.Wakes; len(wakes) != 0 {
+			t.Fatalf("behind external cancel must not wake: %+v", wakes)
+		}
+	})
+	t.Run("timeout", func(t *testing.T) {
+		l := newLanding(t)
+		writeGHFile(t, l.gh, "annotations.json", `[{"message":"The job has exceeded the maximum execution time of 1m0s"}]`)
+		writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("CANCELLED", "55002", "30"))
+		writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
+		l.pass()
+		updates := ghCalls(t, l.gh, "api -X PUT")
+		wantUpdate := "api -X PUT repos/acme/demo/pulls/7/update-branch -f expected_head_sha=" + l.c1
+		if len(updates) != 1 || updates[0] != wantUpdate {
+			t.Fatalf("update calls = %q, want [%q]", updates, wantUpdate)
+		}
+		if reruns := ghCalls(t, l.gh, "run rerun"); len(reruns) != 0 {
+			t.Fatalf("behind timeout must not re-run: %q", reruns)
+		}
+		if wakes := l.state().Project.Wakes; len(wakes) != 0 {
+			t.Fatalf("behind timeout must not wake before update: %+v", wakes)
+		}
+	})
+}
+
+// TestCIRedBehindBaseRedHolds verifies that a red, behind PR when the base
+// branch is red holds at N38 without re-running, updating, or telling the
+// worker.
+func TestCIRedBehindBaseRedHolds(t *testing.T) {
+	t.Parallel()
+	l := newLanding(t)
+	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("FAILURE", "45337206494", "100"))
+	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
+	redHead := commitBaseHead(t, l.repo, l.gh, "red")
+	writeCountedBaseRun(t, l.gh, 101, redHead, "failure")
+	l.pass()
+	l.pass()
+	if reruns := ghCalls(t, l.gh, "run rerun"); len(reruns) != 0 {
+		t.Fatalf("red behind PR with red base must not re-run: %q", reruns)
+	}
+	if updates := ghCalls(t, l.gh, "api -X PUT"); len(updates) != 0 {
+		t.Fatalf("red behind PR with red base must not update: %q", updates)
+	}
+	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 0 {
+		t.Fatalf("red behind PR with red base must not tell worker: %q", sends)
+	}
+	if row := l.state().Tasks[0].LastRow; row != "N38" {
+		t.Fatalf("LastRow = %q, want N38", row)
+	}
+}
+
+// TestCIRedBehindUpdatedHeadBaseRedHolds verifies round-2 review correction:
+// a red, behind PR at an updated head (done move_h_merge_only@H) when the base
+// is red still holds at N38 instead of telling the worker or re-running.
+func TestCIRedBehindUpdatedHeadBaseRedHolds(t *testing.T) {
+	t.Parallel()
+	l := newLanding(t)
+	l.edit(func(s *flow.State) {
+		s.Tasks[0].Attempts[0].Acts = append(s.Tasks[0].Attempts[0].Acts, flow.Act{
+			Key:    flow.AskMergeOnly + "@" + l.c1,
+			Result: "done",
+			At:     time.Now(),
+		})
+	})
+	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("FAILURE", "45337206494", "100"))
+	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
+	redHead := commitBaseHead(t, l.repo, l.gh, "red")
+	writeCountedBaseRun(t, l.gh, 101, redHead, "failure")
+	l.pass()
+	l.pass()
+	if reruns := ghCalls(t, l.gh, "run rerun"); len(reruns) != 0 {
+		t.Fatalf("updated-head red behind PR with red base must not re-run: %q", reruns)
+	}
+	if updates := ghCalls(t, l.gh, "api -X PUT"); len(updates) != 0 {
+		t.Fatalf("updated-head red behind PR with red base must not update: %q", updates)
+	}
+	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 0 {
+		t.Fatalf("updated-head red behind PR with red base must not tell worker: %q", sends)
+	}
+	if row := l.state().Tasks[0].LastRow; row != "N38" {
+		t.Fatalf("LastRow = %q, want N38", row)
+	}
+}
+
+// TestCIRedBehindUpdateRefusedEndsAtN5 verifies that when GitHub refuses
+// update-branch ensure_failures times on a red, behind PR, the task ends at N5
+// waking the coordinator once for failed@update_branch@H with no re-run.
+func TestCIRedBehindUpdateRefusedEndsAtN5(t *testing.T) {
+	t.Parallel()
+	l := newLanding(t)
+	now := time.Now()
+	l.eng.Now = func() time.Time { return now }
+	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("FAILURE", "45337206494", "100"))
+	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
+	writeGHFile(t, l.gh, "update_branch_fail", "")
+
+	// Three transient failures (EnsureFailures = 3) with doubling backoff (1m, 2m).
+	l.pass()
+	now = now.Add(time.Minute)
+	l.pass()
+	now = now.Add(2 * time.Minute)
+	l.pass()
+	l.pass() // N5 fires wake_coordinator@failed@update_branch@c1
+	l.pass() // repeat pass: no second wake
+
+	if reruns := ghCalls(t, l.gh, "run rerun"); len(reruns) != 0 {
+		t.Fatalf("refused update on red behind PR must not re-run: %q", reruns)
+	}
+	if sends := sendsTo(t, l.srv.Requests(), l.worker); len(sends) != 0 {
+		t.Fatalf("refused update on red behind PR must not tell worker: %q", sends)
+	}
+	if updates := ghCalls(t, l.gh, "api -X PUT"); len(updates) != 3 {
+		t.Fatalf("update calls = %d (%q), want 3 (ensure_failures)", len(updates), updates)
+	}
+	st := l.state()
+	if st.Tasks[0].LastRow != "N5" {
+		t.Fatalf("LastRow = %q, want N5", st.Tasks[0].LastRow)
+	}
+	wantWake := "failed@" + flow.AskUpdateBranch + "@" + l.c1
+	if w := st.Project.Wakes; len(w) != 1 || w[0].Key != wantWake {
+		t.Fatalf("wakes = %+v, want 1 with key %q", w, wantWake)
 	}
 }

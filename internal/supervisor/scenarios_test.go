@@ -893,11 +893,28 @@ func TestTypedTerminalInputBlocksPrompts(t *testing.T) {
 	if !strings.Contains(res.Spoken, "being typed") {
 		t.Errorf("result = %+v", res)
 	}
-	if _, err := h.sup.WindowPrompt(context.Background(), "w5:p1", "run tests"); err == nil {
-		t.Error("window prompt accepted")
+	if _, err := h.sup.WindowPrompt(context.Background(), "w5:p1", "run tests"); !errors.Is(err, ErrTerminalTyping) {
+		t.Errorf("window prompt err = %v, want ErrTerminalTyping", err)
 	}
 	if got := h.promptRequests(); len(got) != 0 {
 		t.Errorf("sent prompts: %v", got)
+	}
+
+	// A dim prompt suggestion on the colour path is not typed input and must go through.
+	h.srv.SetScreen("w6:p1", "────────\n\x1b[0m❯\u00a0\x1b[2mcommit it\x1b[0m\n────────\n  ⏵⏵ auto mode on")
+	row, _ := h.store.Get("w6:p1")
+	res, err := h.sup.sendInstruction(context.Background(), row, "run tests", "Telling docs to run tests.")
+	if err != nil {
+		t.Fatalf("voice send with dim suggestion failed: %v (res=%+v)", err, res)
+	}
+	if !strings.HasSuffix(res.Spoken, "Sent.") {
+		t.Errorf("voice send spoken = %q, want Sent.", res.Spoken)
+	}
+	if _, err := h.sup.WindowPrompt(context.Background(), "w6:p1", "run tests again"); err != nil {
+		t.Fatalf("window prompt with dim suggestion failed: %v", err)
+	}
+	if got := h.promptRequests(); len(got) != 2 {
+		t.Errorf("sent prompts = %v, want 2", got)
 	}
 }
 
@@ -937,48 +954,123 @@ func TestTypingCheckDoesNotTreatIdleMenuAsBlocked(t *testing.T) {
 	}
 }
 
-func TestPlainScreenTypingGuardWhenANSIUnavailable(t *testing.T) {
-	h := twoAgents(t)
-	h.sup.herdr = &unavailableANSI{Herdr: h.sup.herdr}
+// plainHerdr wraps a Herdr without implementing ANSIReader (like herdr-core)
+// and records Read calls so tests can verify checkTypedInput skips screen reads.
+type plainHerdr struct {
+	inner Herdr
+	mu    sync.Mutex
+	reads []herdr.ReadSource
+}
 
-	h.srv.SetScreen("w5:p1", "────────\n❯\u00a0halftyped\n────────\n  status")
-	res := h.send("w5:p1", "run tests")
-	if !strings.Contains(res.Spoken, "being typed") {
-		t.Errorf("voice result = %+v, want typing refusal", res)
-	}
-	if _, err := h.sup.WindowPrompt(context.Background(), "w5:p1", "run tests"); !errors.Is(err, ErrTerminalTyping) {
-		t.Errorf("window prompt err = %v, want ErrTerminalTyping", err)
-	}
-	if got := h.promptRequests(); len(got) != 0 {
-		t.Errorf("sent prompts while typing: %v", got)
-	}
+func (p *plainHerdr) Read(ctx context.Context, paneID string, source herdr.ReadSource, lines int) (herdr.ReadResult, error) {
+	p.mu.Lock()
+	p.reads = append(p.reads, source)
+	p.mu.Unlock()
+	return p.inner.Read(ctx, paneID, source, lines)
+}
 
-	h.srv.SetScreen("w5:p1", "› halftyped\n\n  gpt-5.6-luna max · ~/repo")
-	if _, err := h.sup.WindowPrompt(context.Background(), "w5:p1", "run tests"); !errors.Is(err, ErrTerminalTyping) {
-		t.Errorf("codex window prompt err = %v, want ErrTerminalTyping", err)
-	}
+func (p *plainHerdr) Prompt(ctx context.Context, paneID, text string) (herdr.AgentInfo, error) {
+	return p.inner.Prompt(ctx, paneID, text)
+}
 
-	for _, screen := range []string{
-		fixture(t, "claude-idle.screen.txt"),
-		fixture(t, "codex-after-approval.screen.txt"),
-		"────────\n❯\u00a0\n────────\n  status",
+func (p *plainHerdr) SendKeys(ctx context.Context, paneID string, keys ...string) error {
+	return p.inner.SendKeys(ctx, paneID, keys...)
+}
+
+func (p *plainHerdr) Interrupt(ctx context.Context, paneID string) error {
+	return p.inner.Interrupt(ctx, paneID)
+}
+
+func (p *plainHerdr) ListAgents(ctx context.Context) ([]herdr.AgentInfo, error) {
+	return p.inner.ListAgents(ctx)
+}
+
+func (p *plainHerdr) visibleReads() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	n := 0
+	for _, s := range p.reads {
+		if s == herdr.SourceVisible {
+			n++
+		}
+	}
+	return n
+}
+
+func TestVoiceSendSkipsTypingCheckWithoutANSIReader(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		captureFile string
+	}{
+		{"dim prompt suggestion", "claude-suggestion-plain.screen.txt"},
+		{"typed prompt text", "claude-typed-plain.screen.txt"},
 	} {
-		h.srv.SetScreen("w5:p1", screen)
-		before := h.log.count("supervisor.typing_check_unavailable")
-		if _, err := h.sup.WindowPrompt(context.Background(), "w5:p1", "run tests"); err != nil {
-			t.Fatalf("clear screen %q blocked: %v", screen, err)
-		}
-		if got := h.log.count("supervisor.typing_check_unavailable"); got != before {
-			t.Errorf("clear screen %q logged typing_check_unavailable (%d -> %d)", screen, before, got)
-		}
-	}
+		t.Run(tc.name, func(t *testing.T) {
+			h := twoAgents(t)
+			plain := &plainHerdr{inner: h.sup.herdr}
+			h.sup.herdr = plain
+			h.srv.SetScreen("w6:p1", fixture(t, tc.captureFile))
 
-	h.srv.SetScreen("w5:p1", "plain output without prompt")
-	before := h.log.count("supervisor.typing_check_unavailable")
-	if _, err := h.sup.WindowPrompt(context.Background(), "w5:p1", "run tests"); err != nil {
-		t.Fatalf("unclear screen did not fail open: %v", err)
+			row, _ := h.store.Get("w6:p1")
+			res, err := h.sup.sendInstruction(context.Background(), row, "run tests", "Telling docs to run tests.")
+			if err != nil {
+				t.Fatalf("sendInstruction err = %v (want nil, not ErrTerminalTyping); res = %+v", err, res)
+			}
+			if strings.Contains(res.Spoken, "being typed") || !strings.HasSuffix(res.Spoken, "Sent.") {
+				t.Errorf("sendInstruction spoken = %q, want Sent.", res.Spoken)
+			}
+			if got := h.promptRequests(); len(got) != 1 || got[0] != [2]string{"w6:p1", "run tests"} {
+				t.Errorf("prompt requests = %v, want [[w6:p1 run tests]]", got)
+			}
+			if got := plain.visibleReads(); got != 0 {
+				t.Errorf("visible screen reads for typing check = %d, want 0", got)
+			}
+
+			if _, err := h.sup.WindowPrompt(context.Background(), "w6:p1", "run tests again"); err != nil {
+				t.Fatalf("WindowPrompt err = %v, want nil", err)
+			}
+			if got := plain.visibleReads(); got != 0 {
+				t.Errorf("visible screen reads after WindowPrompt = %d, want 0", got)
+			}
+		})
 	}
-	if got := h.log.count("supervisor.typing_check_unavailable"); got != before+1 {
-		t.Errorf("unclear screen typing_check_unavailable = %d, want %d", got, before+1)
+}
+
+func TestVoiceSendSkipsTypingCheckWhenANSIUnavailable(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		captureFile string
+	}{
+		{"dim prompt suggestion", "claude-suggestion-plain.screen.txt"},
+		{"typed prompt text", "claude-typed-plain.screen.txt"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := twoAgents(t)
+			plain := &plainHerdr{inner: h.sup.herdr}
+			h.sup.herdr = &unavailableANSI{Herdr: plain}
+			h.srv.SetScreen("w6:p1", fixture(t, tc.captureFile))
+
+			row, _ := h.store.Get("w6:p1")
+			res, err := h.sup.sendInstruction(context.Background(), row, "run tests", "Telling docs to run tests.")
+			if err != nil {
+				t.Fatalf("sendInstruction err = %v (want nil, not ErrTerminalTyping); res = %+v", err, res)
+			}
+			if strings.Contains(res.Spoken, "being typed") || !strings.HasSuffix(res.Spoken, "Sent.") {
+				t.Errorf("sendInstruction spoken = %q, want Sent.", res.Spoken)
+			}
+			if got := h.promptRequests(); len(got) != 1 || got[0] != [2]string{"w6:p1", "run tests"} {
+				t.Errorf("prompt requests = %v, want [[w6:p1 run tests]]", got)
+			}
+			if got := plain.visibleReads(); got != 0 {
+				t.Errorf("plain visible screen reads after ErrANSIUnavailable = %d, want 0", got)
+			}
+
+			if _, err := h.sup.WindowPrompt(context.Background(), "w6:p1", "run tests again"); err != nil {
+				t.Fatalf("WindowPrompt err = %v, want nil", err)
+			}
+			if got := plain.visibleReads(); got != 0 {
+				t.Errorf("plain visible screen reads after WindowPrompt = %d, want 0", got)
+			}
+		})
 	}
 }
