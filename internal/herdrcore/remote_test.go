@@ -295,3 +295,98 @@ func TestRemoteBehaviourStatusSendReadEvents(t *testing.T) {
 		t.Fatalf("remote exit event = %+v, want FleetPaneExited for box~t5", ev)
 	}
 }
+
+// Round-2 blocking probe (NeonH §2.2): spaceSet.add must never let an older
+// remote terminal carrying the same herdr.space label replace a local terminal
+// as sp.first and overwrite the local space's git repo name.
+func TestSnapshotMixedSpaceKeepsLocalRepoName(t *testing.T) {
+	localRepo := filepath.Join(t.TempDir(), "local-repo")
+	sub := filepath.Join(localRepo, "sub")
+	if err := os.MkdirAll(filepath.Join(localRepo, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(localRepo, ".git", "HEAD"), []byte("ref: refs/heads/main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(sub, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b, srv := newBackend(t)
+
+	local := reported("t1", "claude-code", "idle")
+	local.Cwd, local.CreatedMS = sub, 200
+	local.Labels = map[string]string{"herdr.space": "s1", "herdr.tab": "a"}
+	srv.Add(local)
+
+	remote := reported("box/t4", "claude-code", "idle")
+	remote.Cwd, remote.CreatedMS = "/remote/other", 100
+	remote.Labels = map[string]string{"herdr.space": "s1", "herdr.tab": "b"}
+	srv.Add(remote)
+
+	snap, err := b.Snapshot(testContext(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Workspaces) != 1 || snap.Workspaces[0].Label != "local-repo" {
+		t.Fatalf("Workspaces = %+v, want Label %q", snap.Workspaces, "local-repo")
+	}
+}
+
+// Round-2 blocking probe (NeonH §2.3, Carbon Bug 3): a remote terminal carrying
+// sheepdog=shell must never be marked PhoneShell, matched by IsShellPane, or
+// killed by CloseShell.
+func TestRemoteTerminalIsNotLocalPhoneShell(t *testing.T) {
+	b, srv := newBackend(t)
+	ctx := testContext(t)
+	remote := liveTerminal("box/t4", "zsh")
+	remote.Labels = map[string]string{"sheepdog": "shell", "herdr.space": "s-remote", "herdr.tab": "a"}
+	srv.Add(remote)
+
+	snap, err := b.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Panes) != 1 || snap.Panes[0].PhoneShell {
+		t.Fatalf("remote pane PhoneShell = true (%+v), want false", snap.Panes)
+	}
+	if b.IsShellPane(snap.Panes[0], "") {
+		t.Fatalf("IsShellPane(remote box~t4) = true, want false")
+	}
+	if err := b.CloseShell(ctx, "box~t4"); err == nil {
+		t.Fatal("CloseShell(box~t4) succeeded on remote terminal, want refusal")
+	}
+	if n := countRequests(srv, "terminal.kill"); n != 0 {
+		t.Fatalf("CloseShell(box~t4) issued %d terminal.kill requests, want 0", n)
+	}
+}
+
+// Round-2 blocking probe (Carbon Bug 1): Snapshot and GetAgent must not expose
+// a remote terminal's cwd as AgentInfo.Cwd or PaneInfo.Cwd, while keeping the
+// remote workspace's base-name label.
+func TestSnapshotAndGetAgentDoNotExposeRemoteCwdAsLocalCwd(t *testing.T) {
+	localProjectDir := t.TempDir()
+	b, srv := newBackend(t)
+	remote := reported("box/t4", "claude-code", "idle")
+	remote.Cwd = localProjectDir
+	remote.Labels = map[string]string{"herdr.space": "s-remote", "herdr.tab": "a"}
+	srv.Add(remote)
+
+	ctx := testContext(t)
+	snap, err := b.Snapshot(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(snap.Workspaces) != 1 || snap.Workspaces[0].Label != filepath.Base(localProjectDir) {
+		t.Fatalf("Workspaces = %+v, want base name label preserved", snap.Workspaces)
+	}
+	if len(snap.Agents) != 1 || snap.Agents[0].Cwd != "" {
+		t.Fatalf("remote AgentInfo.Cwd = %q, want empty so /api/state never offers a local shell there", snap.Agents[0].Cwd)
+	}
+	if len(snap.Panes) != 1 || snap.Panes[0].Cwd != "" {
+		t.Fatalf("remote PaneInfo.Cwd = %q, want empty", snap.Panes[0].Cwd)
+	}
+	got, err := b.GetAgent(ctx, "box~t4")
+	if err != nil || got.Cwd != "" {
+		t.Fatalf("GetAgent(box~t4) = (%+v, %v), want empty Cwd", got, err)
+	}
+}

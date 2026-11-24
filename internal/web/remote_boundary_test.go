@@ -14,6 +14,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
+	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdrcore"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
@@ -247,5 +248,50 @@ func TestSpaceFolderViaHerdrcoreReturnsEmptyForRemoteSpace(t *testing.T) {
 	}
 	if dir != "" {
 		t.Fatalf("SpaceFolder(s-remote) = %q, want empty string for remote-only space", dir)
+	}
+}
+
+// Round-2 blocking probe (Carbon Bug 1): state.Store.Apply and GET /api/state
+// must never expose a remote agent's Cwd as a local path, so clients do not
+// offer "Open shell here" targeting this Mac.
+func TestStateEndpointOmitsRemoteAgentCwd(t *testing.T) {
+	localDir := t.TempDir()
+	h := newHarness(t, harnessOpts{})
+
+	if _, _, err := h.store.Apply(herdr.Transition{
+		PaneID:         "box~t4",
+		To:             herdr.StateIdle,
+		Agent:          "claude",
+		WorkspaceID:    "s-remote",
+		WorkspaceLabel: "remote",
+		Cwd:            localDir,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	resp, err := http.Get(h.http.URL + "/api/state")
+	if err != nil {
+		t.Fatalf("GET /api/state: %v", err)
+	}
+	raw, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("GET /api/state = %d %s", resp.StatusCode, raw)
+	}
+	var got StateResponse
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("decode /api/state: %v (%s)", err, raw)
+	}
+	var found bool
+	for _, a := range got.Agents {
+		if a.PaneID == "box~t4" {
+			found = true
+			if a.Cwd != "" {
+				t.Fatalf("GET /api/state exposed remote agent cwd = %q, want empty", a.Cwd)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("GET /api/state missing remote agent box~t4: %+v", got.Agents)
 	}
 }

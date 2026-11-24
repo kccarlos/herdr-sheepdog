@@ -311,3 +311,105 @@ func TestProtectedWhyIgnoresRemoteCwd(t *testing.T) {
 		t.Fatalf("protectedWhy(remote box~t4) = %q, want empty (must not match remote cwd against local ProtectedDirs)", why)
 	}
 }
+
+// Round-2 blocking probe (NeonH §2.1): spaceDir must skip remote panes when a
+// space also contains a local pane, instead of picking "box~t4" < "t1" and
+// rejecting the whole space.
+func TestSpaceDirSkipsRemotePaneInMixedSpace(t *testing.T) {
+	localDir := t.TempDir()
+	snap := herdr.Snapshot{
+		Workspaces: []herdr.WorkspaceInfo{{WorkspaceID: "s1", Label: "app"}},
+		Panes: []herdr.PaneInfo{
+			{PaneID: "box~t4", WorkspaceID: "s1", Cwd: "/remote/app", Agent: "claude"},
+			{PaneID: "t1", WorkspaceID: "s1", Cwd: localDir, Agent: "claude"},
+		},
+	}
+	got, err := spaceDir(snap, "s1")
+	if err != nil {
+		t.Fatalf("spaceDir(s1) error = %v, want local pane t1 in %s", err, localDir)
+	}
+	if got.Pane != "t1" {
+		t.Fatalf("spaceDir(s1).Pane = %q, want t1", got.Pane)
+	}
+}
+
+// Round-2 blocking probe (Carbon Bug 2, NeonH §2): workerSessionWithRoots and
+// brainHost.ReadSession must never pass remote Session* fields into local
+// WorkerLog or read a local transcript file for a remote pane.
+func TestReadSessionAndJournalNeverReadLocalTranscriptForRemotePane(t *testing.T) {
+	logDir := t.TempDir()
+	localTranscript := filepath.Join(logDir, "projects", "-local-secret", "11111111-1111-1111-1111-111111111111.jsonl")
+	if err := os.MkdirAll(filepath.Dir(localTranscript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(localTranscript, []byte(`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"LOCAL SECRET TRANSCRIPT"}]}}`+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	h := newHarness(t, func(c *Config) {
+		c.WorkerLog = workerlog.New(workerlog.Options{
+			ClaudeProjects: filepath.Join(logDir, "projects"),
+			CodexSessions:  filepath.Join(logDir, "sessions"),
+		})
+	})
+	ctx := context.Background()
+	h.sup.HandleTransition(ctx, herdr.Transition{
+		PaneID: "box~t4", To: herdr.StateDone, At: h.clock.Now(),
+		Agent: "claude",
+		Session: &herdr.AgentSession{
+			Source: "herdr:claude", Kind: herdr.SessionKindPath, Value: localTranscript,
+		},
+	})
+
+	sess := workerSessionWithRoots(state.Agent{
+		PaneID:        "box~t4",
+		Kind:          "claude",
+		SessionSource: "herdr:claude",
+		SessionKind:   herdr.SessionKindPath,
+		SessionValue:  localTranscript,
+		Cwd:           logDir,
+	}, workerlog.ProcessRoots{})
+	if sess.Source != "" || sess.Kind != "" || sess.Value != "" || sess.Cwd != "" {
+		t.Errorf("workerSessionWithRoots(remote box~t4) = %+v, want empty session fields", sess)
+	}
+
+	sr, err := (brainHost{h.sup}).ReadSession(ctx, "box~t4")
+	if err == nil || !strings.Contains(err.Error(), "another machine") {
+		t.Fatalf("ReadSession(box~t4) = (%+v, %v), want remote refusal ('another machine')", sr, err)
+	}
+}
+
+// Round-2 blocking probe (Carbon Bug 3): Supervisor.Spaces (GET /api/spaces)
+// must omit remote-only workspaces whose panes all run on another machine.
+func TestSpacesOmitsRemoteOnlyWorkspace(t *testing.T) {
+	w := newSpawnWorld(t)
+	w.srv.SetWorkspace(herdr.WorkspaceInfo{WorkspaceID: "s-remote", Label: "remote"})
+	w.srv.SetPane(herdr.PaneInfo{PaneID: "box~t4", WorkspaceID: "s-remote", Cwd: "/remote/app", Agent: "claude"})
+
+	view, err := w.sup.Spaces(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Spaces) != 0 {
+		t.Fatalf("Spaces() listed remote-only space: %+v", view.Spaces)
+	}
+}
+
+// Round-2 probe (Carbon §3): spaceFolder must not clobber an unreadable local
+// worktree CheckoutPath when iterating remote panes in the same workspace.
+func TestSpaceFolderPreservesUnreadableWorktreeWhenOnlyRemotePanes(t *testing.T) {
+	wtPath := "/unreadable/worktree"
+	w := herdr.WorkspaceInfo{
+		WorkspaceID: "s-wt",
+		Label:       "wt",
+		Worktree:    &herdr.WorkspaceWorktree{CheckoutPath: wtPath, Linked: true},
+	}
+	panes := []herdr.PaneInfo{
+		{PaneID: "box~t4", WorkspaceID: "s-wt", Cwd: "/remote/app", Agent: "claude"},
+	}
+
+	path, unreadable, linked := spaceFolder(w, panes, func(string) bool { return false })
+	if path != wtPath || !unreadable || !linked {
+		t.Fatalf("spaceFolder = (%q, unreadable=%v, linked=%v), want (%q, true, true)", path, unreadable, linked, wtPath)
+	}
+}
