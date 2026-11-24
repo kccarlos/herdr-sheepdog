@@ -818,7 +818,9 @@ func TestBaseStatus(t *testing.T) {
 		}
 	}
 
-	// Cancelled by job time limit counts red; external cancel + success counts green.
+	// Cancelled by job time limit counts red; external cancel + success is unknown
+	// (PR A rule 4 / review A4: a clean cancel never turns the base green and keeps
+	// the last known state).
 	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[{"id":20,"status":"completed","conclusion":"cancelled"},{"id":19,"status":"completed","conclusion":"success"}]}`)
 	writeGH(t, gh, "run-jobs.json", `{"jobs":[{"id":501,"conclusion":"cancelled"}]}`)
 	writeGH(t, gh, "annotations.json", `[{"message":"The job has exceeded the maximum execution time of 60m0s"}]`)
@@ -826,8 +828,8 @@ func TestBaseStatus(t *testing.T) {
 		t.Fatalf("cancelled by limit = %+v, %v; want red id=20", got, err)
 	}
 	writeGH(t, gh, "annotations.json", `[{"message":"The run was canceled by @someone."}]`)
-	if got, err := fixtureGit(t).BaseStatus(ctx, repo); err != nil || got.Red || !got.Known {
-		t.Fatalf("cancelled externally = %+v, %v; want green", got, err)
+	if got, err := fixtureGit(t).BaseStatus(ctx, repo); err != nil || got.Red || got.Known {
+		t.Fatalf("cancelled externally = %+v, %v; want unknown", got, err)
 	}
 
 	// Read error returns err (never flips red).
@@ -877,6 +879,124 @@ func TestBaseStatusHeadCommit(t *testing.T) {
 	got, err = fixtureGit(t).BaseStatus(ctx, repo)
 	if err != nil || !got.Red || !got.Known {
 		t.Fatalf("paged runs (fail on page 2) = %+v, %v; want red known", got, err)
+	}
+}
+
+// TestBaseStatusPushOnlyWorkflowIgnored verifies finding 6 (trial 0ae4dd5,
+// seq 46): a push-only workflow (pages.yml, or GitHub's dynamic Pages run with
+// no workflow file at head) is not counted and must not redden the base.
+// Workflow files are committed at head and runs carry "path" so PR A step 2
+// only wires the workflow-predicate argument on BaseStatus.
+func TestBaseStatusPushOnlyWorkflowIgnored(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	commitFile(t, repo, ".github/workflows/ci.yml", "name: CI\non: [push, pull_request]\n")
+	commitFile(t, repo, ".github/workflows/release.yml", "name: Release\non: push\n")
+	head := commitFile(t, repo, ".github/workflows/pages.yml", "name: Pages\non: push\n")
+	runGit(t, repo, "push", "origin", "main")
+	writeGH(t, gh, "base-ref.json", `{"object":{"sha":"`+head+`"}}`)
+
+	// Trial 0ae4dd5 (seq 46): CI cancelled with no failed job, Release passed,
+	// Pages failed (run 45325825569) -> unknown, not red.
+	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[`+
+		`{"id":45325825560,"path":".github/workflows/ci.yml","head_sha":"`+head+`","status":"completed","conclusion":"cancelled"},`+
+		`{"id":45325825565,"path":".github/workflows/release.yml","head_sha":"`+head+`","status":"completed","conclusion":"success"},`+
+		`{"id":45325825569,"path":".github/workflows/pages.yml","head_sha":"`+head+`","status":"completed","conclusion":"failure"}]}`)
+	writeGH(t, gh, "run-jobs.json", `{"jobs":[{"id":601,"name":"Test","conclusion":"cancelled"}]}`)
+	writeGH(t, gh, "annotations.json", `[]`)
+	got, err := fixtureGit(t).BaseStatus(ctx, repo)
+	if err != nil || got.Known || got.Red {
+		t.Errorf("0ae4dd5 (pages failure + clean CI cancel + release pass) = %+v, %v; want unknown (Known=false, Red=false)", got, err)
+	}
+
+	// GitHub's dynamic Pages run has no workflow file at head: not counted, so
+	// its failure must not redden a passing counted CI run.
+	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[`+
+		`{"id":45325825569,"path":"dynamic/pages/pages-build-deployment","head_sha":"`+head+`","status":"completed","conclusion":"failure"},`+
+		`{"id":45325825570,"path":".github/workflows/ci.yml","head_sha":"`+head+`","status":"completed","conclusion":"success"}]}`)
+	got, err = fixtureGit(t).BaseStatus(ctx, repo)
+	if err != nil || got.Red || !got.Known || got.ID != 45325825570 {
+		t.Errorf("dynamic pages failure + CI success = %+v, %v; want green id=45325825570", got, err)
+	}
+}
+
+// TestBaseStatusCancelledWithFailedJobIsRed verifies finding 8 (trial 02e8f06,
+// seq 128): a counted CI run that ended cancelled after its Lint job failed
+// (run 45336002997) makes the base red even alongside a passing push-only
+// Release run (45336003006).
+func TestBaseStatusCancelledWithFailedJobIsRed(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	commitFile(t, repo, ".github/workflows/ci.yml", "name: CI\non: [push, pull_request]\n")
+	head := commitFile(t, repo, ".github/workflows/release.yml", "name: Release\non: push\n")
+	runGit(t, repo, "push", "origin", "main")
+	writeGH(t, gh, "base-ref.json", `{"object":{"sha":"`+head+`"}}`)
+
+	// Trial 02e8f06: Release succeeded (45336003006), CI was cancelled (45336002997)
+	// with Lint failing and another job cancelled (no timeout annotation).
+	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[`+
+		`{"id":45336003006,"path":".github/workflows/release.yml","head_sha":"`+head+`","status":"completed","conclusion":"success"},`+
+		`{"id":45336002997,"path":".github/workflows/ci.yml","head_sha":"`+head+`","status":"completed","conclusion":"cancelled"}]}`)
+	writeGH(t, gh, "run-jobs.json", `{"jobs":[{"id":701,"name":"Lint","conclusion":"failure"},{"id":702,"name":"Test","conclusion":"cancelled"}]}`)
+	writeGH(t, gh, "annotations.json", `[]`)
+
+	got, err := fixtureGit(t).BaseStatus(ctx, repo)
+	if err != nil || !got.Red || !got.Known || got.ID != 45336002997 {
+		t.Fatalf("02e8f06 (cancelled CI with failed Lint job + release pass) = %+v, %v; want red known id=45336002997", got, err)
+	}
+}
+
+// TestBaseStatusGreenNeedsCountedSuccess verifies finding 8 (trial 545155a,
+// seq 66, and rule 3): green names a passing counted CI run (not a push-only
+// Release run listed ahead of it), and a Release-only success leaves the
+// verdict unknown.
+func TestBaseStatusGreenNeedsCountedSuccess(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	commitFile(t, repo, ".github/workflows/ci.yml", "name: CI\non: [push, pull_request]\n")
+	head := commitFile(t, repo, ".github/workflows/release.yml", "name: Release\non: push\n")
+	runGit(t, repo, "push", "origin", "main")
+	writeGH(t, gh, "base-ref.json", `{"object":{"sha":"`+head+`"}}`)
+
+	// Trial 545155a: Release and CI both passed; Release listed first must not
+	// be named as the green run.
+	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[`+
+		`{"id":45330000001,"path":".github/workflows/release.yml","head_sha":"`+head+`","status":"completed","conclusion":"success"},`+
+		`{"id":45330000002,"path":".github/workflows/ci.yml","head_sha":"`+head+`","status":"completed","conclusion":"success"}]}`)
+	got, err := fixtureGit(t).BaseStatus(ctx, repo)
+	if err != nil || got.Red || !got.Known || got.ID != 45330000002 {
+		t.Errorf("545155a (release + CI pass) = %+v, %v; want green known id=45330000002", got, err)
+	}
+
+	// Push-only Release success alone must not turn the base green.
+	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[`+
+		`{"id":45336003006,"path":".github/workflows/release.yml","head_sha":"`+head+`","status":"completed","conclusion":"success"}]}`)
+	got, err = fixtureGit(t).BaseStatus(ctx, repo)
+	if err != nil || got.Red || got.Known {
+		t.Errorf("release-only success = %+v, %v; want unknown (Known=false, Red=false)", got, err)
+	}
+}
+
+// TestBaseStatusSkippedAloneIsUnknown verifies PR A rule 3 (review A1): one
+// counted workflow run that ended completed/skipped (e.g. jobs gated on
+// github.event_name == 'pull_request') must return Known=false rather than
+// turning the base green.
+func TestBaseStatusSkippedAloneIsUnknown(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	head := commitFile(t, repo, ".github/workflows/ci.yml", "name: CI\non: [push, pull_request]\n")
+	runGit(t, repo, "push", "origin", "main")
+	writeGH(t, gh, "base-ref.json", `{"object":{"sha":"`+head+`"}}`)
+	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[`+
+		`{"id":45339000001,"path":".github/workflows/ci.yml","head_sha":"`+head+`","status":"completed","conclusion":"skipped"}]}`)
+
+	got, err := fixtureGit(t).BaseStatus(ctx, repo)
+	if err != nil || got.Red || got.Known {
+		t.Fatalf("skipped alone = %+v, %v; want unknown (Known=false, Red=false)", got, err)
 	}
 }
 

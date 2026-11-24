@@ -472,3 +472,98 @@ func TestBaseRedFailedTellFallbackWakesOncePerSpell(t *testing.T) {
 		t.Fatalf("base_red_held wakes = %d, want 1 (all: %+v)", heldWakes, l.state().Project.Wakes)
 	}
 }
+
+// TestBaseStatusPullRequestTargetCounts verifies PR A rule 1 through
+// observeBaseLocked with the real parsePRWorkflow parser (design review round 2):
+// a push-only workflow (pages.yml) is ignored and must not redden the base,
+// while a workflow with on: [push, pull_request_target] is counted and reddens
+// the base when its push run fails.
+func TestBaseStatusPullRequestTargetCounts(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	t.Run("push_only_ignored", func(t *testing.T) {
+		t.Parallel()
+		repo, _ := initGitRepoWithRemote(t)
+		githubOrigin(t, repo)
+		gh := bindRepoFakeGH(t, repo)
+		head := commitFile(t, repo, ".github/workflows/pages.yml", "name: Pages\non: push\n")
+		gitIn(t, repo, "push", "origin", "main")
+		writeGHFile(t, gh, "base-ref.json", `{"object":{"sha":"`+head+`"}}`)
+		writeBaseRuns(t, gh, `{"workflow_runs":[{"id":45325825569,"path":".github/workflows/pages.yml","head_sha":"`+head+`","status":"completed","conclusion":"failure"}]}`)
+
+		eng := newGitTestEngine(t, testPaths(t), nil)
+		s := flow.State{Settings: flow.DefaultSettings()}
+		s.Project.Folder = repo
+		eng.observeBaseLocked(ctx, "project", &s)
+		if s.Project.Base != nil && s.Project.Base.Red {
+			t.Fatalf("push-only pages.yml failure reddened base: %+v", s.Project.Base)
+		}
+		if len(s.Project.Wakes) != 0 {
+			t.Fatalf("wakes on push-only failure = %+v, want none", s.Project.Wakes)
+		}
+	})
+
+	t.Run("pull_request_target_counts", func(t *testing.T) {
+		t.Parallel()
+		repo, _ := initGitRepoWithRemote(t)
+		githubOrigin(t, repo)
+		gh := bindRepoFakeGH(t, repo)
+		head := commitFile(t, repo, ".github/workflows/ci.yml", "name: CI\non: [push, pull_request_target]\n")
+		gitIn(t, repo, "push", "origin", "main")
+		writeGHFile(t, gh, "base-ref.json", `{"object":{"sha":"`+head+`"}}`)
+		writeBaseRuns(t, gh, `{"workflow_runs":[{"id":45340000001,"path":".github/workflows/ci.yml","head_sha":"`+head+`","status":"completed","conclusion":"failure"}]}`)
+
+		eng := newGitTestEngine(t, testPaths(t), nil)
+		s := flow.State{Settings: flow.DefaultSettings()}
+		s.Project.Folder = repo
+		eng.observeBaseLocked(ctx, "project", &s)
+		if s.Project.Base == nil || !s.Project.Base.Red {
+			t.Fatalf("pull_request_target failure did not redden base: %+v", s.Project.Base)
+		}
+		if len(s.Project.Wakes) != 1 || s.Project.Wakes[0].Key != "base_red@"+head+"@1" {
+			t.Fatalf("wakes on pull_request_target failure = %+v, want 1 base_red@%s@1", s.Project.Wakes, head)
+		}
+	})
+}
+
+// TestBaseRedCleanCancelStaysRed verifies PR A (finding 8, rule 4): once the
+// base is red, a later head whose counted CI run ends with a clean cancel (no
+// failed or timed-out job) returns unknown, keeps the base red, emits no
+// base_green wake, and keeps N38 holding behind PRs.
+func TestBaseRedCleanCancelStaysRed(t *testing.T) {
+	t.Parallel()
+	l := newLanding(t)
+	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
+	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
+
+	// Head 1 (trial 291cd69 shape): counted CI fails -> base turns red.
+	redHead := commitFile(t, l.repo, ".github/workflows/ci.yml", "name: CI\non: [push, pull_request]\n")
+	gitIn(t, l.repo, "push", "origin", "main")
+	writeGHFile(t, l.gh, "base-ref.json", `{"object":{"sha":"`+redHead+`"}}`)
+	writeBaseRuns(t, l.gh, `{"workflow_runs":[{"id":45335000001,"path":".github/workflows/ci.yml","head_sha":"`+redHead+`","status":"completed","conclusion":"failure"}]}`)
+	l.pass()
+	if b := l.state().Project.Base; b == nil || !b.Red {
+		t.Fatalf("after red head: base = %+v, want red", b)
+	}
+
+	// Head 2: clean cancel of counted CI (no failed job, no timeout annotation) ->
+	// unknown, so the base stays red with no base_green wake and no update-branch.
+	cancelHead := commitFile(t, l.repo, "note.txt", "next commit\n")
+	gitIn(t, l.repo, "push", "origin", "main")
+	writeGHFile(t, l.gh, "base-ref.json", `{"object":{"sha":"`+cancelHead+`"}}`)
+	writeBaseRuns(t, l.gh, `{"workflow_runs":[{"id":45335000002,"path":".github/workflows/ci.yml","head_sha":"`+cancelHead+`","status":"completed","conclusion":"cancelled"}]}`)
+	writeGHFile(t, l.gh, "run-jobs.json", `{"jobs":[{"id":901,"name":"Test","conclusion":"cancelled"}]}`)
+	writeGHFile(t, l.gh, "annotations.json", `[{"message":"The run was canceled by @someone."}]`)
+	l.pass()
+
+	if b := l.state().Project.Base; b == nil || !b.Red {
+		t.Fatalf("after clean cancel: base = %+v, want still red", b)
+	}
+	if wakes := l.state().Project.Wakes; len(wakes) != 1 || wakes[0].Key != "base_red@"+redHead+"@1" {
+		t.Fatalf("wakes after clean cancel = %+v, want only base_red@%s@1 (no base_green)", wakes, redHead)
+	}
+	if got := ghCalls(t, l.gh, "api -X PUT"); len(got) != 0 {
+		t.Fatalf("update-branch called after clean cancel on red base: %q", got)
+	}
+}
