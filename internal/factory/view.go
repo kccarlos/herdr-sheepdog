@@ -75,7 +75,9 @@ func projectViewOf(s flow.State) ProjectView {
 	for _, tv := range GraphViewOf(s, nil).Tasks {
 		counts[tv.Stage]++
 	}
-	if n := len(s.Project.PlanReviews); n > 0 {
+	if open := len(flow.OpenPlanFindings(s.Project)); open > 0 {
+		status = fmt.Sprintf("%d plan findings open, waiting on the coordinator", open)
+	} else if n := len(s.Project.PlanReviews); n > 0 {
 		if pr := s.Project.PlanReviews[n-1]; pr.Accepted.IsZero() && pr.Verdict == "" && pr.Run != nil && flow.RunLive(pr.Run.RunID, pr.Run.Run) {
 			status = "Plan review"
 		}

@@ -12,7 +12,7 @@ const (
 	AskStartCoordinator, AskStopCoordinator, AskFinalJournal         = "coordinator", "stop_coordinator", "final_journal"
 	AskCoordGoOn, AskCoordDialogStuck, AskDeliverWakes, AskHeartbeat = "coord_go_on", "coord_dialog_stuck", "deliver_wakes", "heartbeat"
 	AskStartPlanReviewer, AskStopPlanReviewer, AskAcceptPlan         = "start_plan_reviewer", "stop_plan_reviewer", "accept_plan"
-	coordStartWindow, firstDialogStuck                               = time.Hour, 1
+	coordStartWindow, firstDialogStuck, planFindingsHoldBeats        = time.Hour, 1, 2
 )
 
 // ProjectIn is what a project rule sees (design.md section 6).
@@ -63,7 +63,7 @@ func (in ProjectIn) heartbeatDue() bool {
 
 func (in ProjectIn) planReviewStep() (start, accept bool) {
 	if pr := in.lastPlanReview(); pr != nil && pr.Accepted.IsZero() {
-		return false, pr.Verdict != "" && len(OpenPlanFindings(in.Project)) == 0
+		return false, pr.Verdict != "" && (len(OpenPlanFindings(in.Project)) == 0 || in.past(pr.At, planFindingsHoldBeats*in.HeartbeatMinutes))
 	}
 	if !slices.ContainsFunc(in.Tasks, func(t Task) bool { return !Ended(t) && t.Unreviewed }) {
 		return false, false
@@ -75,7 +75,11 @@ func (in ProjectIn) planReviewStep() (start, accept bool) {
 }
 
 func (in ProjectIn) planReviewStopWhy() string {
-	if pr := in.lastPlanReview(); pr != nil && pr.Accepted.IsZero() && pr.Verdict == "" && pr.Run != nil && in.PlanRun.State != RunNone {
+	pr := in.lastPlanReview()
+	if pr != nil && pr.Verdict != "" && pr.Run != nil && pr.Run.RunID != "" {
+		return "plan reviewer report was accepted"
+	}
+	if pr != nil && pr.Accepted.IsZero() && pr.Verdict == "" && pr.Run != nil && in.PlanRun.State != RunNone {
 		switch {
 		case in.PlanRun.State == RunGone, in.PlanRun.State == RunIdle:
 			return "plan reviewer " + map[RunState]string{RunGone: "terminal is gone", RunIdle: "went idle without a report"}[in.PlanRun.State]

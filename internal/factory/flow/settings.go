@@ -123,7 +123,7 @@ const DiskFullMin, DiskFullMax = 50, 99
 // (design.md 10.1, D12).
 func DefaultSettings() Settings {
 	return Settings{
-		ReviewRounds: 2, MaxRounds: 5,
+		ReviewRounds: 2, MaxRounds: 5, PlanReviewRounds: 1,
 		RetroAfterRoundsWithMajors: 2, RetroFromRound: 3, RetrosPerTask: 1,
 		ChecksGraceMinutes: 5, CIStalledMinutes: 90, MainRedMinutes: 60, CIFailsPerHour: 3, BuildHours: 4, FlakeReruns: 1,
 		StartMinutes: 2, IdleGraceSeconds: 20, QuietMinutes: 20, InterruptSeconds: 90, ReviewMinutes: 45, BlockedMinutes: 10,
