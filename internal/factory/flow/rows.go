@@ -789,10 +789,8 @@ func RecentCIFails(t Task, now time.Time) []CIFail {
 		return nil
 	}
 	cutoff := now.Add(-time.Hour)
-	for _, r := range t.Recaps {
-		if r.Decided != nil && r.Decided.At.After(cutoff) {
-			cutoff = r.Decided.At
-		}
+	if last := LastRecapDecidedAt(t); last.After(cutoff) {
+		cutoff = last
 	}
 	seen := map[string]bool{}
 	var out []CIFail

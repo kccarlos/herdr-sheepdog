@@ -1,5 +1,7 @@
 package flow
 
+import "time"
+
 // Ladder answers (design.md 4.6). NoLadderRow is the catch-all's: slice 1
 // has no ladder row for it, so no task row acts on it and N43 wakes the
 // coordinator.
@@ -82,7 +84,12 @@ func newestAttemptRetro(in In) (Round, []Round, bool) {
 }
 
 func noRecapSinceRetro(in In, round int) bool {
-	last := LastRecapDecidedAt(in.Task)
+	var last time.Time
+	for _, r := range in.Task.Recaps {
+		if r.Decided != nil && r.Decided.Choice != "override" && r.Decided.Choice != ChoiceContinue && r.Decided.At.After(last) {
+			last = r.Decided.At
+		}
+	}
 	return last.IsZero() || retroAt(in.Task, len(in.Task.Attempts), round).After(last)
 }
 

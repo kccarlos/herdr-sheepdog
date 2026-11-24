@@ -139,12 +139,15 @@ func (e *Engine) acceptReadyLocked(id string, s *flow.State, role string, ti int
 		}
 		r := flow.RejectableRound(*a, h)
 		ladder := flow.Ladder(flow.In{Task: *t, Settings: s.Settings, Facts: flow.Facts{
-			SplitFromHadRetro: splitFromHadRetro(s.Tasks, *t),
-			RetroUnavailable:  e.retroUnavailableLocked(ctx, *t, s.Settings),
+			SplitFromHadRetro: flow.SplitFromHadRetro(s.Tasks, *t),
+			RetroUnavailable:  retroUnavailable(*t, s.Settings, flow.ResolveFacts{}),
 		}})
 		if rel != flow.RelSame || r == nil || ladder != flow.Fix {
 			if rel == flow.RelSame && ladder == flow.RecapAnswer {
 				return e.refuse(id, "nothing_to_reject", "Nothing to reject: a recap is open and the coordinator decides; there is nothing for you to do.")
+			}
+			if rel == flow.RelSame && ladder == flow.RetroAnswer {
+				return e.refuse(id, "nothing_to_reject", "Nothing to reject: a retro is next for this head; there is nothing for you to do.")
 			}
 			return e.refuse(id, "nothing_to_reject", "Nothing to reject: the newest round covering the current head must be an unrejected reviewer changes verdict with no new commit (after a commit, run report ready without --reject).")
 		}

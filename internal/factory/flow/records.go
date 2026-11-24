@@ -197,7 +197,6 @@ type Task struct {
 	EstimateLines int                    `json:"estimate_lines"`
 	Request       map[string][]Candidate `json:"request,omitempty"`
 	SplitFrom     string                 `json:"split_from,omitempty"`
-	HadRetro      bool                   `json:"had_retro,omitempty"`
 	Done          *Merged                `json:"done,omitempty"`
 	Closed        *Closed                `json:"closed,omitempty"`
 	Dropped       *Dropped               `json:"dropped,omitempty"`

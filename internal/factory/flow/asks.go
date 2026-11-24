@@ -179,12 +179,7 @@ func GateNoSinceRecap(asks []Ask, t Task, att *Attempt) *Ask {
 	if att == nil {
 		return nil
 	}
-	var lastRecap time.Time
-	for _, rc := range t.Recaps {
-		if rc.Decided != nil && rc.Decided.At.After(lastRecap) {
-			lastRecap = rc.Decided.At
-		}
-	}
+	lastRecap := LastRecapDecidedAt(t)
 	for i := len(asks) - 1; i >= 0; i-- {
 		a := &asks[i]
 		inAttempt := a.Head != "" && (slices.ContainsFunc(att.Ready, func(r Ready) bool { return r.Head == a.Head }) ||

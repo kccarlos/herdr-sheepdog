@@ -1,6 +1,9 @@
 package flow
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // Rel is how one commit stands to another (design.md 3.1).
 type Rel string
@@ -225,15 +228,27 @@ func AttemptRetros(a Attempt) []Round {
 	return out
 }
 
-// LastRecapDecidedAt returns the newest decided recap timestamp on t, or zero.
+// LastRecapDecidedAt returns the newest coordinator recap decision timestamp on
+// t, or zero. Owner overrides close a recap temporarily while covering H and
+// resume normal rules once spent (design.md 4.1 N6, 4.3b N19b).
 func LastRecapDecidedAt(t Task) time.Time {
 	var last time.Time
 	for _, r := range t.Recaps {
-		if r.Decided != nil && r.Decided.At.After(last) {
+		if r.Decided != nil && r.Decided.Choice != "override" && r.Decided.At.After(last) {
 			last = r.Decided.At
 		}
 	}
 	return last
+}
+
+// SplitFromHadRetro reports whether task's split parent already has a retro
+// record (design.md 4.5 N24, 4.6 L11, 8 I1).
+func SplitFromHadRetro(tasks []Task, task Task) bool {
+	if task.SplitFrom == "" {
+		return false
+	}
+	pi := slices.IndexFunc(tasks, func(p Task) bool { return p.ID == task.SplitFrom })
+	return pi >= 0 && len(tasks[pi].Retros) > 0
 }
 
 func retroAt(t Task, attempt, round int) time.Time {

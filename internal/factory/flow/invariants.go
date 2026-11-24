@@ -62,7 +62,7 @@ func CheckInvariants(snap InvariantSnapshot) []InvariantViolation {
 					pfx = "parked task " + t.ID + " (stop_runs exhausted)"
 				}
 			case rLive && !snap.Skipped[t.ID]:
-				rev, in, want := a.Review, In{Task: t, Settings: s.Settings, Now: snap.Now}, Review
+				rev, in, want := a.Review, In{Task: t, Settings: s.Settings, Facts: Facts{SplitFromHadRetro: SplitFromHadRetro(s.Tasks, t)}, Now: snap.Now}, Review
 				if rev.Role() == RoleRetro {
 					want = RetroAnswer
 				}
