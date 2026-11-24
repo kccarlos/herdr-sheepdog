@@ -2411,11 +2411,11 @@ func (e *Engine) execTellFindings(ctx context.Context, id string, s *flow.State,
 		a.SizeCap = nextCap
 		msg := fmt.Sprintf("Retro round %d granted one bounded fix (%d major(s) in %s; size cap %d lines): %s — make only this bounded fix, commit, and run %s again.",
 			r.N, r.Majors, r.ReportPath, nextCap, change, rc)
-		err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false)
+		dec, err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false, fmt.Sprintf("the bounded retro fix from round %d (size cap %d)", r.N, nextCap))
 		if err != nil {
 			a.SizeCap = prevCap
 		}
-		return fmt.Sprintf("told worker bounded retro fix from round %d (size cap %d)", r.N, nextCap), false, err
+		return dec, false, err
 	}
 	msg := fmt.Sprintf("Review round %d found %d major(s) in %s — fix them, commit, and run %s again, or when every finding is wrong and you change nothing, run %s factory report ready --reject \"<why>\".",
 		r.N, r.Majors, r.ReportPath, rc, bin)
