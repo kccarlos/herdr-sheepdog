@@ -62,7 +62,8 @@ func (e *Engine) reconcileAlertLocked(id string, s *flow.State, key string, acti
 			if delete(s.Project.Alerts, key); len(s.Project.Alerts) == 0 {
 				s.Project.Alerts = nil
 			}
-			if !e.saveLocked(id, *s) {
+			why := fmt.Sprintf("%s; lasted %dm", cur.Cause, max(0, int(e.now().Sub(cur.At)/time.Minute)))
+			if !e.commitLogLocked(id, s, LogLine{By: "engine", Rule: cmp.Or(cur.Rule, "alert"), Asked: []string{cur.Kind}, Decision: "alert cleared: " + cur.Kind, Why: why}) {
 				setProjectAlert(s, key, cur)
 			}
 		}
@@ -183,10 +184,11 @@ func (e *Engine) observeCoordSignInLocked(ctx context.Context, id string, s *flo
 		if runSignedOut {
 			s.Project.Acts = append(s.Project.Acts, flow.Act{Key: "j5@" + flow.CoordStuckKey(run), Result: "done", At: now})
 		}
-		if delete(s.Project.Alerts, flow.AlertAgentsDown); len(s.Project.Alerts) == 0 {
-			s.Project.Alerts = nil
+		if _, ok := s.Project.Alerts[flow.AlertAgentsDown]; ok {
+			e.reconcileAlertLocked(id, s, flow.AlertAgentsDown, false, flow.Alert{}, "", "")
+		} else if runSignedOut {
+			e.saveLocked(id, *s)
 		}
-		e.saveLocked(id, *s)
 		return false
 	}
 	raiseJ5(heldCLI)
@@ -257,12 +259,22 @@ func (e *Engine) observeConsentLocked(ctx context.Context, id string, s *flow.St
 		return terr
 	}
 	prev := e.consentStreaks[id]
+	streak := prev == badKind || badKind == "timeout" && prev == "slow"
 	e.consentStreaks[id] = badKind
-	if prev == badKind || s.Project.HasAlert(flow.AlertConsentPrompt) {
+	if streak && (badKind != "timeout" || e.git.Stalled(s.Project.Folder)) || s.Project.HasAlert(flow.AlertConsentPrompt) {
 		home, _ := os.UserHomeDir()
 		prompt, fix := consentPrompt(home, s.Project.Folder)
-		cause := fmt.Sprintf("project folder %s %s twice in herdr-core (%s)", s.Project.Folder, map[string]string{"timeout": "timed out", "blank": "returned blank"}[badKind], prompt)
+		cause := fmt.Sprintf("project folder %s returned blank twice in herdr-core (%s)", s.Project.Folder, prompt)
+		if badKind == "timeout" {
+			cause = fmt.Sprintf("project folder %s did not answer twice in herdr-core: the volume is stalling, or a macOS prompt is waiting (%s)", s.Project.Folder, prompt)
+			fix += "; if no prompt is showing, the volume is slow and this clears by itself"
+		}
 		e.reconcileAlertLocked(id, s, flow.AlertConsentPrompt, true, flow.Alert{Kind: flow.AlertConsentPrompt, Cause: cause, Fix: fix, At: now, Rule: "J3"}, "J3", "")
+	} else if badKind == "timeout" && streak {
+		e.consentStreaks[id] = "slow"
+		if prev == "timeout" {
+			e.logEvent("factory.volume_slow", map[string]string{"project": id, "folder": s.Project.Folder})
+		}
 	}
 	return nil
 }
