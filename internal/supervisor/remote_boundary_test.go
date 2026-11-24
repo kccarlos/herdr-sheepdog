@@ -413,3 +413,39 @@ func TestSpaceFolderPreservesUnreadableWorktreeWhenOnlyRemotePanes(t *testing.T)
 		t.Fatalf("spaceFolder = (%q, unreadable=%v, linked=%v), want (%q, true, true)", path, unreadable, linked, wtPath)
 	}
 }
+
+// Round-3 blocking probe (Carbon §2.1): spaceOf must exclude remote panes
+// carrying a local space's herdr.space label so they do not appear in the local
+// space's Agents/Shells (breaking iOS SpaceDetailView's changesPane) or block
+// CloseSpace when busy.
+func TestSpaceOfMixedSpaceExcludesRemotePanes(t *testing.T) {
+	w := spacesWorld(t) // local space "w3" in w.bench with idle local "w3:p1" (claude) and shell "w3:p2"
+	w.srv.SetPane(herdr.PaneInfo{PaneID: "box~t4", WorkspaceID: "w3", Agent: "claude"})
+	w.srv.SetPane(herdr.PaneInfo{PaneID: "box~t5", WorkspaceID: "w3"})
+	w.sup.HandleTransition(context.Background(), herdr.Transition{
+		PaneID: "box~t4", To: herdr.StateWorking, At: w.clock.Now(),
+		Agent: "claude", WorkspaceID: "w3", WorkspaceLabel: "bench",
+	})
+
+	view, err := w.sup.Spaces(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Spaces) != 1 {
+		t.Fatalf("Spaces() = %+v, want 1 local space w3", view.Spaces)
+	}
+	sp := view.Spaces[0]
+	// FAILS at HEAD: paneLess("box~t4", "w3:p1") puts remote "box~t4" at sp.Agents[0],
+	// breaking SpacesView.swift's changesPane (space.agents.first?.paneID).
+	if len(sp.Agents) != 1 || sp.Agents[0].PaneID != "w3:p1" {
+		t.Errorf("mixed local space Agents = %+v, want only local [w3:p1]", sp.Agents)
+	}
+	// FAILS at HEAD: sp.Shells == ["box~t5", "w3:p2"].
+	if len(sp.Shells) != 1 || sp.Shells[0] != "w3:p2" {
+		t.Errorf("mixed local space Shells = %v, want only local [w3:p2]", sp.Shells)
+	}
+	// FAILS at HEAD: ErrSpaceBusy because remote "box~t4" is working.
+	if _, err := w.sup.CloseSpace(context.Background(), "w3"); err != nil {
+		t.Errorf("CloseSpace(w3) = %v, want nil (remote pane must not block closing local space)", err)
+	}
+}
