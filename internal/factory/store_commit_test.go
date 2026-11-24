@@ -704,10 +704,45 @@ func TestStore_WaitingLineIsWrittenAfterAFailedCommit(t *testing.T) {
 	}
 }
 
-// Test 8 (S2, S3, S4, §2):
-// Table: {raise} × {append fails, save fails} × {go on in process, restart};
-// recover, one pass. State and log decisions are equal in both columns; a held
-// alert shows in ProjectStatus in the in-process column.
+// assertAlertLogMatchesState checks S1/S3 on disk plus the alert-episode
+// invariant for kind: raise and clear lines alternate starting with raise,
+// Seq is strictly increasing, and kind is active in state.json iff the last
+// matching alert line is a raise.
+func assertAlertLogMatchesState(t *testing.T, statePath, logPath, kind string) (flow.State, []LogLine) {
+	t.Helper()
+	st, lines := assertLogInvariants(t, statePath, logPath)
+	clearDec := "alert cleared: " + kind
+	active := false
+	var matched []LogLine
+	for _, l := range lines {
+		if l.By != "engine" || !slices.Contains(l.Asked, kind) {
+			continue
+		}
+		matched = append(matched, l)
+		if l.Decision == clearDec {
+			if !active {
+				t.Fatalf("alert %q logged clear at Seq=%d without an active raise: %+v", kind, l.Seq, matched)
+			}
+			active = false
+		} else {
+			if active {
+				t.Fatalf("alert %q logged consecutive raise at Seq=%d without an intervening clear: %+v", kind, l.Seq, matched)
+			}
+			active = true
+		}
+	}
+	if inState := st.Project.HasAlert(kind); inState != active {
+		t.Fatalf("alert %q state/log mismatch: in state.json=%t, log implies active=%t (matched=%+v)", kind, inState, active, matched)
+	}
+	return st, lines
+}
+
+// Test 8 (S2, S3, S4, §2, trial finding 4):
+// Table: {raise, clear_cause_stays_gone, clear_cause_returns} ×
+// {append_fails, save_fails} × {go on in process, restart}; recover, pass.
+// State and log decisions are equal in both columns and satisfy
+// assertAlertLogMatchesState; a held raise shows in ProjectStatus in the
+// in-process column, and a failed clear leaves the alert active in both.
 func TestStore_FailureThenRecoveryEqualsRestart(t *testing.T) {
 	type outcome struct {
 		seq    int64
@@ -724,83 +759,202 @@ func TestStore_FailureThenRecoveryEqualsRestart(t *testing.T) {
 		return out
 	}
 
-	runColumn := func(t *testing.T, failMode string, doRestart bool) outcome {
+	runColumn := func(t *testing.T, op, failMode string, doRestart bool) outcome {
 		t.Helper()
-		w := newStoreWorld(t, "Raise recovery parity "+failMode)
+		w := newStoreWorld(t, "Alert recovery parity "+op+" "+failMode)
 		w.seedIdleCoordAndWarmUp()
-		seqBefore := w.state().Seq
 
+		injectFailure := func() {
+			t.Helper()
+			writeErr := errors.New("injected " + failMode + " failure")
+			switch failMode {
+			case "append_fails":
+				w.setWriteHooks(nil, func(string, LogLine) error { return writeErr })
+			case "save_fails":
+				w.setWriteHooks(func(string, flow.State) error { return writeErr }, nil)
+			default:
+				t.Fatalf("unknown failMode %q", failMode)
+			}
+		}
+
+		assertNoOrphansVisible := func(seq int64) {
+			t.Helper()
+			visibleMid, _, err := ProjectLog(w.ctx, w.paths, w.repo, 0)
+			if err != nil {
+				t.Fatalf("ProjectLog before recovery: %v", err)
+			}
+			for _, l := range visibleMid {
+				if l.Seq > seq {
+					t.Fatalf("ProjectLog exposed uncommitted line past state.Seq=%d before recovery: %+v", seq, l)
+				}
+			}
+		}
+
+		if op == "raise" {
+			seqBefore := w.state().Seq
+			w.setDisks(
+				DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 95, Known: true},
+				DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+			)
+			injectFailure()
+
+			// Failing pass: raise commit fails.
+			w.pass()
+
+			// Before recovery: state.json must not have the alert, and readers
+			// (ProjectLog) must hide any uncommitted orphan line (S4).
+			stMid := w.state()
+			if stMid.Seq != seqBefore || stMid.Project.HasAlert(flow.AlertDisk) {
+				t.Fatalf("after failed %s: state.json mutated (Seq=%d want %d, alerts=%+v)", failMode, stMid.Seq, seqBefore, stMid.Project.Alerts)
+			}
+			assertNoOrphansVisible(stMid.Seq)
+
+			if doRestart {
+				w.restart()
+				// A restart loses in-memory held alerts; offline/restarted status has none yet.
+				if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, flow.AlertDisk); ok {
+					t.Fatalf("restarted engine unexpectedly showed held disk alert before recovery pass: %+v", ts)
+				}
+			} else {
+				// In-process column: held alert must be visible in Engine.ProjectStatus.
+				if _, ok := cdEngineStatusAlert(t, w.eng, w.repo, flow.AlertDisk); !ok {
+					rows, _ := w.eng.ProjectStatus(w.repo)
+					t.Fatalf("in-process Engine.ProjectStatus missing held disk alert after %s; rows=%+v", failMode, rows)
+				}
+			}
+
+			// Recover writes, advance clock, and run one pass.
+			w.setWriteHooks(nil, nil)
+			w.advanceMinute()
+			w.pass()
+
+			stEnd, lines := assertAlertLogMatchesState(t, w.paths.State(w.id), w.paths.Log(w.id), flow.AlertDisk)
+			if !stEnd.Project.HasAlert(flow.AlertDisk) {
+				t.Fatalf("after recovery pass (%s, restart=%t), disk alert missing from state.json", failMode, doRestart)
+			}
+			if _, ok := statusAlert(t, w.paths, w.repo, flow.AlertDisk); !ok {
+				t.Fatalf("after recovery pass (%s, restart=%t), offline ProjectStatus missing disk alert", failMode, doRestart)
+			}
+			return outcome{
+				seq:    stEnd.Seq,
+				alerts: normalizeAlerts(stEnd.Project.Alerts),
+				logs:   extractLogDecisions(lines),
+			}
+		}
+
+		// Clear cases: first raise disk cleanly.
 		w.setDisks(
 			DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 95, Known: true},
 			DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
 		)
-		writeErr := errors.New("injected " + failMode + " failure")
-		switch failMode {
-		case "append_fails":
-			w.setWriteHooks(nil, func(string, LogLine) error { return writeErr })
-		case "save_fails":
-			w.setWriteHooks(func(string, flow.State) error { return writeErr }, nil)
-		default:
-			t.Fatalf("unknown failMode %q", failMode)
-		}
-
-		// Failing pass: raise commit fails.
 		w.pass()
+		stRaised, _ := assertAlertLogMatchesState(t, w.paths.State(w.id), w.paths.Log(w.id), flow.AlertDisk)
+		if !stRaised.Project.HasAlert(flow.AlertDisk) {
+			t.Fatal("setup bug: disk alert did not raise before clear test")
+		}
+		seqBefore := stRaised.Seq
 
-		// Before recovery: state.json must not have the alert, and readers
-		// (ProjectLog) must hide any uncommitted orphan line (S4).
-		stMid := w.state()
-		if stMid.Seq != seqBefore || stMid.Project.HasAlert(flow.AlertDisk) {
-			t.Fatalf("after failed %s: state.json mutated (Seq=%d want %d, alerts=%+v)", failMode, stMid.Seq, seqBefore, stMid.Project.Alerts)
-		}
-		visibleMid, _, err := ProjectLog(w.ctx, w.paths, w.repo, 0)
-		if err != nil {
-			t.Fatalf("ProjectLog before recovery: %v", err)
-		}
-		for _, l := range visibleMid {
-			if l.Seq > stMid.Seq {
-				t.Fatalf("ProjectLog exposed uncommitted line past state.Seq=%d before recovery: %+v", stMid.Seq, l)
-			}
-		}
-
-		if doRestart {
-			w.restart()
-			// A restart loses in-memory held alerts; offline/restarted status has none yet.
-			if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, flow.AlertDisk); ok {
-				t.Fatalf("restarted engine unexpectedly showed held disk alert before recovery pass: %+v", ts)
-			}
-		} else {
-			// In-process column: held alert must be visible in Engine.ProjectStatus.
-			if _, ok := cdEngineStatusAlert(t, w.eng, w.repo, flow.AlertDisk); !ok {
-				rows, _ := w.eng.ProjectStatus(w.repo)
-				t.Fatalf("in-process Engine.ProjectStatus missing held disk alert after %s; rows=%+v", failMode, rows)
-			}
-		}
-
-		// Recover writes, advance clock, and run one pass.
-		w.setWriteHooks(nil, nil)
+		// Cause goes away, but the clear commit fails.
+		w.setDisks(
+			DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 40, Known: true},
+			DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+		)
+		injectFailure()
 		w.advanceMinute()
 		w.pass()
 
-		stEnd, lines := assertLogInvariants(t, w.paths.State(w.id), w.paths.Log(w.id))
-		if !stEnd.Project.HasAlert(flow.AlertDisk) {
-			t.Fatalf("after recovery pass (%s, restart=%t), disk alert missing from state.json", failMode, doRestart)
+		// A clear that did not commit did not happen: alert remains in state.json
+		// and readers hide any uncommitted clear line (S4).
+		stMid := w.state()
+		if stMid.Seq != seqBefore || !stMid.Project.HasAlert(flow.AlertDisk) {
+			t.Fatalf("after failed clear (%s): state.json mutated (Seq=%d want %d, hasDisk=%t)", failMode, stMid.Seq, seqBefore, stMid.Project.HasAlert(flow.AlertDisk))
 		}
-		if _, ok := statusAlert(t, w.paths, w.repo, flow.AlertDisk); !ok {
-			t.Fatalf("after recovery pass (%s, restart=%t), offline ProjectStatus missing disk alert", failMode, doRestart)
+		assertNoOrphansVisible(stMid.Seq)
+
+		if doRestart {
+			w.restart()
 		}
-		return outcome{
-			seq:    stEnd.Seq,
-			alerts: normalizeAlerts(stEnd.Project.Alerts),
-			logs:   extractLogDecisions(lines),
+		if _, ok := cdEngineStatusAlert(t, w.eng, w.repo, flow.AlertDisk); !ok {
+			rows, _ := w.eng.ProjectStatus(w.repo)
+			t.Fatalf("Engine.ProjectStatus missing disk alert after failed clear (%s, restart=%t); rows=%+v", failMode, doRestart, rows)
+		}
+
+		switch op {
+		case "clear_cause_stays_gone":
+			w.setWriteHooks(nil, nil)
+			w.advanceMinute()
+			w.pass()
+
+			stEnd, lines := assertAlertLogMatchesState(t, w.paths.State(w.id), w.paths.Log(w.id), flow.AlertDisk)
+			if stEnd.Project.HasAlert(flow.AlertDisk) {
+				t.Fatalf("after clear recovery (%s, restart=%t), disk alert still in state.json", failMode, doRestart)
+			}
+			if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, flow.AlertDisk); ok {
+				t.Fatalf("after clear recovery (%s, restart=%t), disk alert still in live status: %+v", failMode, doRestart, ts)
+			}
+			if clears := alertClearLogs(t, w.paths, w.repo, flow.AlertDisk); len(clears) != 1 {
+				t.Fatalf("after clear recovery (%s, restart=%t), clear lines = %d (%+v), want 1", failMode, doRestart, len(clears), clears)
+			}
+			return outcome{
+				seq:    stEnd.Seq,
+				alerts: normalizeAlerts(stEnd.Project.Alerts),
+				logs:   extractLogDecisions(lines),
+			}
+
+		case "clear_cause_returns":
+			// Cause returns before recovery: the same episode continues (no clear line,
+			// no second raise line).
+			w.setDisks(
+				DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 95, Known: true},
+				DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+			)
+			w.setWriteHooks(nil, nil)
+			w.advanceMinute()
+			w.pass()
+
+			stStill, _ := assertAlertLogMatchesState(t, w.paths.State(w.id), w.paths.Log(w.id), flow.AlertDisk)
+			if !stStill.Project.HasAlert(flow.AlertDisk) {
+				t.Fatalf("after cause returned before recovery (%s, restart=%t), disk alert disappeared", failMode, doRestart)
+			}
+			if clears := alertClearLogs(t, w.paths, w.repo, flow.AlertDisk); len(clears) != 0 {
+				t.Fatalf("failed clear + returning cause logged clear lines: %+v, want 0", clears)
+			}
+			if raises := diskRaiseLogs(t, w.paths, w.repo); len(raises) != 1 {
+				t.Fatalf("failed clear + returning cause logged %d raises (%+v), want 1 (same episode)", len(raises), raises)
+			}
+
+			// When the cause really ends later, one clear line is committed.
+			w.setDisks(
+				DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 40, Known: true},
+				DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+			)
+			w.advanceMinute()
+			w.pass()
+
+			stEnd, lines := assertAlertLogMatchesState(t, w.paths.State(w.id), w.paths.Log(w.id), flow.AlertDisk)
+			if stEnd.Project.HasAlert(flow.AlertDisk) {
+				t.Fatalf("after final clear (%s, restart=%t), disk alert still in state.json", failMode, doRestart)
+			}
+			if clears := alertClearLogs(t, w.paths, w.repo, flow.AlertDisk); len(clears) != 1 {
+				t.Fatalf("after final clear (%s, restart=%t), clear lines = %d (%+v), want 1", failMode, doRestart, len(clears), clears)
+			}
+			return outcome{
+				seq:    stEnd.Seq,
+				alerts: normalizeAlerts(stEnd.Project.Alerts),
+				logs:   extractLogDecisions(lines),
+			}
+
+		default:
+			t.Fatalf("unknown op %q", op)
+			return outcome{}
 		}
 	}
 
-	for _, op := range []string{"raise"} {
+	for _, op := range []string{"raise", "clear_cause_stays_gone", "clear_cause_returns"} {
 		for _, failMode := range []string{"append_fails", "save_fails"} {
 			t.Run(op+"/"+failMode, func(t *testing.T) {
-				inProc := runColumn(t, failMode, false)
-				restarted := runColumn(t, failMode, true)
+				inProc := runColumn(t, op, failMode, false)
+				restarted := runColumn(t, op, failMode, true)
 				if !reflect.DeepEqual(inProc, restarted) {
 					t.Fatalf("%s/%s diverged between in-process and restart:\nin-process: %+v\nrestart:    %+v",
 						op, failMode, inProc, restarted)
