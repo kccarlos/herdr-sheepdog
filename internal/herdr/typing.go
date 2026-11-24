@@ -26,8 +26,6 @@ type inputRegion struct {
 
 // TypedInput reports whether the bottom-most input row contains non-dim text,
 // and whether its styling was available to make that decision.
-func HasTypedInput(screen string) bool { typed, _ := TypedInput(screen); return typed }
-
 func TypedInput(screen string) (bool, bool) {
 	reg, ok := findInputRegion(screen)
 	if !ok || !reg.styled[reg.row] {

@@ -2,27 +2,11 @@ package herdr
 
 import "testing"
 
-func TestHasTypedInput(t *testing.T) {
-	for _, tc := range []struct {
-		screen string
-		want   bool
-	}{
-		{"❯ \x1b[2mTry asking something\x1b[0m\n────────", false},
-		{"❯ fix \x1b[2mthe tests\x1b[0m\n────────", true},
-		{"\x1b[0m› hello\n  world\n────────", true},
-		{"❯ \n────────\nold output", false},
-		{"previous ❯ text\n❯ \x1b[38;2;10;20;30mtyped\x1b[0m", true},
-	} {
-		if got := HasTypedInput(tc.screen); got != tc.want {
-			t.Errorf("%q: got %v, want %v", tc.screen, got, tc.want)
-		}
-	}
-}
-
 func TestTypedInputUnclearWithoutPromptStyling(t *testing.T) {
 	for _, screen := range []string{
 		"❯ Try asking something\n────────",
 		"\x1b[31mold output\x1b[0m\n❯ Try asking something\n────────",
+		"❯ \n────────\nold output",
 		"no prompt here",
 	} {
 		if typed, known := TypedInput(screen); typed || known {
@@ -36,6 +20,10 @@ func TestTypedInputLiveRegion(t *testing.T) {
 		name, screen string
 		typed, known bool
 	}{
+		{"dim placeholder", "❯ \x1b[2mTry asking something\x1b[0m\n────────", false, true},
+		{"typed before dim", "❯ fix \x1b[2mthe tests\x1b[0m\n────────", true, true},
+		{"wrapped codex ruled", "\x1b[0m› hello\n  world\n────────", true, true},
+		{"truecolor typed after history", "previous ❯ text\n❯ \x1b[38;2;10;20;30mtyped\x1b[0m", true, true},
 		{"nbsp", "────────\n\x1b[0m❯\u00a0typed\n────────\nstatus", true, true},
 		{"empty", "────────\n\x1b[0m❯\n────────\nstatus", false, true},
 		{"history", "\x1b[0m❯ old command\nworking\n\nstatus", false, false},
