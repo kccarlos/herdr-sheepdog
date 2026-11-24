@@ -19,22 +19,43 @@ const (
 	RoleReviewer    = "reviewer"
 )
 
-// Round kinds of slices 2 and 12 (design.md 3, 4.6).
+// Round kinds of slices 2, 11 and 12 (design.md 3, 4.6, 11.7).
 const (
-	RoundFull     = "full"
-	RoundDelta    = "delta"
-	RoundRetro    = "retro"
-	RoundSendBack = "send_back" // the coordinator's "changes", with a why (design.md 4.9)
+	RoundFull, RoundDelta, RoundRetro, RoundPlan = "full", "delta", "retro", "plan"
+	RoundSendBack                                = "send_back" // the coordinator's "changes", with a why (design.md 4.9)
 )
 
-// Retro verdicts and change kinds (design.md 3, 4.6, 7.2).
+// Retro and plan-review verdicts and change kinds (design.md 3, 4.6, 7.2, 11.7).
 const (
-	VerdictShip     = "ship"
-	VerdictFix      = "fix"
-	VerdictRedesign = "redesign"
-	ChangeKindCheck = "check"
-	ChangeKindBrief = "brief"
+	VerdictShip, VerdictFix, VerdictRedesign, VerdictUnavailable = "ship", "fix", "redesign", "unavailable"
+	ChangeKindCheck, ChangeKindBrief                             = "check", "brief"
 )
+
+// PlanFindingKinds is the fixed finding-kind set for plan reviews (prompts.md 3.2, 5.2).
+var PlanFindingKinds = []string{"delete", "shrink", "merge", "split", "design-first"}
+
+// PlanFinding is one finding on a planned task inside a PlanReview (design.md 3, 11.7).
+type PlanFinding struct {
+	Kind      string `json:"kind"`
+	Task      string `json:"task"`
+	Why       string `json:"why"`
+	Closed    string `json:"closed,omitempty"`
+	RejectWhy string `json:"reject_why,omitempty"`
+}
+
+// PlanReview is one project-level plan review record (design.md 3, 11.7).
+type PlanReview struct {
+	N        int           `json:"n"`
+	Tasks    []string      `json:"tasks"`
+	Reviewer Reviewer      `json:"reviewer,omitempty"`
+	Verdict  string        `json:"verdict,omitempty"`
+	Why      string        `json:"why,omitempty"`
+	Findings []PlanFinding `json:"findings,omitempty"`
+	Run      *ReviewRun    `json:"run,omitempty"`
+	Started  time.Time     `json:"started,omitempty"`
+	At       time.Time     `json:"at,omitempty"`
+	Accepted time.Time     `json:"accepted,omitempty"`
+}
 
 // RetroCauses is the fixed 8-cause set for retro reports (design.md 7.2, KB-RET-15).
 var RetroCauses = []string{
@@ -135,6 +156,7 @@ type Project struct {
 	Run                *RunRecord        `json:"run,omitempty"`
 	Acts               []Act             `json:"acts,omitempty"`
 	Wakes              []Wake            `json:"wakes,omitempty"` // held until J12 delivers them
+	PlanReviews        []PlanReview      `json:"plan_reviews,omitempty"`
 	Base               *BaseState        `json:"base,omitempty"`
 	NewGoal            bool              `json:"new_goal,omitempty"`            // J4: owner gave a new goal after a plan existed
 	NewGoalTasks       int               `json:"new_goal_tasks,omitempty"`      // J4: task count when NewGoal was set
@@ -213,6 +235,7 @@ type Task struct {
 	Dropped       *Dropped               `json:"dropped,omitempty"`
 	Split         *Split                 `json:"split,omitempty"`
 	Parked        bool                   `json:"parked,omitempty"`
+	Unreviewed    bool                   `json:"unreviewed,omitempty"`
 	HoldWhy       string                 `json:"hold_why,omitempty"`
 	HoldKey       string                 `json:"hold_key,omitempty"`
 	LastRow       string                 `json:"last_row,omitempty"`
@@ -387,12 +410,35 @@ type ReviewRun struct {
 	Age          time.Duration `json:"age,omitempty"`
 }
 
-// Role returns RoleRetro for a retro run in the shared review slot, else RoleReviewer.
+// Role returns RoleRetro, RolePlanReviewer, or RoleReviewer for a review slot.
 func (r *ReviewRun) Role() string {
-	if r != nil && r.Kind == RoundRetro {
+	switch {
+	case r != nil && r.Kind == RoundRetro:
 		return RoleRetro
+	case r != nil && r.Kind == RoundPlan:
+		return RolePlanReviewer
+	default:
+		return RoleReviewer
 	}
-	return RoleReviewer
+}
+
+func (p Project) lastPlanReview() *PlanReview {
+	if n := len(p.PlanReviews); n > 0 {
+		return &p.PlanReviews[n-1]
+	}
+	return nil
+}
+
+// OpenPlanFindings returns the open findings on p's newest unaccepted plan review.
+func OpenPlanFindings(p Project) (out []PlanFinding) {
+	if pr := p.lastPlanReview(); pr != nil && pr.Accepted.IsZero() {
+		for _, f := range pr.Findings {
+			if f.Closed == "" {
+				out = append(out, f)
+			}
+		}
+	}
+	return out
 }
 
 // Proof is one outcome's evidence attached to a ready report (design.md 3, 7.2):
