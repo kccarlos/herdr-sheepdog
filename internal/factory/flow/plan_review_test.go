@@ -140,3 +140,44 @@ func TestPlanReviewSettingsRangeChangedAndRole(t *testing.T) {
 		t.Errorf("ReviewRun{Kind:RoundPlan}.Role() = %q, want %q", got, RolePlanReviewer)
 	}
 }
+
+// TestJ15PlanReviewProjectRows covers plan.md 11.2 and design.md 6: J15 sits
+// directly above J3 and stops gone, idle, overdue, or all-dropped plan reviews.
+func TestJ15PlanReviewProjectRows(t *testing.T) {
+	on := DefaultSettings()
+	on.PlanReviewRounds = 1
+	idle := &RunRecord{ID: "r1", State: PhaseIdle, StartedAt: now, LastTurnEnd: now, Turn: 1}
+	unrev := []Task{{ID: "T1", Title: "feat: new", Unreviewed: true}}
+	dropped := []Task{{ID: "T1", Title: "feat: opt", Unreviewed: true, Dropped: &Dropped{Why: "opt"}}}
+	disk := map[string]Alert{AlertDisk: {Kind: AlertDisk, Cause: "full"}}
+	mk := func(coord *RunRecord, tasks []Task, alerts map[string]Alert, age time.Duration, state RunState) ProjectIn {
+		pr := PlanReview{N: 1, Tasks: []string{"T1"}, Started: now.Add(-5 * time.Minute), Run: &ReviewRun{Kind: RoundPlan, Round: 1, RunID: "plan-1", Age: age}}
+		return ProjectIn{Project: Project{Started: true, Run: coord, Alerts: alerts, PlanReviews: []PlanReview{pr}}, Tasks: tasks, Settings: on, Now: now, PlanRun: Run{State: state}}
+	}
+	for _, c := range []struct {
+		name, wantRow string
+		wantAsk       []string
+		in            ProjectIn
+	}{
+		{"gone", "J15", []string{AskStopPlanReviewer}, mk(idle, unrev, nil, time.Minute, RunGone)},
+		{"idle", "J15", []string{AskStopPlanReviewer}, mk(idle, unrev, nil, time.Minute, RunIdle)},
+		{"overdue", "J15", []string{AskStopPlanReviewer}, mk(idle, unrev, nil, time.Duration(on.ReviewMinutes)*time.Minute, RunWorking)},
+		{"all tasks dropped (beats J4)", "J15", []string{AskStopPlanReviewer}, mk(idle, dropped, nil, time.Minute, RunWorking)},
+		{"beats J3 stopping alert", "J15", []string{AskStopPlanReviewer}, mk(nil, unrev, disk, time.Minute, RunIdle)},
+		{"working under limit stays J14", "J14", nil, mk(idle, unrev, nil, time.Minute, RunWorking)},
+	} {
+		if r, d := FirstMatch(ProjectRows, c.in); r.ID != c.wantRow || !slices.Equal(d.Asked, c.wantAsk) {
+			t.Errorf("%s: got (%s, asked=%v, why=%q), want (%s, asked=%v)", c.name, r.ID, d.Asked, d.Why, c.wantRow, c.wantAsk)
+		}
+	}
+	i15 := slices.IndexFunc(ProjectRows, func(r Row[ProjectIn]) bool { return r.ID == "J15" })
+	i3 := slices.IndexFunc(ProjectRows, func(r Row[ProjectIn]) bool { return r.ID == "J3" })
+	if i15 != 0 || i3 != 1 {
+		t.Fatalf("J15 must sit directly above J3 at top of ProjectRows (J15=%d, J3=%d)", i15, i3)
+	}
+	swapped := slices.Clone(ProjectRows)
+	swapped[i15], swapped[i3] = swapped[i3], swapped[i15]
+	if r, _ := FirstMatch(swapped, mk(nil, unrev, disk, time.Minute, RunIdle)); r.ID != "J3" {
+		t.Errorf("swapped J15/J3: got %s, want J3", r.ID)
+	}
+}

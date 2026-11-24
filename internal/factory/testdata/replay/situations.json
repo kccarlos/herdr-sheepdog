@@ -26,5 +26,9 @@
   {"id": "RET3", "role": "retro", "notes": "prompts.md 4, 5.5", "message": "You found the root cause and must decide whether the worker and coordinator changes are checks or brief wording.",
    "says": ["repo", "check", "brief"], "never": ["<report>"]},
   {"id": "RET4", "role": "retro", "notes": "prompts.md 5.5; design.md 7.2", "message": "Your findings are written to the findings file outside the worktree and you are ready to submit the retro outcome.",
-   "run": ["sheepdog factory report retro"], "says": ["--cause", "--worker-change-kind", "--coordinator-change-kind", "--findings"], "never": ["<report>"]}
+   "run": ["sheepdog factory report retro"], "says": ["--cause", "--worker-change-kind", "--coordinator-change-kind", "--findings"], "never": ["<report>"]},
+  {"id": "P1", "role": "plan_reviewer", "notes": "prompts.md 3.1, 7; plan.md 11.2", "message": "Task T2 has if_skipped: an optional item from the backlog; the goal does not ask for it.",
+   "says": ["skipped", "optional", "delete"], "never": ["<report>"]},
+  {"id": "P2", "role": "plan_reviewer", "notes": "prompts.md 5.2, 7; retro doc: SDF-16", "message": "Task T3 changes saved state (state.json) and has no states written down.",
+   "says": ["saved state", "states written down"], "never": ["<report>"]}
 ]}

@@ -11,7 +11,7 @@ import (
 const (
 	AskStartCoordinator, AskStopCoordinator, AskFinalJournal         = "coordinator", "stop_coordinator", "final_journal"
 	AskCoordGoOn, AskCoordDialogStuck, AskDeliverWakes, AskHeartbeat = "coord_go_on", "coord_dialog_stuck", "deliver_wakes", "heartbeat"
-	AskStartPlanReviewer, AskAcceptPlan                              = "start_plan_reviewer", "accept_plan"
+	AskStartPlanReviewer, AskStopPlanReviewer, AskAcceptPlan         = "start_plan_reviewer", "stop_plan_reviewer", "accept_plan"
 	coordStartWindow, firstDialogStuck                               = time.Hour, 1
 )
 
@@ -23,6 +23,7 @@ type ProjectIn struct {
 	Now                time.Time
 	CoordFallbackReady bool // J5: another configured coordinator candidate has a positive sign-in check
 	PlanReviewerReady  bool // J16: a plan_reviewer candidate currently resolves
+	PlanRun            Run  // J15: observed state of the active plan_reviewer run
 }
 
 // AllTasksEnded reports whether a plan exists and every task carries a terminal mark (J4).
@@ -71,6 +72,20 @@ func (in ProjectIn) planReviewStep() (start, accept bool) {
 		return in.idle(), false
 	}
 	return false, true
+}
+
+func (in ProjectIn) planReviewStopWhy() string {
+	if pr := in.lastPlanReview(); pr != nil && pr.Accepted.IsZero() && pr.Verdict == "" && pr.Run != nil && in.PlanRun.State != RunNone {
+		switch {
+		case in.PlanRun.State == RunGone, in.PlanRun.State == RunIdle:
+			return "plan reviewer " + map[RunState]string{RunGone: "terminal is gone", RunIdle: "went idle without a report"}[in.PlanRun.State]
+		case pr.Run.Age >= time.Duration(in.ReviewMinutes)*time.Minute:
+			return "plan reviewer exceeded review_minutes"
+		case !slices.ContainsFunc(in.Tasks, func(t Task) bool { return !Ended(t) && slices.Contains(pr.Tasks, t.ID) }):
+			return "every task in the plan review has ended"
+		}
+	}
+	return ""
 }
 
 func (in ProjectIn) coordSilent() bool {
@@ -128,6 +143,9 @@ func pcond(id, waits, stage string, when, sel func(ProjectIn) bool, yes, no Deci
 // J2 lives in passProject's early return and Engine.Stop.
 // J10 sits before J6/J7 so an R29 dialog-stuck end is noted before J6 waits or J7 restarts it.
 var ProjectRows = []Row[ProjectIn]{
+	prow("J15", "engine", "running", func(in ProjectIn) bool { return in.planReviewStopWhy() != "" }, func(in ProjectIn) Decision {
+		return pdec(in.planReviewStopWhy(), AskStopPlanReviewer)
+	}),
 	prow("J3", "owner", "stopped", func(in ProjectIn) bool { return StoppingAlert(in.Alerts) != nil && !in.alive() }, func(in ProjectIn) Decision {
 		a := StoppingAlert(in.Alerts)
 		return pdec("Stopped: " + cmp.Or(a.Fix, a.Cause))

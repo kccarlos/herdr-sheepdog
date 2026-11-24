@@ -765,6 +765,10 @@ func (e *Engine) runByTokenLocked(token string) (id string, state flow.State, ro
 			id, state, role, runID = pid, s, flow.RoleCoordinator, s.Project.RunID
 			return false
 		}
+		if n := len(s.Project.PlanReviews); n > 0 && s.Project.PlanReviews[n-1].Run != nil && same(s.Project.PlanReviews[n-1].Run.RunTokenHash) {
+			id, state, role, runID = pid, s, flow.RolePlanReviewer, s.Project.PlanReviews[n-1].Run.RunID
+			return false
+		}
 		for i, t := range s.Tasks {
 			if n := len(t.Attempts); n > 0 {
 				if a := t.Attempts[n-1]; same(a.RunTokenHash) {
