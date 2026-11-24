@@ -100,7 +100,17 @@ func StoppingAlert(alerts map[string]Alert) *Alert {
 func RunLive(id string, r *RunRecord) bool {
 	return r != nil && r.State != PhaseEnded || r == nil && id != ""
 }
-func (p Project) HasAlert(kind string) bool { _, ok := p.Alerts[kind]; return ok }
+func (p Project) HasAlert(kind string) bool {
+	if _, ok := p.Alerts[kind]; ok {
+		return true
+	}
+	for _, a := range p.Alerts {
+		if a.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
 func (p Project) CoordSignOutHold() bool {
 	a, ok := p.Alerts[AlertAgentsDown]
 	return ok && strings.HasPrefix(a.Scope, "signed_out:")
