@@ -103,9 +103,7 @@ func (e *Engine) observeNoPoolLocked(ctx context.Context, id string, s *flow.Sta
 		}
 		anyObs = true
 		f := *obs[i]
-		f.NoSlot, f.GitHubUnavailable = false, e.ghUnavail[id] || s.Project.HasAlert(flow.AlertGitHubUnavailable)
-		r0, d0 := flow.FirstMatch(flow.TaskRows, flow.In{Task: t, Settings: s.Settings, Facts: f, Asks: s.Asks, Now: now})
-		asksWorker := slices.ContainsFunc(d0.Asked, func(k string) bool { return k == flow.AskNewAttempt || strings.HasPrefix(k, flow.AskStartWorker) })
+		r0, asksWorker := e.matchTaskStartLocked(id, *s, t, f, now)
 		if !asksWorker && (f.Worker.State != flow.RunWorking && f.Worker.State != flow.RunIdle || !slices.Contains([]string{"N7", "N22", "N23", "N32", "N33", "N38", "N39"}, r0.ID)) {
 			continue
 		}

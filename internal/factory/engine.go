@@ -431,14 +431,6 @@ func (e *Engine) passProject(ctx context.Context, id string, _ ...bool) {
 		return
 	}
 	baseTried := s.Project.Base != nil && s.Project.Base.Red && flow.Done(s.Project.Acts, flow.AskTellBaseRed+"@"+s.Project.Base.SpellID)
-	var candidates, poolHeld []string
-	queue := func(t flow.Task) {
-		if _, r := resolveWorkerReason(t, s.Settings, flow.ResolveFacts{Pool: e.passPoolCheck}); r.Why != "" {
-			poolHeld = append(poolHeld, t.ID)
-			return
-		}
-		candidates = append(candidates, t.ID)
-	}
 	workerRun, workerState, workerErr := map[string]flow.Run{}, map[string]flow.RunState{}, map[string]error{}
 	for ti := range s.Tasks {
 		t := &s.Tasks[ti]
@@ -470,13 +462,6 @@ func (e *Engine) passProject(ctx context.Context, id string, _ ...bool) {
 				e.saveLocked(id, s)
 			}
 			workerRun[t.ID], workerState[t.ID], workerErr[t.ID] = r, r.State, rerr
-			if r.State == flow.RunGone && flow.WantsWorkerSlot(*t, s.Settings, e.now()) {
-				queue(*t)
-			}
-		} else if a == nil && !flow.Ended(*t) && !t.Parked && flow.OpenRecap(*t) == nil && flow.WantsNewAttempt(*t, s.Settings, e.now()) {
-			if notDone, dropped := flow.UnmetDeps(*t, s.Tasks); len(notDone) == 0 && len(dropped) == 0 {
-				queue(*t)
-			}
 		}
 	}
 	if hcErr == nil && !hcChecked && (e.hcUnavail[id] || s.Project.HasAlert(flow.AlertHCUnavailable)) && e.HC != nil {
@@ -488,20 +473,44 @@ func (e *Engine) passProject(ctx context.Context, id string, _ ...bool) {
 		setFlag(&e.hcUnavail, id, unavail)
 		e.reconcileAlertLocked(id, &s, flow.AlertHCUnavailable, unavail, flow.Alert{Kind: flow.AlertHCUnavailable, Cause: cmp.Or(flow.CleanErr(errText(hcErr)), "herdr-core is unreachable"), At: e.now()}, "alert", "")
 	}
-	granted := flow.GrantSlots(candidates, s.Tasks, flow.RunningTasks(s.Tasks, workerState), s.Settings.MaxRunning, s.Asks...)
-	for _, tid := range poolHeld {
-		granted[tid] = true
-	}
 	obs, skipped := make([]*flow.Facts, len(s.Tasks)), map[string]bool{}
 	for i := range s.Tasks {
-		if f, ok := e.observeTaskLocked(ctx, id, &s, i, granted[s.Tasks[i].ID], workerRun[s.Tasks[i].ID], workerErr[s.Tasks[i].ID], baseTried, dt); ctx.Err() == nil && ok {
+		if f, ok := e.observeTaskLocked(ctx, id, &s, i, true, workerRun[s.Tasks[i].ID], workerErr[s.Tasks[i].ID], baseTried, dt); ctx.Err() == nil && ok {
 			obs[i] = &f
 		} else {
 			skipped[s.Tasks[i].ID] = true
 		}
 	}
 	if ctx.Err() == nil {
-		e.observeNoPoolLocked(ctx, id, &s, obs, e.now())
+		now := e.now()
+		wantSlot := map[string]bool{}
+		var candidates, poolHeld []string
+		for i, t := range s.Tasks {
+			if obs[i] == nil {
+				continue
+			}
+			if a := flow.OpenAttempt(t); a != nil && cmp.Or(workerState[t.ID], a.Run.TaskRun().State) != flow.RunGone {
+				continue
+			}
+			if _, asks := e.matchTaskStartLocked(id, s, t, *obs[i], now); asks {
+				wantSlot[t.ID] = true
+				if _, r := resolveWorkerReason(t, s.Settings, flow.ResolveFacts{Pool: e.passPoolCheck}); r.Why != "" {
+					poolHeld = append(poolHeld, t.ID)
+				} else {
+					candidates = append(candidates, t.ID)
+				}
+			}
+		}
+		granted := flow.GrantSlots(candidates, s.Tasks, flow.RunningTasks(s.Tasks, workerState), s.Settings.MaxRunning, s.Asks...)
+		for _, tid := range poolHeld {
+			granted[tid] = true
+		}
+		for i, t := range s.Tasks {
+			if obs[i] != nil && wantSlot[t.ID] && !granted[t.ID] {
+				obs[i].NoSlot = true
+			}
+		}
+		e.observeNoPoolLocked(ctx, id, &s, obs, now)
 		ranTasks := false
 		for i := range s.Tasks {
 			if ctx.Err() == nil && obs[i] != nil {
@@ -510,7 +519,7 @@ func (e *Engine) passProject(ctx context.Context, id string, _ ...bool) {
 				e.checkENOSPCLocked(ctx, id, &s, e.now())
 			}
 		}
-		now := e.now()
+		now = e.now()
 		if ranTasks {
 			e.emitOverrideResultsLocked(id, &s, now)
 		}
@@ -520,6 +529,14 @@ func (e *Engine) passProject(ctx context.Context, id string, _ ...bool) {
 		e.checkInvariantsLocked(id, &s, skipped, now)
 	}
 	e.checkENOSPCLocked(ctx, id, &s, e.now())
+}
+
+func (e *Engine) matchTaskStartLocked(id string, s flow.State, t flow.Task, f flow.Facts, now time.Time) (flow.Row[flow.In], bool) {
+	f.NoSlot, f.GitHubUnavailable = false, e.ghUnavail[id] || s.Project.HasAlert(flow.AlertGitHubUnavailable)
+	r, d := flow.FirstMatch(flow.TaskRows, flow.In{Task: t, Settings: s.Settings, Facts: f, Asks: s.Asks, Now: now})
+	return r, slices.ContainsFunc(d.Asked, func(k string) bool {
+		return k == flow.AskNewAttempt || strings.HasPrefix(k, flow.AskStartWorker)
+	})
 }
 
 func (e *Engine) checkENOSPCLocked(ctx context.Context, id string, s *flow.State, now time.Time) {
@@ -1379,7 +1396,7 @@ func (e *Engine) passTaskLocked(ctx context.Context, id string, s *flow.State, t
 	return false
 }
 
-func (e *Engine) observeTaskLocked(ctx context.Context, id string, s *flow.State, ti int, hasSlot bool, workerRun flow.Run, workerErr error, baseTried bool, dt time.Duration) (flow.Facts, bool) {
+func (e *Engine) observeTaskLocked(ctx context.Context, id string, s *flow.State, ti int, _ bool, workerRun flow.Run, workerErr error, baseTried bool, dt time.Duration) (flow.Facts, bool) {
 	facts := flow.Facts{GitHubUnavailable: e.ghUnavail[id] || s.Project.HasAlert(flow.AlertGitHubUnavailable), HCUnavailable: e.hcUnavail[id] || s.Project.HasAlert(flow.AlertHCUnavailable)}
 	if b := s.Project.Base; b != nil && b.Red {
 		facts.BaseRed, facts.BaseRedSince = true, b.Since
@@ -1394,6 +1411,7 @@ func (e *Engine) observeTaskLocked(ctx context.Context, id string, s *flow.State
 	oa := flow.OpenAttempt(task)
 	if !flow.Ended(task) {
 		facts.DepsNotDone, facts.DepsDropped = flow.UnmetDeps(task, s.Tasks)
+		facts.OtherMergeInFlight = otherMergeInFlight(s.Tasks, ti)
 	}
 	if oa != nil && !flow.Ended(task) {
 		a := *oa
@@ -1424,7 +1442,6 @@ func (e *Engine) observeTaskLocked(ctx context.Context, id string, s *flow.State
 			return facts, false
 		}
 		facts.Worker = workerRun
-		facts.NoSlot = workerRun.State == flow.RunGone && !hasSlot
 		facts.Tip, facts.TipRel = tip, rel
 		if len(a.Ready) > 0 { // no PR can exist before the first ready
 			facts.PR = e.readPRLocked(ctx, id, s, ti)
@@ -1436,8 +1453,6 @@ func (e *Engine) observeTaskLocked(ctx context.Context, id string, s *flow.State
 		if !facts.RetroUnavailable {
 			facts.RetroUnavailable = e.retroUnavailableLocked(ctx, task, s.Settings)
 		}
-	} else if oa == nil && !flow.Ended(s.Tasks[ti]) {
-		facts.NoSlot = !hasSlot && !flow.Exhausted(s.Tasks[ti].Acts, flow.AskNewAttempt, s.Settings)
 	}
 	return facts, true
 }
@@ -1482,6 +1497,10 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 	holdWhy := ""
 	if len(d.Asked) == 0 && d.Hold {
 		holdWhy = d.Why
+	} else if facts.NoSlot {
+		if _, asks := e.matchTaskStartLocked(id, *s, task, facts, now); asks {
+			holdWhy = "no slot is free"
+		}
 	}
 	previousHold, previousHoldKey := s.Tasks[ti].HoldWhy, s.Tasks[ti].HoldKey
 	holdChanged := previousHold != holdWhy
@@ -2320,34 +2339,37 @@ func (e *Engine) deliverRunLocked(ctx context.Context, rec *flow.RunRecord, s fl
 	return row.ID, dec, nil
 }
 
-func (e *Engine) deliverWorkerLocked(ctx context.Context, id, taskID string, s *flow.State, a *flow.Attempt, msg string, urgent bool) error {
+func (e *Engine) deliverWorkerLocked(ctx context.Context, id, taskID string, s *flow.State, a *flow.Attempt, msg string, urgent bool, about string) (string, error) {
 	if a != nil && a.RunID != "" && e.HC != nil && (a.Run == nil || a.Run.State == flow.PhaseWorking && a.Run.Status == "") {
 		if a.Run == nil {
 			if _, err := e.HC.Get(ctx, a.RunID); err != nil {
-				return err
+				return "", err
 			}
 		}
 		if _, err := e.advanceRunLocked(ctx, id, taskID, s, a.RunID, flow.RoleWorker, "claude", &a.Run); err != nil {
-			return err
+			return "", err
 		}
 	}
 	if !e.cleanLocked(id) {
-		return errStoreDirty
+		return "", errStoreDirty
 	}
 	if a == nil || (a.RunID == "" && (a.Run == nil || a.Run.State != flow.PhaseEnded)) || (e.HC == nil && a.Run == nil) {
 		if a != nil && a.RunID == "" && (a.Run == nil && !flow.Done(a.Acts, flow.AskStartWorker) || a.Run != nil && a.Run.State == flow.PhaseStarting && a.Run.Address == "") {
 			a.Held = appendHeld(a.Held, msg)
-			return nil
+			return "held for the next worker: " + about, nil
 		}
-		return errNoWorkerRun
+		return "", errNoWorkerRun
 	}
 	rowID, dec, err := e.deliverRunLocked(ctx, a.Run, s.Settings, msg, urgent, e.now())
 	if rowID == "R36" {
 		a.Held = appendHeld(a.Held, msg)
 		e.commitLogLocked(id, s, LogLine{By: "engine", Task: taskID, Rule: rowID, Decision: dec.Why, Why: fmt.Sprintf("worker run %s ended (%s): held on task", a.Run.Address, a.Run.Result)})
-		return nil
+		return "held for the next worker: " + about, nil
 	}
-	return err
+	if err != nil {
+		return "", err
+	}
+	return "told worker " + about, nil
 }
 
 func (e *Engine) execTellFindings(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
@@ -2357,11 +2379,13 @@ func (e *Engine) execTellFindings(ctx context.Context, id string, s *flow.State,
 	rc := readyCmd(bin, t.Outcomes)
 	if r.Kind == flow.RoundSendBack {
 		msg := fmt.Sprintf("The coordinator sent the task back: %s — change what it asks, commit, and run %s again.", r.Why, rc)
-		return fmt.Sprintf("told worker the send-back (round %d)", r.N), false, e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false)
+		dec, err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false, fmt.Sprintf("the send-back (round %d)", r.N))
+		return dec, false, err
 	}
 	msg := fmt.Sprintf("Review round %d found %d major(s) in %s — fix them, commit, and run %s again, or when every finding is wrong and you change nothing, run %s factory report ready --reject \"<why>\".",
 		r.N, r.Majors, r.ReportPath, rc, bin)
-	return fmt.Sprintf("told worker findings from round %d", r.N), false, e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false)
+	dec, err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false, fmt.Sprintf("findings from round %d", r.N))
+	return dec, false, err
 }
 
 // execOpenRecap is N25 (review) and N30 (owner_no): allowed split, new, drop.
@@ -2453,17 +2477,20 @@ func (e *Engine) execTellStop(ctx context.Context, id string, s *flow.State, ti 
 	t, a := s.Tasks[ti], flow.OpenAttempt(s.Tasks[ti])
 	if rc := flow.OpenRecap(t); rc != nil && rc.Trigger == flow.TriggerCI {
 		msg := fmt.Sprintf("Task %s hit %d failing CI commits in the last hour. Stop now and write nothing more; the coordinator decides how the task goes on.", t.ID, s.Settings.CIFailsPerHour)
-		return "told worker to stop at the CI failure limit", false, e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, true)
+		dec, err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, true, "to stop at the CI failure limit")
+		return dec, false, err
 	}
 	if rc := flow.OpenRecap(t); rc != nil && rc.Trigger == flow.TriggerTime {
 		msg := fmt.Sprintf("Task %s hit its %dh working time limit. Stop now and write nothing more; the coordinator decides how the task goes on.", t.ID, s.Settings.BuildHours)
-		return "told worker to stop at the build time limit", false, e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, true)
+		dec, err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, true, "to stop at the build time limit")
+		return dec, false, err
 	}
 	msg := fmt.Sprintf("Task %s is over its size cap: %d changed lines, cap %d. Stop now and write nothing more; the coordinator decides how the task goes on.", t.ID, f.Lines, a.SizeCap)
 	if f.LinesTimeout {
 		msg = fmt.Sprintf("Task %s timed out reading changed lines (counts as over cap %d). Stop now and write nothing more; the coordinator decides how the task goes on.", t.ID, a.SizeCap)
 	}
-	return "told worker to stop at the size cap", false, e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, true)
+	dec, err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, true, "to stop at the size cap")
+	return dec, false, err
 }
 
 func pullPrefix(a *flow.Attempt, f flow.Facts) string {
@@ -2483,7 +2510,8 @@ func (e *Engine) execTellDiverged(ctx context.Context, id string, s *flow.State,
 	if flow.PRHeadDivergedOrForeign(in) {
 		msg = pullPrefix(a, f) + msg
 	}
-	return "told worker: " + why, false, e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false)
+	dec, err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false, why)
+	return dec, false, err
 }
 
 // execTellConflict is N32: tell the worker once per H to merge the base (never rebase).
@@ -2491,7 +2519,8 @@ func (e *Engine) execTellConflict(ctx context.Context, id string, s *flow.State,
 	t, a := s.Tasks[ti], flow.OpenAttempt(s.Tasks[ti])
 	msg := fmt.Sprintf("%sPR #%d conflicts with the base at %s — merge the base into your branch (never rebase), resolve, commit, and run %s again.",
 		pullPrefix(a, f), f.PR.Number, flow.H(*a), readyCmd(cmp.Or(e.Bin, "sheepdog"), t.Outcomes))
-	return "told worker PR conflicts with the base", false, e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false)
+	dec, err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false, "PR conflicts with the base")
+	return dec, false, err
 }
 
 // execMergeOnly is N20: H moves to a tip or PR head that is ahead of it by
@@ -2551,7 +2580,8 @@ func (e *Engine) execTellCI(ctx context.Context, id string, s *flow.State, ti in
 		}
 	}
 	msg := fmt.Sprintf("%sCI failed on PR #%d at %s (run %s: %s) — fix it, commit, and run %s again.", pullPrefix(a, f), f.PR.Number, flow.H(*a), run, strings.Join(names, ", "), readyCmd(cmp.Or(e.Bin, "sheepdog"), t.Outcomes))
-	return "told worker CI failed (run " + run + ")", false, e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false)
+	dec, err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false, "CI failed (run "+run+")")
+	return dec, false, err
 }
 
 // execTellBaseRed is N38 past main_red_minutes: tell the oldest held task's
@@ -2560,7 +2590,8 @@ func (e *Engine) execTellBaseRed(ctx context.Context, id string, s *flow.State, 
 	t, a := s.Tasks[ti], flow.OpenAttempt(s.Tasks[ti])
 	msg := fmt.Sprintf("%sThe base branch has been red for %d+ minutes — merge the base into your branch (never rebase), fix if needed, commit, and run %s.",
 		pullPrefix(a, f), s.Settings.MainRedMinutes, readyCmd(cmp.Or(e.Bin, "sheepdog"), t.Outcomes))
-	return "told worker base is red: merge base and say ready", false, e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false)
+	dec, err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false, "base is red: merge base and say ready")
+	return dec, false, err
 }
 
 // observeBaseLocked reads the push workflow runs on the base branch's head

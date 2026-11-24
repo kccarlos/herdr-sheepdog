@@ -275,7 +275,7 @@ func (e *Engine) answerAskLocked(id string, s *flow.State, ai int, option, why, 
 		} else if att != nil {
 			if att.Run != nil && att.Run.State == flow.PhaseEnded {
 				att.Held = appendHeld(att.Held, msg)
-			} else if err := e.deliverWorkerLocked(ctx, id, next.Task, s, att, msg, false); err != nil {
+			} else if _, err := e.deliverWorkerLocked(ctx, id, next.Task, s, att, msg, false, ""); err != nil {
 				if !errors.Is(err, errNoWorkerRun) {
 					e.logError("factory.exec_error", id, err)
 				}

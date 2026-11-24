@@ -976,7 +976,7 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 		if a.RunID != "" || a.Run != nil && a.Run.State == flow.PhaseEnded {
 			sctx, scancel := context.WithTimeout(context.Background(), lockGitTimeout)
 			defer scancel()
-			if err := e.deliverWorkerLocked(sctx, id, t.ID, s, a, msg, false); err != nil {
+			if _, err := e.deliverWorkerLocked(sctx, id, t.ID, s, a, msg, false, ""); err != nil {
 				e.logError("factory.exec_error", id, err)
 				return err
 			}
@@ -1148,7 +1148,7 @@ func (e *Engine) acceptTaskLocked(id string, s *flow.State, role string, args js
 		}
 		ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
 		defer cancel()
-		if err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, "Message from the coordinator: "+why, false); errors.Is(err, errNoWorkerRun) {
+		if _, err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, "Message from the coordinator: "+why, false, ""); errors.Is(err, errNoWorkerRun) {
 			return e.refuse(id, "no_worker", fmt.Sprintf("Task %q has no worker run to message.", t.ID))
 		} else if err != nil {
 			return err
@@ -1381,7 +1381,7 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 			rc := readyCmd(cmp.Or(e.Bin, "sheepdog"), t.Outcomes)
 			msg := fmt.Sprintf("The plan changed for task %s (%s): %s\nTitle: %s\nBrief:\n%s\nOutcomes:\n%s\nEarlier review rounds no longer count. If your work must change, commit and run %s again; otherwise wait.",
 				t.ID, strings.Join(workerWhat, ", "), why, t.Title, cmp.Or(strings.TrimSpace(t.Brief), "(none)"), bullets(t.Outcomes), rc)
-			if err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false); err != nil { // a restarted worker reads the new plan anyway
+			if _, err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false, ""); err != nil { // a restarted worker reads the new plan anyway
 				e.logError("factory.exec_error", id, err)
 			}
 		}
