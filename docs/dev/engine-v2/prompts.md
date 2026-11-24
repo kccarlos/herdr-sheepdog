@@ -105,16 +105,18 @@ A task whose `if_skipped` is "an optional item from the backlog" is refused by t
 | Step | Who | What |
 |---|---|---|
 | The coordinator submits a plan, or an amend that adds tasks | coordinator | `plan apply` or `plan amend`. The plan checks of design.md 11.7 run first |
-| Plan review | a strong model that did not write the plan, in a fresh session, read-only | The template of section 5.2: which tasks can be deleted, which scope can be cut, which two tasks are one, which estimate is not believable, what should be designed first |
+| Plan review | a model from the project's reviewers that is not the coordinator's when another is listed (`models.plan_reviewer` names a stronger one), in a fresh session, read-only | The template of section 5.2: which tasks can be deleted, which scope can be cut, which two tasks are one, which estimate is not believable, what should be designed first |
+| Hold | the engine | The new tasks are `unreviewed` and none of them starts until the review is accepted (design.md 11.7, N10) |
 | Verdict | the plan reviewer | pass, or changes with findings. Each finding names a task and says: delete, shrink, merge, split, or design first |
-| Changes | coordinator | It answers each finding (done, or rejected with a one-line reason) and submits again. `plan_review_rounds` (default 2) |
-| Still not passing | the engine | The plan is accepted with the open findings written into the journal and the owner's digest. Planning is reversible; it does not wait for the owner unless the setting `design_gate` is `owner` |
+| Changes | coordinator | Woken once with the findings. It closes each one by what it does to the task: `task drop` (delete), `plan amend` on the task (shrink, merge, split, design first), or `plan reject <task> --why` with a one-line reason. When every finding is closed the plan is accepted. A finding still open twice `heartbeat_minutes` after the verdict is closed as `unanswered` and the plan is accepted. There is one round (`plan_review_rounds`, design.md 10.1) |
+| Accepted | the engine | The tasks start. A rejected finding stays in the plan review record with its why; the journal and the owner's digest read the records when they exist. Planning is reversible: a plan never waits for the owner |
+| No reviewer | the engine | No candidate resolves (out of quota included), or the run fails: the plan is accepted and the record says `unavailable` with the reason (design.md 11.7) |
 
-The plan reviewer is a run like any reviewer: started by the engine, a report tag with a one-time code, never the coordinator's own model when another candidate resolves.
+The plan reviewer is a run like any reviewer: started by the engine, a report command that carries a one-time code (`sheepdog factory report plan-review`, design.md 7.2), never the coordinator's own model when another candidate resolves (its candidates are `models.plan_reviewer`, else the project's reviewers; design.md 11.7).
 
 ### 3.3 A design note per milestone
 
-"One screen with the smallest version first, not a full design." Before a milestone's tasks may start, the coordinator writes one page: the problem, the smallest design that solves it, what was considered and left out, the data shapes, and what will prove it. It is part of the plan submission for that milestone, so the plan reviewer reads it with the tasks. A UI milestone also has its design task (design.md 11.4). There is no separate design-review machinery: the note is one more thing the plan review of 3.2 judges.
+"One screen with the smallest version first, not a full design." Before a milestone's tasks may start, the coordinator writes one page: the problem, the smallest design that solves it, what was considered and left out, the data shapes, and what will prove it. It is part of the plan submission for that milestone, so the plan reviewer reads it with the tasks. A UI milestone also has its design task (design.md 11.4). There is no separate design-review machinery: the note is one more thing the plan review of 3.2 judges. Slice 11 builds the plan review without the note, because milestones do not exist yet (section 8); until they do, the plan reviewer's `design-first` finding asks for the states to be written down.
 
 ### 3.4 The worker proves it, and says what it skipped
 
@@ -221,7 +223,7 @@ Running
 {facts}
 ```
 
-From the plan-review slice (plan.md slice 11), when the plan reviewer exists, the last planning line becomes: "Submit with `sheepdog factory plan apply <file>`. A reviewer will ask what can be deleted. Answer each finding: do it, or reject it with one line of why."
+From the plan-review slice (plan.md slice 11), when the plan reviewer exists, the last planning line becomes: "Submit with `sheepdog factory plan apply <file>`. A reviewer asks what can be deleted before any task starts. Close each finding: drop the task, amend it, or `sheepdog factory plan reject <task> --why "<why>"`." The template stays within 40 lines.
 
 ### 5.2 Plan reviewer (from the plan-review slice)
 
@@ -229,7 +231,7 @@ From the plan-review slice (plan.md slice 11), when the plan reviewer exists, th
 You review a plan before any code is written. Read only. You did not write it.
 Your one question for every task: should this exist, and at this size? [Ponytail 1]
 
-- Read the goal in the owner's words, the design note, then each task's six fields.
+- Read the goal in the owner's words, then each task's fields.
 - For each task ask: who is it for? What breaks if it is skipped? Is "smallest" really the
   smallest that does the core job? Does a later task need it, or is it "for later"?
 - Check that the need survives the fix: after the task's own limits apply, does it still add
@@ -244,10 +246,11 @@ Your one question for every task: should this exist, and at this size? [Ponytail
   one line of why. Preferences and wording are not findings.
 - "The plan is fine" is a valid answer. Do not invent findings.
 
-{plan} {design_note} {repo_facts}
-End with your findings, one per line: `finding: <task> delete|shrink|merge|split|design-first <why>`;
-then only this tag, with "findings" equal to your `finding:` lines:
-<report>{"code":"{code}","verdict":"pass|changes","findings":0}</report>
+{facts}
+Write your findings to {findings_path}, one per line: `<delete|shrink|merge|split|design-first>: <task> <why>`.
+Then run exactly one of:
+`{sheepdog} factory report plan-review pass --code {code}`
+`{sheepdog} factory report plan-review changes --code {code} --findings {findings_path}`
 ```
 
 ### 5.3 Worker
@@ -346,7 +349,7 @@ Every prompt ends with facts the engine builds from records at that moment. An a
 | Coordinator, at every wake | What woke it and the named way out; tasks waiting on it and why; open asks; pools; free slots; settings that differ from their default; the retro table (design.md 11.2); the last journal entry on a fresh session |
 | Worker | The brief; `not_doing`; the estimate and the cap; the base branch; the report commands with the task filled in; for a fix, the findings file; "pull first" when the engine moved the head |
 | Reviewer | The brief; `not_doing`; the diff range; earlier rounds with their verdicts; the worker's rejections, taken from its `reject` records and from the commit messages since the last round; the worker's proofs with their output; the one-time code, round, head and scratch findings path for its `factory report review` command (or `<report>` tag for Codex pending S-REV-2) |
-| Plan reviewer | The plan, the design note, the owner's words, the repo's size and layout |
+| Plan reviewer | The goal in the owner's words; the tasks under review with their scope fields; the titles of the tasks already accepted; the one-time code, the scratch findings path and the `factory report plan-review` command. The design note joins when milestones exist. The repo's size and layout are not listed: the run is in the project folder and looks itself |
 | Retro | As the old template: rounds, sizes, the brief, the reviewer and worker models; plus the one-time code, head, scratch findings path and `factory report retro` command |
 
 Quota is watched for agents; a worker's facts never name a quota tool (KB-QTA-12).
@@ -375,12 +378,12 @@ One statement of where each thing lands, by the slices of [plan.md](plan.md):
 | `--self-check-misses`, `--class`, `--deletable`, `--not-run` on `factory report review` (and the transitional reply lines for Codex); the first-look pass rate | design.md 7.2, 11.2 | 3 |
 | The templates of section 5 with replay evidence | this file | 3 (slice 1 runs on three short stand-ins) |
 | The engine running the proofs again in a clean checkout, and a per-outcome judgement in the verdict | design.md 11.6 | 10 (parked 2026-11-23) |
-| The plan review run, its report and the coordinator's answers, `plan_review_rounds` | design.md 11.7, 7.2 | 11 |
+| The plan review run and its `report plan-review`, the hold on `unreviewed` tasks, `plan reject`, `plan_review_rounds` | design.md 11.7, 7.2, J15, J16, N10 | 11 (cut into 11.1–11.3 in [plan.md](plan.md)) |
 | The design note as part of a milestone's plan; the per-template numbers in the facts block | design.md 11.7, 11.2 | later, with milestones and the retro |
 
 ## 9. Limits, stated plainly
 
 - The v1 templates (`coordinator.md`, `worker.md`, `reviewer_cmd.md`, `reviewer.md`) are live on `main`; the plan reviewer (slice 11), retro (coming in slice 12), and verifier (later) remain drafts that no agent has run yet. Wording that reads well can still fail a replay; the old templates failed 6 of 15 situations before they were fixed against them.
 - Layer 3 is still layer 3. "Take the smallest complete change" is held by a model's attention, a size cap, and a reviewer asked which lines can go. None of those is proof that the smallest change was taken.
-- Five safety rules are held by a prompt sentence alone, with no code behind them yet (design.md section 13): the coordinator makes its own calls on a wake and does not ask the owner (KB-COO-41); the coordinator never writes code or commits to the base (KB-COO-55); what the coordinator may approve for a worker (KB-COO-61); a worker never prints or commits a secret (KB-WKT-24); a worker stays in its scope and never merges or rebases a PR branch (KB-ASK-24). Branch protection on the base is the backstop for the second and the last.
-- The plan reviewer can become a rubber stamp or a source of noise. Its findings are counted by outcome: if plans that passed it grow past their estimates as often as plans did before it, it is removed.
+- Six safety rules are held by a prompt sentence alone, with no code behind them yet (design.md section 13): the coordinator makes its own calls on a wake and does not ask the owner (KB-COO-41); the coordinator never writes code or commits to the base (KB-COO-55); what the coordinator may approve for a worker (KB-COO-61); a worker never prints or commits a secret (KB-WKT-24); a worker stays in its scope and never merges or rebases a PR branch (KB-ASK-24); an `agy` plan reviewer does not write in the project folder (design.md 11.7; a Claude one is held by its launch allow list). Branch protection on the base is the backstop for the second and the last.
+- The plan reviewer can become a rubber stamp or a source of noise. Its records say how each finding closed (dropped, amended, rejected) and which reviews were `unavailable`. If, over a real project's plans, no finding closes by a drop or an amend, `plan_review_rounds` goes to 0 and the run is removed. The same records decide whether a second round is built. Comparing a task's final size with its estimate waits for the per-task numbers of section 7, which are not stored yet.
