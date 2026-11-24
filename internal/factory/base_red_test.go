@@ -37,11 +37,11 @@ func commitBaseHead(t *testing.T, repo, ghDir, tag string) string {
 	return sha
 }
 
-func writeCountedBaseRun(t *testing.T, ghDir string, id int, headSHA, status, conclusion string) {
+func writeCountedBaseRun(t *testing.T, ghDir string, id int, headSHA, conclusion string) {
 	t.Helper()
 	writeBaseRuns(t, ghDir, fmt.Sprintf(
-		`{"workflow_runs":[{"id":%d,"path":%q,"head_sha":%q,"status":%q,"conclusion":%q}]}`,
-		id, testCIWorkflowPath, headSHA, status, conclusion,
+		`{"workflow_runs":[{"id":%d,"path":%q,"head_sha":%q,"status":"completed","conclusion":%q}]}`,
+		id, testCIWorkflowPath, headSHA, conclusion,
 	))
 }
 
@@ -54,7 +54,7 @@ func TestBaseRedHoldsBehindAndGreenResumesKBMRG47(t *testing.T) {
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
 	red1 := commitBaseHead(t, l.repo, l.gh, "red1")
-	writeCountedBaseRun(t, l.gh, 101, red1, "completed", "failure")
+	writeCountedBaseRun(t, l.gh, 101, red1, "failure")
 
 	// Pass 1 & 2: base is red + behind -> N38 holds (no update-branch, no merge),
 	// coordinator woken once for head sha red1.
@@ -94,7 +94,7 @@ func TestBaseRedHoldsBehindAndGreenResumesKBMRG47(t *testing.T) {
 
 	// Base turns green (green1): coordinator woken once, and N40 asks update-branch.
 	green1 := commitBaseHead(t, l.repo, l.gh, "green1")
-	writeCountedBaseRun(t, l.gh, 102, green1, "completed", "success")
+	writeCountedBaseRun(t, l.gh, 102, green1, "success")
 	l.pass()
 	l.pass()
 	if got := ghCalls(t, l.gh, "api -X PUT"); len(got) != 1 {
@@ -107,7 +107,7 @@ func TestBaseRedHoldsBehindAndGreenResumesKBMRG47(t *testing.T) {
 
 	// Base turns red again (red2): red -> green -> red wakes again.
 	red2 := commitBaseHead(t, l.repo, l.gh, "red2")
-	writeCountedBaseRun(t, l.gh, 103, red2, "completed", "timed_out")
+	writeCountedBaseRun(t, l.gh, 103, red2, "timed_out")
 	l.pass()
 	wakes = l.state().Project.Wakes
 	if len(wakes) != 3 || wakes[2].Key != "base_red@"+red2+"@1" {
@@ -123,7 +123,7 @@ func TestBaseRedNotBehindStillMerges(t *testing.T) {
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":0}`)
 	redHead := commitBaseHead(t, l.repo, l.gh, "red")
-	writeCountedBaseRun(t, l.gh, 201, redHead, "completed", "failure")
+	writeCountedBaseRun(t, l.gh, 201, redHead, "failure")
 
 	l.pass()
 	if merges := ghCalls(t, l.gh, "pr merge"); len(merges) != 1 {
@@ -174,7 +174,7 @@ func TestBaseRedPastMainRedMinutesOldestTaskOnce(t *testing.T) {
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
 	redHead := commitBaseHead(t, l.repo, l.gh, "red")
-	writeCountedBaseRun(t, l.gh, 301, redHead, "completed", "failure")
+	writeCountedBaseRun(t, l.gh, 301, redHead, "failure")
 
 	// Before main_red_minutes: held, no worker told, only base_red wake.
 	l.pass()
@@ -245,7 +245,7 @@ func TestBaseRedReadErrorKeepsLastState(t *testing.T) {
 	// Now turn red, then fail reads: must stay red (no green wake).
 	_ = os.Remove(filepath.Join(l.gh, "base_runs_fail"))
 	redHead := commitBaseHead(t, l.repo, l.gh, "red")
-	writeCountedBaseRun(t, l.gh, 401, redHead, "completed", "failure")
+	writeCountedBaseRun(t, l.gh, 401, redHead, "failure")
 	l.pass()
 	writeGHFile(t, l.gh, "base_runs_fail", "")
 	l.pass()
@@ -266,7 +266,7 @@ func TestBaseRedRerunStaysRed(t *testing.T) {
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
 	redHead := commitBaseHead(t, l.repo, l.gh, "red")
-	writeCountedBaseRun(t, l.gh, 501, redHead, "completed", "failure")
+	writeCountedBaseRun(t, l.gh, 501, redHead, "failure")
 	l.pass()
 
 	// Re-run of 501 is now in progress while a second workflow already passed: must stay red.
@@ -292,14 +292,14 @@ func TestBaseRedSurvivesRestartAndStopStart(t *testing.T) {
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
 	red1 := commitBaseHead(t, l.repo, l.gh, "red1")
-	writeCountedBaseRun(t, l.gh, 601, red1, "completed", "failure")
+	writeCountedBaseRun(t, l.gh, 601, red1, "failure")
 	l.pass()
 
 	// Daemon restarts with a brand-new Engine; a second failing push landed on main while down.
 	eng2 := newGitTestEngine(t, l.paths, l.client)
 	eng2.Bin = l.eng.Bin
 	red2 := commitBaseHead(t, l.repo, l.gh, "red2")
-	writeCountedBaseRun(t, l.gh, 602, red2, "completed", "failure")
+	writeCountedBaseRun(t, l.gh, 602, red2, "failure")
 	eng2.passProject(context.Background(), l.id, false)
 
 	// Must NOT wake a second time in the same red spell, and keeps original spell ID and Since.
@@ -343,13 +343,13 @@ func TestBaseRedWaitTextClearsOnGreen(t *testing.T) {
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
 	red1 := commitBaseHead(t, l.repo, l.gh, "red1")
-	writeCountedBaseRun(t, l.gh, 701, red1, "completed", "failure")
+	writeCountedBaseRun(t, l.gh, 701, red1, "failure")
 	l.pass()
 
 	// Base turns green while compare fails (N36 holds without logging a new row).
 	writeGHFile(t, l.gh, "compare_fail", "")
 	grn2 := commitBaseHead(t, l.repo, l.gh, "grn2")
-	writeCountedBaseRun(t, l.gh, 702, grn2, "completed", "success")
+	writeCountedBaseRun(t, l.gh, 702, grn2, "success")
 	l.pass()
 	gv := GraphViewOf(l.state(), l.logLines())
 	if strings.Contains(strings.ToLower(gv.Tasks[0].WhyWaiting), "base") {
@@ -367,7 +367,7 @@ func TestBaseRedFailedTellRetriesOnceNextPass(t *testing.T) {
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
 	redHead := commitBaseHead(t, l.repo, l.gh, "red")
-	writeCountedBaseRun(t, l.gh, 801, redHead, "completed", "failure")
+	writeCountedBaseRun(t, l.gh, 801, redHead, "failure")
 	l.pass()
 
 	// Age past main_red_minutes and clear RunID (with start_worker already recorded) so tell fails on pass 1.
@@ -410,7 +410,7 @@ func TestBaseRedGreenRedSameSHAWakesAndTellsAgain(t *testing.T) {
 	sameHead := commitBaseHead(t, l.repo, l.gh, "same")
 
 	// Spell 1: red at sameHead -> base_red wake, escalate past main_red_minutes.
-	writeCountedBaseRun(t, l.gh, 901, sameHead, "completed", "failure")
+	writeCountedBaseRun(t, l.gh, 901, sameHead, "failure")
 	l.pass()
 	l.edit(func(s *flow.State) {
 		s.Project.Base.Since = now.Add(-time.Duration(s.Settings.MainRedMinutes+1) * time.Minute)
@@ -423,11 +423,11 @@ func TestBaseRedGreenRedSameSHAWakesAndTellsAgain(t *testing.T) {
 	// Re-run passes at the same sha -> base_green wake.
 	setStatusAt(t, l, l.worker, "idle", now.Add(time.Second))
 	now = now.Add(30 * time.Second)
-	writeCountedBaseRun(t, l.gh, 901, sameHead, "completed", "success")
+	writeCountedBaseRun(t, l.gh, 901, sameHead, "success")
 	l.pass()
 
 	// Spell 2: a later re-run fails at the same sha -> new base_red wake, and tells again past main_red_minutes.
-	writeCountedBaseRun(t, l.gh, 901, sameHead, "completed", "failure")
+	writeCountedBaseRun(t, l.gh, 901, sameHead, "failure")
 	l.pass()
 	redWakes := 0
 	for _, w := range l.state().Project.Wakes {
@@ -481,7 +481,7 @@ func TestBaseRedFailedTellFallbackWakesOncePerSpell(t *testing.T) {
 	writePRJSON(t, l.gh, "view.json", l.c1, greenRollup)
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
 	redHead := commitBaseHead(t, l.repo, l.gh, "red")
-	writeCountedBaseRun(t, l.gh, 902, redHead, "completed", "failure")
+	writeCountedBaseRun(t, l.gh, 902, redHead, "failure")
 	l.pass()
 	l.edit(func(s *flow.State) {
 		s.Project.Base.Since = now.Add(-time.Duration(s.Settings.MainRedMinutes+1) * time.Minute)

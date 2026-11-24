@@ -791,7 +791,7 @@ func TestBaseStatus(t *testing.T) {
 	gh := installFakeGH(t)
 
 	// Empty runs list (path-ignored push) -> unknown, not red.
-	got, err := fixtureGit(t).BaseStatus(ctx, repo)
+	got, err := fixtureGit(t).BaseStatus(ctx, repo, nil)
 	if err != nil || got.Known || got.Red || got.Branch != "main" {
 		t.Fatalf("empty = %+v, %v", got, err)
 	}
@@ -812,7 +812,7 @@ func TestBaseStatus(t *testing.T) {
 		{"skipped and failure", `{"workflow_runs":[{"id":14,"status":"completed","conclusion":"skipped"},{"id":15,"status":"completed","conclusion":"failure"}]}`, true, true, 15},
 	} {
 		writeGH(t, gh, "base-runs.json", tc.body)
-		got, err := fixtureGit(t).BaseStatus(ctx, repo)
+		got, err := fixtureGit(t).BaseStatus(ctx, repo, nil)
 		if err != nil || got.Red != tc.red || got.Known != tc.known || got.ID != tc.id {
 			t.Errorf("%s: got %+v, %v; want red=%v known=%v id=%d", tc.name, got, err, tc.red, tc.known, tc.id)
 		}
@@ -824,17 +824,17 @@ func TestBaseStatus(t *testing.T) {
 	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[{"id":20,"status":"completed","conclusion":"cancelled"},{"id":19,"status":"completed","conclusion":"success"}]}`)
 	writeGH(t, gh, "run-jobs.json", `{"jobs":[{"id":501,"conclusion":"cancelled"}]}`)
 	writeGH(t, gh, "annotations.json", `[{"message":"The job has exceeded the maximum execution time of 60m0s"}]`)
-	if got, err := fixtureGit(t).BaseStatus(ctx, repo); err != nil || !got.Red || !got.Known || got.ID != 20 {
+	if got, err := fixtureGit(t).BaseStatus(ctx, repo, nil); err != nil || !got.Red || !got.Known || got.ID != 20 {
 		t.Fatalf("cancelled by limit = %+v, %v; want red id=20", got, err)
 	}
 	writeGH(t, gh, "annotations.json", `[{"message":"The run was canceled by @someone."}]`)
-	if got, err := fixtureGit(t).BaseStatus(ctx, repo); err != nil || got.Red || got.Known {
+	if got, err := fixtureGit(t).BaseStatus(ctx, repo, nil); err != nil || got.Red || got.Known {
 		t.Fatalf("cancelled externally = %+v, %v; want unknown", got, err)
 	}
 
 	// Read error returns err (never flips red).
 	writeGH(t, gh, "base_runs_fail", "")
-	if _, err := fixtureGit(t).BaseStatus(ctx, repo); err == nil {
+	if _, err := fixtureGit(t).BaseStatus(ctx, repo, nil); err == nil {
 		t.Fatal("BaseStatus succeeded on base_runs_fail")
 	}
 }
@@ -848,7 +848,7 @@ func TestBaseStatusHeadCommit(t *testing.T) {
 
 	// Passing workflow listed first cannot hide a failing workflow on the same head commit.
 	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[{"id":202,"head_sha":"`+head+`","status":"completed","conclusion":"success"},{"id":201,"head_sha":"`+head+`","status":"completed","conclusion":"failure"}]}`)
-	got, err := fixtureGit(t).BaseStatus(ctx, repo)
+	got, err := fixtureGit(t).BaseStatus(ctx, repo, nil)
 	if err != nil || !got.Red || !got.Known || got.HeadSHA != head {
 		t.Fatalf("two workflows (pass then fail) = %+v, %v; want red known head=%s", got, err, head)
 	}
@@ -859,7 +859,7 @@ func TestBaseStatusHeadCommit(t *testing.T) {
 
 	// Re-run in progress (or another workflow still running) with no red run yet -> unknown (keep last value).
 	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[{"id":201,"head_sha":"`+head+`","status":"in_progress","conclusion":""},{"id":202,"head_sha":"`+head+`","status":"completed","conclusion":"success"}]}`)
-	got, err = fixtureGit(t).BaseStatus(ctx, repo)
+	got, err = fixtureGit(t).BaseStatus(ctx, repo, nil)
 	if err != nil || got.Known || got.Red {
 		t.Fatalf("in-progress rerun alongside pass = %+v, %v; want unknown (keep last value)", got, err)
 	}
@@ -876,11 +876,13 @@ func TestBaseStatusHeadCommit(t *testing.T) {
 	p1.WriteString(`]}`)
 	writeGH(t, gh, "base-runs.json", p1.String())
 	writeGH(t, gh, "base-runs.2.json", `{"workflow_runs":[{"id":2000,"head_sha":"`+head+`","status":"completed","conclusion":"failure"}]}`)
-	got, err = fixtureGit(t).BaseStatus(ctx, repo)
+	got, err = fixtureGit(t).BaseStatus(ctx, repo, nil)
 	if err != nil || !got.Red || !got.Known {
 		t.Fatalf("paged runs (fail on page 2) = %+v, %v; want red known", got, err)
 	}
 }
+
+func stubPRWorkflow(src, _ string) bool { return strings.Contains(src, "pull_request") }
 
 // TestBaseStatusPushOnlyWorkflowIgnored verifies finding 6 (trial 0ae4dd5,
 // seq 46): a push-only workflow (pages.yml, or GitHub's dynamic Pages run with
@@ -905,7 +907,7 @@ func TestBaseStatusPushOnlyWorkflowIgnored(t *testing.T) {
 		`{"id":45325825569,"path":".github/workflows/pages.yml","head_sha":"`+head+`","status":"completed","conclusion":"failure"}]}`)
 	writeGH(t, gh, "run-jobs.json", `{"jobs":[{"id":601,"name":"Test","conclusion":"cancelled"}]}`)
 	writeGH(t, gh, "annotations.json", `[]`)
-	got, err := fixtureGit(t).BaseStatus(ctx, repo)
+	got, err := fixtureGit(t).BaseStatus(ctx, repo, stubPRWorkflow)
 	if err != nil || got.Known || got.Red {
 		t.Errorf("0ae4dd5 (pages failure + clean CI cancel + release pass) = %+v, %v; want unknown (Known=false, Red=false)", got, err)
 	}
@@ -915,7 +917,7 @@ func TestBaseStatusPushOnlyWorkflowIgnored(t *testing.T) {
 	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[`+
 		`{"id":45325825569,"path":"dynamic/pages/pages-build-deployment","head_sha":"`+head+`","status":"completed","conclusion":"failure"},`+
 		`{"id":45325825570,"path":".github/workflows/ci.yml","head_sha":"`+head+`","status":"completed","conclusion":"success"}]}`)
-	got, err = fixtureGit(t).BaseStatus(ctx, repo)
+	got, err = fixtureGit(t).BaseStatus(ctx, repo, stubPRWorkflow)
 	if err != nil || got.Red || !got.Known || got.ID != 45325825570 {
 		t.Errorf("dynamic pages failure + CI success = %+v, %v; want green id=45325825570", got, err)
 	}
@@ -942,7 +944,7 @@ func TestBaseStatusCancelledWithFailedJobIsRed(t *testing.T) {
 	writeGH(t, gh, "run-jobs.json", `{"jobs":[{"id":701,"name":"Lint","conclusion":"failure"},{"id":702,"name":"Test","conclusion":"cancelled"}]}`)
 	writeGH(t, gh, "annotations.json", `[]`)
 
-	got, err := fixtureGit(t).BaseStatus(ctx, repo)
+	got, err := fixtureGit(t).BaseStatus(ctx, repo, stubPRWorkflow)
 	if err != nil || !got.Red || !got.Known || got.ID != 45336002997 {
 		t.Fatalf("02e8f06 (cancelled CI with failed Lint job + release pass) = %+v, %v; want red known id=45336002997", got, err)
 	}
@@ -966,7 +968,7 @@ func TestBaseStatusGreenNeedsCountedSuccess(t *testing.T) {
 	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[`+
 		`{"id":45330000001,"path":".github/workflows/release.yml","head_sha":"`+head+`","status":"completed","conclusion":"success"},`+
 		`{"id":45330000002,"path":".github/workflows/ci.yml","head_sha":"`+head+`","status":"completed","conclusion":"success"}]}`)
-	got, err := fixtureGit(t).BaseStatus(ctx, repo)
+	got, err := fixtureGit(t).BaseStatus(ctx, repo, stubPRWorkflow)
 	if err != nil || got.Red || !got.Known || got.ID != 45330000002 {
 		t.Errorf("545155a (release + CI pass) = %+v, %v; want green known id=45330000002", got, err)
 	}
@@ -974,7 +976,7 @@ func TestBaseStatusGreenNeedsCountedSuccess(t *testing.T) {
 	// Push-only Release success alone must not turn the base green.
 	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[`+
 		`{"id":45336003006,"path":".github/workflows/release.yml","head_sha":"`+head+`","status":"completed","conclusion":"success"}]}`)
-	got, err = fixtureGit(t).BaseStatus(ctx, repo)
+	got, err = fixtureGit(t).BaseStatus(ctx, repo, stubPRWorkflow)
 	if err != nil || got.Red || got.Known {
 		t.Errorf("release-only success = %+v, %v; want unknown (Known=false, Red=false)", got, err)
 	}
@@ -994,7 +996,7 @@ func TestBaseStatusSkippedAloneIsUnknown(t *testing.T) {
 	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[`+
 		`{"id":45339000001,"path":".github/workflows/ci.yml","head_sha":"`+head+`","status":"completed","conclusion":"skipped"}]}`)
 
-	got, err := fixtureGit(t).BaseStatus(ctx, repo)
+	got, err := fixtureGit(t).BaseStatus(ctx, repo, stubPRWorkflow)
 	if err != nil || got.Red || got.Known {
 		t.Fatalf("skipped alone = %+v, %v; want unknown (Known=false, Red=false)", got, err)
 	}

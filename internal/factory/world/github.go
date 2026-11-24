@@ -444,12 +444,12 @@ type BaseRun struct {
 }
 
 // BaseStatus reads the base branch's head commit and its push workflow runs
-// (design.md 7.3, N38, KB-MRG-47). Red if any completed run failed (failure,
-// timed_out, or cancelled by job time limit); green when every run completed
-// and none is red; unknown while any run is still in progress or when no run
-// exists for that commit (path-ignored push). Read errors are returned so
-// callers keep the last known state and never flip red.
-func (g *Git) BaseStatus(ctx context.Context, repoDir string) (BaseRun, error) {
+// (design.md 7.3, N38, KB-MRG-47). When counted is non-nil, only runs whose
+// workflow file at head satisfies counted(src, base) count; a missing file is
+// ignored and a failed read yields unknown. Red on failure, timed_out, or
+// cancelled with a failed/timed-out job; green when all finished, none
+// cancelled, and one succeeded; else unknown. Read errors return err.
+func (g *Git) BaseStatus(ctx context.Context, repoDir string, counted func(workflowSrc, base string) bool) (BaseRun, error) {
 	repo, err := g.ghRepo(ctx, repoDir)
 	if err != nil {
 		return BaseRun{}, err
@@ -464,22 +464,56 @@ func (g *Git) BaseStatus(ctx context.Context, repoDir string) (BaseRun, error) {
 		return BaseRun{}, cmp.Or(err, fmt.Errorf("world: empty head sha for base %s", base))
 	}
 	head := headRef.Object.SHA
-	red, firstID, firstConc, total, pending := BaseRun{}, int64(0), "", 0, false
+	var fetched, hasCommit, readFailed bool
+	seen := map[string]bool{}
+	isCounted := func(path string) bool {
+		if counted == nil || path == "" {
+			return counted == nil
+		}
+		if ok, have := seen[path]; have {
+			return ok
+		}
+		if !hasCommit {
+			_, err := g.gitCmd(ctx, repoDir, "rev-parse", "--verify", "--quiet", head+"^{commit}")
+			if gitExit(err, 1) && !fetched {
+				fetched = true
+				if err = g.FetchRemote(ctx, repoDir); err == nil {
+					_, err = g.gitCmd(ctx, repoDir, "rev-parse", "--verify", "--quiet", head+"^{commit}")
+				}
+			}
+			if err != nil {
+				readFailed = true
+				return false
+			}
+			hasCommit = true
+		}
+		r, err := g.Run(ctx, repoDir, "show", head+":"+path)
+		if err != nil {
+			if gitExit(err, 128) && (strings.Contains(err.Error(), "does not exist in") || strings.Contains(err.Error(), "exists on disk, but not in")) {
+				seen[path] = false
+				return false
+			}
+			readFailed = true
+			return false
+		}
+		seen[path] = counted(string(r.Stdout), base)
+		return seen[path]
+	}
+	red, passID, pending := BaseRun{}, int64(0), false
 	endpoint := "repos/" + repo + "/actions/runs?branch=" + url.QueryEscape(base) + "&event=push&head_sha=" + url.QueryEscape(head)
 	err = g.ghPages(ctx, repoDir, endpoint, 100, func(raw []byte) (int, error) {
 		var resp struct {
 			WorkflowRuns []struct {
-				ID                 int64
-				Status, Conclusion string
+				ID                       int64
+				Path, Status, Conclusion string
 			} `json:"workflow_runs"`
 		}
 		if err := json.Unmarshal(raw, &resp); err != nil {
 			return 0, err
 		}
 		for _, r := range resp.WorkflowRuns {
-			total++
-			if firstID == 0 {
-				firstID, firstConc = r.ID, strings.ToLower(r.Conclusion)
+			if readFailed || !isCounted(r.Path) {
+				continue
 			}
 			if !strings.EqualFold(r.Status, "completed") {
 				pending = true
@@ -489,30 +523,37 @@ func (g *Git) BaseStatus(ctx context.Context, repoDir string) (BaseRun, error) {
 				continue
 			}
 			switch c := strings.ToLower(r.Conclusion); c {
+			case "success":
+				passID = cmp.Or(passID, r.ID)
+			case "skipped", "neutral":
 			case "failure", "timed_out":
 				red = BaseRun{ID: r.ID, Branch: base, HeadSHA: head, Conclusion: c, Red: true, Known: true}
 			case "cancelled":
-				if lim, err := g.runCancelledByLimit(ctx, repoDir, repo, r.ID); err != nil {
+				if why, err := g.runCancelledRed(ctx, repoDir, repo, r.ID); err != nil {
 					return 0, err
-				} else if lim {
-					red = BaseRun{ID: r.ID, Branch: base, HeadSHA: head, Conclusion: "cancelled_timeout", Red: true, Known: true}
+				} else if why != "" {
+					red = BaseRun{ID: r.ID, Branch: base, HeadSHA: head, Conclusion: why, Red: true, Known: true}
+				} else {
+					pending = true
 				}
+			default:
+				pending = true
 			}
 		}
 		return len(resp.WorkflowRuns), nil
 	})
 	if err != nil {
 		return BaseRun{}, err
-	} else if red.Red {
+	} else if !readFailed && red.Red {
 		return red, nil
-	} else if total == 0 || pending {
+	} else if readFailed || pending || passID == 0 {
 		return BaseRun{Branch: base, HeadSHA: head}, nil
 	}
-	return BaseRun{ID: firstID, Branch: base, HeadSHA: head, Conclusion: firstConc, Known: true}, nil
+	return BaseRun{ID: passID, Branch: base, HeadSHA: head, Conclusion: "success", Known: true}, nil
 }
 
-func (g *Git) runCancelledByLimit(ctx context.Context, dir, repo string, runID int64) (bool, error) {
-	limited := false
+func (g *Git) runCancelledRed(ctx context.Context, dir, repo string, runID int64) (string, error) {
+	why := ""
 	err := g.ghPages(ctx, dir, fmt.Sprintf("repos/%s/actions/runs/%d/jobs", repo, runID), 100, func(raw []byte) (int, error) {
 		var resp struct {
 			Jobs []struct {
@@ -522,15 +563,23 @@ func (g *Git) runCancelledByLimit(ctx context.Context, dir, repo string, runID i
 		}
 		err := json.Unmarshal(raw, &resp)
 		for _, j := range resp.Jobs {
-			if err == nil && strings.EqualFold(j.Conclusion, "cancelled") {
+			if err != nil || why != "" {
+				break
+			}
+			switch strings.ToLower(j.Conclusion) {
+			case "failure", "timed_out":
+				why = "cancelled_failed"
+			case "cancelled":
 				var stop string
 				stop, err = g.checkRunStop(ctx, dir, repo, j.ID)
-				limited = limited || stop == "timeout"
+				if stop == "timeout" {
+					why = "cancelled_timeout"
+				}
 			}
 		}
 		return len(resp.Jobs), err
 	})
-	return limited, err
+	return why, err
 }
 
 // MergePR asks GitHub to squash-merge PR number, pinned to head: GitHub

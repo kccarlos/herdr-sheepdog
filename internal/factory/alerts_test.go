@@ -1272,7 +1272,7 @@ func TestPR5b8_MainRedDoesNotStopKeepsN38AndClearsOnlyOnGoodCompletedBase(t *tes
 		writePRJSON(t, w.gh, "view.json", c1, greenRollup)
 		writeGHFile(t, w.gh, "compare.json", `{"behind_by":1}`)
 		baseHead1 := commitBaseHead(t, w.repo, w.gh, "red1")
-		writeCountedBaseRun(t, w.gh, 101, baseHead1, "completed", "failure")
+		writeCountedBaseRun(t, w.gh, 101, baseHead1, "failure")
 
 		mainRedDur := time.Duration(w.state().Settings.MainRedMinutes) * time.Minute
 		w.pass() // first red observation; N38 holds T1, main_red not yet raised
@@ -1352,7 +1352,7 @@ func TestPR5b8_MainRedDoesNotStopKeepsN38AndClearsOnlyOnGoodCompletedBase(t *tes
 		}
 
 		// 4) Positively known completed good base snapshot -> clears main_red!
-		writeCountedBaseRun(t, w.gh, 102, baseHead2, "completed", "success")
+		writeCountedBaseRun(t, w.gh, 102, baseHead2, "success")
 		w.advance(time.Minute)
 		w.pass()
 		if ts, active := statusAlert(t, w.paths, w.repo, "main_red"); active {
