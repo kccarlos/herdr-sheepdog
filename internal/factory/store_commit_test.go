@@ -1162,3 +1162,122 @@ func TestStore_DeliverWorkerDoesNotSendAfterFailedSaveInAdvanceRun(t *testing.T)
 		t.Fatalf("sent to workers after failed write dirtied store (S2b): worker1=%q worker2=%q, want 0 sends", s1, s2)
 	}
 }
+
+// Test 15 (S2, S2b — r2 review: NeonH Finding 1, J6 path):
+// When J10's commitLogLocked fails and dirties the store, passProjectRulesLocked
+// must stop immediately rather than re-matching against uncommitted in-memory
+// state and falling through into J6 (holding a phantom agents_down@j6 alert in
+// ProjectStatus and flushing it to log.jsonl on recovery).
+func TestStore_J10CommitFailStopsProjectRules(t *testing.T) {
+	w := newStoreWorld(t, "J10 commit failure stops subsequent project rules")
+	w.edit(func(s *flow.State) {
+		s.Settings.CoordinatorStartsPerHour = 1
+		s.Settings.CoordinatorGapMinutes = 1
+		s.Project.Acts = []flow.Act{{Key: flow.AskStartCoordinator, Result: "done", At: w.now.Add(-59 * time.Minute)}}
+		s.Project.RunID = ""
+		s.Project.Run = &flow.RunRecord{
+			ID: "coord-r29", Address: "coord-r29", Role: flow.RoleCoordinator, CLI: "claude",
+			State: flow.PhaseEnded, Result: flow.EndStuck,
+			BlockedSince: w.now.Add(-5 * time.Minute), EndedAt: w.now.Add(-time.Minute),
+		}
+		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: parked", Parked: true, EstimateLines: 20}}
+	})
+
+	var failedJ10 atomic.Bool
+	w.setWriteHooks(nil, func(path string, l LogLine) error {
+		if l.Rule == "J10" && failedJ10.CompareAndSwap(false, true) {
+			return errors.New("log write failed on J10")
+		}
+		return AppendLog(path, l)
+	})
+
+	w.pass() // J10 fails -> store dirty; must NOT fall through into J6/J7
+	if !failedJ10.Load() {
+		t.Fatal("setup bug: J10 did not attempt a commit")
+	}
+	rows, err := w.eng.ProjectStatus(w.repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, row := range rows {
+		if row.ID == "ALERT" && row.Title == flow.AlertAgentsDown && row.Rule == "J6" {
+			t.Fatalf("dirty store after J10 failure fell through to J6 and held agents_down@j6: %+v", row)
+		}
+	}
+
+	// Advance past the 1-hour start cap and recover cleanly: no phantom J6 alert may be logged.
+	w.advanceMinute()
+	w.advanceMinute()
+	w.pass()
+
+	_, lines := assertLogInvariants(t, w.paths.State(w.id), w.paths.Log(w.id))
+	for _, l := range lines {
+		if l.Rule == "alert" && slices.Contains(l.Asked, flow.AlertAgentsDown) && strings.Contains(l.Why, "coordinator_starts_per_hour") {
+			t.Fatalf("phantom J6 agents_down alert committed after J10 failure: %+v", l)
+		}
+	}
+}
+
+// Test 16 (S2b — r2 review: NeonH Finding 1, J7 path):
+// When J10's commitLogLocked fails and the coordinator start cap is not active,
+// passProjectRulesLocked must stop immediately rather than falling through into
+// J7 (startCoordLocked), which would stop/remove the old coordinator terminal
+// and attempt a launch on a dirty store.
+func TestStore_J10CommitFailDoesNotFallThroughToJ7(t *testing.T) {
+	w := newStoreWorld(t, "J10 commit failure does not fall through to J7")
+	w.srv.Add(hc.Terminal{
+		Address: "coord-r29",
+		Name:    coordName(w.id),
+		State:   "live",
+		Labels:  testCoordLabels(w.id, "coord-r29"),
+	})
+	w.edit(func(s *flow.State) {
+		s.Project.RunID = ""
+		s.Project.Run = &flow.RunRecord{
+			ID: "coord-r29", Address: "coord-r29", Role: flow.RoleCoordinator, CLI: "claude",
+			State: flow.PhaseEnded, Result: flow.EndStuck,
+			BlockedSince: w.now.Add(-5 * time.Minute), EndedAt: w.now.Add(-time.Minute),
+		}
+		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: parked", Parked: true, EstimateLines: 20}}
+	})
+
+	var failedJ10 atomic.Bool
+	w.setWriteHooks(nil, func(path string, l LogLine) error {
+		if l.Rule == "J10" && failedJ10.CompareAndSwap(false, true) {
+			return errors.New("log write failed on J10")
+		}
+		return AppendLog(path, l)
+	})
+
+	w.pass() // J10 fails -> store dirty; must NOT fall through into J7
+	if !failedJ10.Load() {
+		t.Fatal("setup bug: J10 did not attempt a commit")
+	}
+	if _, err := w.client.Get(w.ctx, "coord-r29"); err != nil {
+		t.Fatalf("dirty store after J10 failure fell through to J7 and stopped/removed coord-r29: %v", err)
+	}
+	if strings.Contains(w.daemonLog.String(), "factory.exec_error") {
+		t.Fatalf("dirty store after J10 failure fell through to J7 and logged factory.exec_error:\n%s", w.daemonLog.String())
+	}
+
+	// Next healthy pass: J10 commits and J7 cleanly replaces coord-r29 with a fresh coordinator.
+	w.advanceMinute()
+	w.pass()
+
+	st, lines := assertLogInvariants(t, w.paths.State(w.id), w.paths.Log(w.id))
+	if st.Project.RunID == "" || st.Project.RunID == "coord-r29" {
+		t.Fatalf("after healthy recovery pass, RunID = %q, want a newly started coordinator", st.Project.RunID)
+	}
+	var sawJ10, sawJ7 bool
+	for _, l := range lines {
+		if l.Rule == "J10" {
+			sawJ10 = true
+		}
+		if l.Rule == "J7" && strings.HasPrefix(l.Decision, "started coordinator ") {
+			sawJ7 = true
+		}
+	}
+	if !sawJ10 || !sawJ7 {
+		t.Fatalf("expected both J10 and J7 started-coordinator lines after recovery (sawJ10=%t, sawJ7=%t); lines=%+v", sawJ10, sawJ7, lines)
+	}
+}
