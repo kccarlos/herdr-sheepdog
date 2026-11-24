@@ -22,12 +22,15 @@ type situation struct {
 	Run, Says, Never         []string
 }
 
+var planReviewerTmpl = func() string { b, _ := os.ReadFile("plan_reviewer.md"); return string(b) }()
+
 var templates = map[string]*string{
 	"coordinator":    &coordinatorTemplate,
 	"worker":         &workerTemplate,
 	"reviewer":       &reviewerCmdTemplate,
 	"reviewer-codex": &reviewerTemplate,
 	"retro":          &retroTemplate,
+	"plan_reviewer":  &planReviewerTmpl,
 }
 
 // filled builds role's prompt from tmpl through the engine's own fill, on a
@@ -46,6 +49,9 @@ func filled(role, tmpl string) string {
 	case "retro":
 		e := &Engine{}
 		return e.retroPrompt(tmpl, t, a, flow.DefaultSettings(), "c1", "git diff b..c1", 80, 4, "sheepdog", "/tmp/draft.md")
+	case "plan_reviewer":
+		facts := "Goal: Add a greeting.\nTasks under review:\n- T1 feat: add Greet (for_whom: CLI callers; if_skipped: no greeting; smallest: one Greet func; not_doing: i18n; estimate: 50)\n- T2 feat: verbose flag (for_whom: debuggers; if_skipped: an optional item from the backlog; smallest: --verbose; not_doing: log levels; estimate: 40)\n- T3 feat: persist count (for_whom: users; if_skipped: no count; smallest: write count to state.json; not_doing: history; estimate: 60)\nAccepted tasks: (none)"
+		return fill(tmpl, "{facts}", facts, "{findings_path}", "/tmp/plan-draft.md", "{sheepdog}", "sheepdog", "{code}", "abc123")
 	}
 	e := &Engine{}
 	prompt, err := e.reviewerPromptWith(context.Background(), tmpl, t, a, "c1", flow.RoundFull, "git diff b..c1", e.rejectionPrompt("p", "T1", a, "c1"), 2, "sheepdog", "/tmp/draft.md")
@@ -194,6 +200,27 @@ func TestRetroTemplateCauseSetMatchesFlow(t *testing.T) {
 	}
 	if !slices.Equal(got, flow.RetroCauses) {
 		t.Fatalf("retro.md cause line = %v (from %q), want exact flow.RetroCauses %v", got, line, flow.RetroCauses)
+	}
+}
+
+// TestPlanReviewerTemplateKindsMatchFlow checks plan.md 11.2, design.md 7.2,
+// and prompts.md 5.2: plan_reviewer.md lists exact flow.PlanFindingKinds.
+func TestPlanReviewerTemplateKindsMatchFlow(t *testing.T) {
+	if strings.TrimSpace(planReviewerTmpl) == "" {
+		t.Fatal("plan_reviewer.md is missing or empty")
+	}
+	var got []string
+	for _, raw := range strings.Split(planReviewerTmpl, "\n") {
+		line := strings.TrimSpace(sourceMark.ReplaceAllString(raw, ""))
+		if _, after, ok := strings.Cut(line, "<"+flow.PlanFindingKinds[0]+"|"); ok {
+			if body, _, ok := strings.Cut(after, ">"); ok {
+				got = append([]string{flow.PlanFindingKinds[0]}, strings.Split(body, "|")...)
+				break
+			}
+		}
+	}
+	if !slices.Equal(got, flow.PlanFindingKinds) {
+		t.Fatalf("plan_reviewer.md finding kinds = %v, want exact flow.PlanFindingKinds %v", got, flow.PlanFindingKinds)
 	}
 }
 
