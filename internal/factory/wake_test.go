@@ -309,6 +309,7 @@ func TestN25N6RecapOpensOnceWakesCoordinatorAndSplits(t *testing.T) {
 	l.srv.Finish("coord-elsewhere", "exited")
 	l.srv.Add(hc.Terminal{Address: "coord1", Name: "coord", State: "live", Labels: testCoordLabels(l.id, "run-coord1"), Status: &hc.Status{App: "claude-code", State: "idle"}, StatusMS: &pastMS})
 	l.edit(func(s *flow.State) {
+		s.Settings.RetrosPerTask = 0 // disable retro so a 3-round streak hits L12 -> N25 recap
 		s.Project.RunID = "coord1"
 		s.Project.RunTokenHash = tokenHash("tok-coord")
 		s.Tasks[0].Attempts[0].Rounds = []flow.Round{

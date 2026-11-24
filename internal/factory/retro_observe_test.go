@@ -59,11 +59,11 @@ func TestObserveTaskSplitFromHadRetroFromParentRetros(t *testing.T) {
 }
 
 // TestObserveTaskSetsRetroUnavailableOnNonQuotaResolveFailure checks plan.md
-// 12.1 and B2: observeTaskLocked sets Facts.RetroUnavailable = true when
-// ResolveWithReason(RoleRetro, ...) fails for a non-quota reason (no retro
-// candidates when models.retro is unset, or launchCapability refusing RoleRetro
-// in 12.1 even when models.retro is configured), and Facts.RetroUnavailable
-// marshals under json:"retro_unavailable,omitempty".
+// 12.1, 12.3 (R3), and B2: observeTaskLocked sets Facts.RetroUnavailable = true
+// when ResolveWithReason(RoleRetro, ...) fails for a non-quota reason (e.g.
+// launchCapability refusing an unsupported retro CLI) and false when a default
+// or configured retro candidate is usable, and Facts.RetroUnavailable marshals
+// under json:"retro_unavailable,omitempty".
 func TestObserveTaskSetsRetroUnavailableOnNonQuotaResolveFailure(t *testing.T) {
 	t.Parallel()
 
@@ -89,11 +89,17 @@ func TestObserveTaskSetsRetroUnavailableOnNonQuotaResolveFailure(t *testing.T) {
 		models map[string][]flow.Candidate
 		want   bool // facts.RetroUnavailable
 	}{
-		{name: "models_retro_unset", models: nil, want: true},
+		// 12.3 (R3) sets DefaultModels[RoleRetro] = claude/opus/high, which is
+		// launchable and distinct from the default claude/sonnet worker.
+		{name: "models_retro_unset", models: nil, want: false},
 		// 12.2 teaches launchCapability RoleRetro, so a configured retro candidate is usable.
 		{name: "models_retro_set_launchable_from_12_2", models: map[string][]flow.Candidate{
 			flow.RoleRetro: {{CLI: world.AgyCLI, Model: "gemini-4-carbon-high", Effort: "high"}},
 		}, want: false},
+		// launchCapability refuses RoleRetro on Codex (non-quota resolve failure).
+		{name: "models_retro_codex_unsupported", models: map[string][]flow.Candidate{
+			flow.RoleRetro: {{CLI: world.CodexCLI, Model: "gpt-6.2-sol", Effort: "high"}},
+		}, want: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

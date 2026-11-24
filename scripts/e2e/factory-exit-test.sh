@@ -22,7 +22,10 @@ revert_main_red() {
   echo "== reverting temporary ci/main-fail on main $(date +%T)"
   git_gh revert --no-edit HEAD >/dev/null 2>&1 && git_gh push -q origin HEAD:main && MAIN_RED_PUSHED=0 && echo "== reverted: $(git -C "$R" log --oneline -1)"
 }
-stopd() { hc kill "$DNAME" >/dev/null 2>&1; hc rm "$DNAME" >/dev/null 2>&1; sleep 3; }
+# Only stop a daemon this run started: tests run the script on an empty dir, and a
+# fixed terminal name must never take down a live run started elsewhere.
+STARTED=0
+stopd() { [ "$STARTED" = 1 ] || return 0; hc kill "$DNAME" >/dev/null 2>&1; hc rm "$DNAME" >/dev/null 2>&1; sleep 3; }
 cleanup_trap() {
   revert_main_red || true
   [ -n "$J" ] && "$D/sheepdog" factory stop "$R" --config "$C" >/dev/null 2>&1 || true
@@ -37,9 +40,9 @@ trap cleanup_trap EXIT
 
 daemon() {
   if [ -n "$OP_TOKEN_FILE" ] && [ -f "$OP_TOKEN_FILE" ]; then
-    hc run --bg --json --name "$DNAME" --cwd "$D" -- zsh -c "OP_SERVICE_ACCOUNT_TOKEN=\"\$(<\"$OP_TOKEN_FILE\")\" exec op run --env-file=\"$VOICE_ENV\" -- env -u OP_SERVICE_ACCOUNT_TOKEN \"$D/sheepdog\" serve --config \"$C\" --voice=gemini --brain=off --cli=off" >/dev/null || fail "hc run daemon"
+    hc run --bg --json --name "$DNAME" --cwd "$D" -- zsh -c "OP_SERVICE_ACCOUNT_TOKEN=\"\$(<\"$OP_TOKEN_FILE\")\" exec op run --env-file=\"$VOICE_ENV\" -- env -u OP_SERVICE_ACCOUNT_TOKEN \"$D/sheepdog\" serve --config \"$C\" --voice=gemini --brain=off --cli=off" >/dev/null || fail "hc run daemon"; STARTED=1
   else
-    hc run --bg --json --name "$DNAME" --cwd "$D" -- op run --env-file="$VOICE_ENV" -- "$D/sheepdog" serve --config "$C" --voice=gemini --brain=off --cli=off >/dev/null || fail "hc run daemon"
+    hc run --bg --json --name "$DNAME" --cwd "$D" -- op run --env-file="$VOICE_ENV" -- "$D/sheepdog" serve --config "$C" --voice=gemini --brain=off --cli=off >/dev/null || fail "hc run daemon"; STARTED=1
   fi
   for _ in $(seq 1 20); do curl -sf --max-time 2 "$U/api/state" >/dev/null && return 0; sleep 1; done
   fail "daemon did not answer on $U within 20s"

@@ -83,6 +83,7 @@ func DefaultModels(s Settings) map[string][]Candidate {
 		RoleCoordinator: {{"claude", "opus", "medium"}},
 		RoleWorker:      {{"claude", "sonnet", "medium"}},
 		RoleReviewer:    {{"claude", "opus", "medium"}, {"claude", "sonnet", "medium"}},
+		RoleRetro:       {{"claude", "opus", "high"}},
 	}
 	if s.SecondReviewer == "codex" {
 		m[RoleReviewer][1] = Candidate{"codex", "gpt-6.2-sol", "medium"}

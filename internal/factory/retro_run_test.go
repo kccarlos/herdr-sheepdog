@@ -628,34 +628,41 @@ func TestRetroAmendRequestAndAnswerAsk(t *testing.T) {
 // scripts/e2e/factory-retro.sh --mode launch must be implemented (no TODO(12.2)
 // stub exiting 2), configure models.retro with agy/gemini-4-carbon-high, and
 // assert the 12.2 launch -> "In retro" -> M4 N25/N6 path.
-func TestFactoryRetroScriptLaunchModeImplemented(t *testing.T) {
+func TestFactoryRetroScriptRecapAndShipModesImplemented(t *testing.T) {
+	// 12.3 replaced --mode regression and --mode launch with --mode recap and --mode ship.
 	scriptPath := filepath.Join("..", "..", "scripts", "e2e", "factory-retro.sh")
 	raw, err := os.ReadFile(scriptPath)
 	if err != nil {
 		t.Fatalf("read %s: %v", scriptPath, err)
 	}
 	src := string(raw)
-	if strings.Contains(src, "TODO(12.2)") {
-		t.Errorf("%s still contains TODO(12.2) stub", scriptPath)
-	}
-	for _, want := range []string{"gemini-4-carbon-high", "start_retro", "In retro", "retro_unavailable"} {
-		if !strings.Contains(src, want) {
-			t.Errorf("%s missing %q required for --mode launch", scriptPath, want)
+	for _, stub := range []string{"TODO(12.2)", "TODO(12.3)"} {
+		if strings.Contains(src, stub) {
+			t.Errorf("%s still contains %s stub", scriptPath, stub)
 		}
 	}
-	if zshPath, err := exec.LookPath("zsh"); err == nil {
-		cmd := exec.Command(zshPath, scriptPath, "--mode", "launch", t.TempDir())
-		out, runErr := cmd.CombinedOutput()
+	for _, want := range []string{"start_retro", "In retro", "open_recap@review", "N22"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("%s missing %q required for --mode recap and --mode ship", scriptPath, want)
+		}
+	}
+	zshPath, err := exec.LookPath("zsh")
+	if err != nil {
+		return
+	}
+	for _, mode := range []string{"recap", "ship"} {
+		out, runErr := exec.Command(zshPath, scriptPath, "--mode", mode, t.TempDir()).CombinedOutput()
 		var exitErr *exec.ExitError
 		if !errors.As(runErr, &exitErr) {
-			t.Fatalf("factory-retro.sh --mode launch on empty dir: err=%v out=%s", runErr, out)
+			t.Fatalf("factory-retro.sh --mode %s on an empty dir: err=%v out=%s", mode, runErr, out)
 		}
-		if exitErr.ExitCode() == 2 || strings.Contains(string(out), "TODO(12.2)") {
-			t.Fatalf("factory-retro.sh --mode launch hit TODO(12.2) stub (exit %d): %s", exitErr.ExitCode(), out)
+		if exitErr.ExitCode() == 2 || strings.Contains(string(out), "not implemented") {
+			t.Errorf("--mode %s is not implemented: exit %d out=%s", mode, exitErr.ExitCode(), out)
 		}
-		if exitErr.ExitCode() != 1 || !strings.Contains(string(out), "missing executable") {
-			t.Fatalf("factory-retro.sh --mode launch on empty dir exited %d, want preflight exit 1 (missing executable): %s", exitErr.ExitCode(), out)
-		}
+	}
+	out, runErr := exec.Command(zshPath, scriptPath, "--mode", "launch", t.TempDir()).CombinedOutput()
+	if runErr == nil || !strings.Contains(string(out), "Unknown mode") {
+		t.Errorf("--mode launch should be refused as unknown after 12.3: err=%v out=%s", runErr, out)
 	}
 }
 
@@ -731,5 +738,83 @@ func TestObserveReviewLockedNeverReadsCodexReportForRoundRetro(t *testing.T) {
 	a := st.Tasks[0].Attempts[0]
 	if len(a.Rounds) != 0 || a.Review == nil {
 		t.Fatalf("observeReviewLocked read Codex <report> for RoundRetro and recorded reviewer verdict: rounds=%+v review=%+v", a.Rounds, a.Review)
+	}
+}
+
+// TestFactoryRetroScriptMatchesRealRecapWakeKey checks Neon high major 2:
+// scripts/e2e/factory-retro.sh's state.json recap-wake matcher must match the
+// real N6 wake key produced by flow/rows.go (wake_coordinator@recap@1) and
+// wake.go:holdWake (Key: "recap@1").
+func TestFactoryRetroScriptMatchesRealRecapWakeKey(t *testing.T) {
+	pyPath, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not found")
+	}
+	scriptPath := filepath.Join("..", "..", "scripts", "e2e", "factory-retro.sh")
+	raw, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", scriptPath, err)
+	}
+	_, afterStart, ok := strings.Cut(string(raw), "WAKE_TEXT=$(python3 - \"$J\" \"$TID\" <<'PY'\n")
+	if !ok {
+		t.Fatalf("could not locate WAKE_TEXT python matcher in %s", scriptPath)
+	}
+	pySrc, _, ok := strings.Cut(afterStart, "\nPY\n")
+	if !ok {
+		t.Fatalf("could not locate end of WAKE_TEXT python matcher in %s", scriptPath)
+	}
+
+	now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	st := flow.State{
+		Project:  flow.Project{ID: "proj-test"},
+		Settings: flow.DefaultSettings(),
+		Tasks: []flow.Task{{
+			ID: "T1", Title: "feat: retro recap",
+			Attempts: []flow.Attempt{{
+				BaseCommit: "b0", PR: 7,
+				Ready:  []flow.Ready{{Head: "c1"}},
+				Rounds: []flow.Round{{N: 5, Kind: flow.RoundRetro, Head: "c1", Verdict: flow.VerdictFix, Majors: 1, ReportPath: "/tmp/reports/T1-r5.md"}},
+			}},
+			Retros: []flow.Retro{{
+				Attempt: 1, Round: 5, Cause: "wrong-seam",
+				WorkerChange: "fix", WorkerChangeKind: flow.ChangeKindCheck,
+				CoordinatorChange: "split task", CoordinatorChangeKind: flow.ChangeKindBrief,
+				At: now,
+			}},
+			Recaps: []flow.Recap{{Trigger: flow.TriggerReview, Allowed: []string{"split", "new", "drop"}}},
+		}},
+	}
+	row, dec := flow.FirstMatch(flow.TaskRows, flow.In{Task: st.Tasks[0], Settings: st.Settings, Now: now})
+	if row.ID != "N6" {
+		t.Fatalf("FirstMatch = %q, want N6", row.ID)
+	}
+	var wakeAsk string
+	for _, ask := range dec.Asked {
+		if strings.HasPrefix(ask, flow.AskWake+"@") {
+			wakeAsk = ask
+			break
+		}
+	}
+	if wakeAsk == "" {
+		t.Fatalf("N6 Asked = %v, missing %s ask", dec.Asked, flow.AskWake)
+	}
+	holdWake(&st, 0, row.ID, dec.Why, wakeAsk, flow.Facts{}, "", now)
+	if len(st.Project.Wakes) != 1 {
+		t.Fatalf("held wakes = %+v, want 1", st.Project.Wakes)
+	}
+	statePath := filepath.Join(t.TempDir(), "state.json")
+	if err := SaveState(statePath, st); err != nil {
+		t.Fatalf("SaveState: %v", err)
+	}
+
+	cmd := exec.Command(pyPath, "-", statePath, "T1")
+	cmd.Stdin = strings.NewReader(pySrc)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("running extracted matcher: %v\nout=%s", err, out)
+	}
+	got := strings.TrimSpace(string(out))
+	if got != st.Project.Wakes[0].Facts {
+		t.Fatalf("factory-retro.sh matcher returned %q for real N6 wake key %q, want facts %q", got, st.Project.Wakes[0].Key, st.Project.Wakes[0].Facts)
 	}
 }

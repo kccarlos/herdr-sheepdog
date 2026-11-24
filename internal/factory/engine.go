@@ -1498,6 +1498,9 @@ func (e *Engine) observeTaskLocked(ctx context.Context, id string, s *flow.State
 			return facts, false
 		}
 		if !facts.RetroUnavailable {
+			facts.RetroUnavailable = retroUnavailable(task, s.Settings, flow.ResolveFacts{})
+		}
+		if !facts.RetroUnavailable && flow.OpenRecap(task) == nil && flow.Ladder(flow.In{Task: task, Settings: s.Settings, Facts: facts, Now: e.now()}) == flow.RetroAnswer {
 			facts.RetroUnavailable = e.retroUnavailableLocked(ctx, task, s.Settings)
 		}
 	}
@@ -2419,7 +2422,7 @@ func (e *Engine) deliverWorkerLocked(ctx context.Context, id, taskID string, s *
 	return "told worker " + about, nil
 }
 
-func (e *Engine) execTellFindings(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
+func (e *Engine) execTellFindings(ctx context.Context, id string, s *flow.State, ti int, f flow.Facts) (string, bool, error) {
 	t := s.Tasks[ti]
 	a := &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
 	r, bin := a.Rounds[len(a.Rounds)-1], cmp.Or(e.Bin, "sheepdog")
@@ -2427,6 +2430,23 @@ func (e *Engine) execTellFindings(ctx context.Context, id string, s *flow.State,
 	if r.Kind == flow.RoundSendBack {
 		msg := fmt.Sprintf("The coordinator sent the task back: %s — change what it asks, commit, and run %s again.", r.Why, rc)
 		dec, err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false, fmt.Sprintf("the send-back (round %d)", r.N))
+		return dec, false, err
+	}
+	if r.Kind == flow.RoundRetro {
+		change := ""
+		for i := len(t.Retros) - 1; i >= 0; i-- {
+			if t.Retros[i].Attempt == len(t.Attempts) && t.Retros[i].Round == r.N {
+				change = t.Retros[i].WorkerChange
+				break
+			}
+		}
+		nextCap := f.Lines + s.Settings.ContinueLines
+		msg := fmt.Sprintf("Retro round %d granted one bounded fix (%d major(s) in %s; size cap %d lines): %s — make only this bounded fix, commit, and run %s again.",
+			r.N, r.Majors, r.ReportPath, nextCap, change, rc)
+		dec, err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false, fmt.Sprintf("the bounded retro fix from round %d (size cap %d)", r.N, nextCap))
+		if err == nil {
+			a.SizeCap = nextCap
+		}
 		return dec, false, err
 	}
 	msg := fmt.Sprintf("Review round %d found %d major(s) in %s — fix them, commit, and run %s again, or when every finding is wrong and you change nothing, run %s factory report ready --reject \"<why>\".",
