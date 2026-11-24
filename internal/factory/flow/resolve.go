@@ -10,6 +10,7 @@ import (
 
 // Additional roles, permission modes and continue modes (design.md 9.1).
 const (
+	RolePlanReviewer                               = "plan_reviewer"
 	RoleRetro                                      = "retro"
 	RoleDesigner                                   = "designer"
 	RoleVerifier                                   = "verifier"
@@ -19,12 +20,13 @@ const (
 )
 
 var rolePerm = map[string]string{
-	RoleCoordinator: PermFull,
-	RoleWorker:      PermFull,
-	RoleDesigner:    PermFull,
-	RoleReviewer:    PermReadOnly,
-	RoleRetro:       PermReadOnly,
-	RoleVerifier:    PermReadOnly,
+	RoleCoordinator:  PermFull,
+	RoleWorker:       PermFull,
+	RoleDesigner:     PermFull,
+	RoleReviewer:     PermReadOnly,
+	RolePlanReviewer: PermReadOnly,
+	RoleRetro:        PermReadOnly,
+	RoleVerifier:     PermReadOnly,
 }
 
 // Candidate is one entry in a role's ordered candidate list (design.md 9.1).

@@ -95,6 +95,11 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 	if len(fails) > 0 {
 		return e.refuse(id, "plan_invalid", strings.Join(fails, "; ")+".")
 	}
+	if s.Settings.PlanReviewRounds > 0 {
+		for i := range tasks {
+			tasks[i].Unreviewed = true
+		}
+	}
 	s.Tasks = tasks
 	titles := make([]string, len(tasks))
 	for i, t := range tasks {
@@ -1491,8 +1496,9 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 			}
 		}
 	}
-	for _, t := range added {
-		done = append(done, t.ID+" (new)")
+	for i := range added {
+		added[i].Unreviewed = s.Settings.PlanReviewRounds > 0
+		done = append(done, added[i].ID+" (new)")
 	}
 	s.Tasks = append(s.Tasks, added...)
 	return e.commitLocked(id, s, LogLine{By: role, Input: map[string]any{"verb": "plan amend", "why": why, "tasks": done},

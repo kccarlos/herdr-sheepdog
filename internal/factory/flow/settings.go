@@ -22,6 +22,7 @@ const PassInterval = 15 * time.Second
 type Settings struct {
 	ReviewRounds               int `json:"review_rounds"`
 	MaxRounds                  int `json:"max_rounds"`                     // L12 (design.md 10.1)
+	PlanReviewRounds           int `json:"plan_review_rounds"`             // J16, N10 (design.md 10.1, 11.7)
 	RetroAfterRoundsWithMajors int `json:"retro_after_rounds_with_majors"` // L11, L12 (design.md 10.1)
 	RetroFromRound             int `json:"retro_from_round"`               // L11, L12 (design.md 10.1)
 	RetrosPerTask              int `json:"retros_per_task"`                // L11 (design.md 10.1)
@@ -72,6 +73,7 @@ const (
 	ReviewRoundsMin                       = 1
 	ReviewRoundsMax                       = 5
 	MaxRoundsMax                          = 10
+	PlanReviewRoundsMax                   = 1
 	RetroMajorsMin                        = 2
 	RetroMajorsMax                        = 4
 	RetroFromMin                          = 2
@@ -164,6 +166,7 @@ func (s Settings) Changed() []string {
 		{"main_red_minutes", s.MainRedMinutes, d.MainRedMinutes},
 		{"max_rounds", s.MaxRounds, d.MaxRounds},
 		{"max_running", s.MaxRunning, d.MaxRunning},
+		{"plan_review_rounds", s.PlanReviewRounds, d.PlanReviewRounds},
 		{"pool_floor_percent", s.PoolFloorPercent, d.PoolFloorPercent},
 		{"pool_minutes", s.PoolMinutes, d.PoolMinutes},
 		{"quiet_minutes", s.QuietMinutes, d.QuietMinutes},
@@ -209,6 +212,7 @@ func (s Settings) Validate() error {
 		{"retro_after_rounds_with_majors", s.RetroAfterRoundsWithMajors, RetroMajorsMin, RetroMajorsMax},
 		{"retro_from_round", s.RetroFromRound, RetroFromMin, RetroFromMax},
 		{"retros_per_task", s.RetrosPerTask, 0, RetrosPerTaskMax},
+		{"plan_review_rounds", s.PlanReviewRounds, 0, PlanReviewRoundsMax},
 		{"checks_grace_minutes", s.ChecksGraceMinutes, ChecksGraceMin, ChecksGraceMax},
 		{"ci_stalled_minutes", s.CIStalledMinutes, CIStalledMin, CIStalledMax},
 		{"main_red_minutes", s.MainRedMinutes, MainRedMin, MainRedMax},
