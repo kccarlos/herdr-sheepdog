@@ -22,8 +22,9 @@ const PassInterval = 15 * time.Second
 type Settings struct {
 	ReviewRounds               int `json:"review_rounds"`
 	MaxRounds                  int `json:"max_rounds"`                     // L12 (design.md 10.1)
-	RetroAfterRoundsWithMajors int `json:"retro_after_rounds_with_majors"` // L12 (design.md 10.1)
-	RetroFromRound             int `json:"retro_from_round"`               // L12 (design.md 10.1)
+	RetroAfterRoundsWithMajors int `json:"retro_after_rounds_with_majors"` // L11, L12 (design.md 10.1)
+	RetroFromRound             int `json:"retro_from_round"`               // L11, L12 (design.md 10.1)
+	RetrosPerTask              int `json:"retros_per_task"`                // L11 (design.md 10.1)
 	ChecksGraceMinutes         int `json:"checks_grace_minutes"`           // N35, N36 (design.md 10.1)
 	CIStalledMinutes           int `json:"ci_stalled_minutes"`             // N36 (design.md 10.1)
 	MainRedMinutes             int `json:"main_red_minutes"`               // N38 (design.md 10.1)
@@ -75,6 +76,7 @@ const (
 	RetroMajorsMax                        = 4
 	RetroFromMin                          = 2
 	RetroFromMax                          = 6
+	RetrosPerTaskMax                      = 2
 	ChecksGraceMin                        = 1
 	ChecksGraceMax                        = 60
 	CIStalledMin                          = 10
@@ -120,7 +122,7 @@ const DiskFullMin, DiskFullMax = 50, 99
 func DefaultSettings() Settings {
 	return Settings{
 		ReviewRounds: 2, MaxRounds: 5,
-		RetroAfterRoundsWithMajors: 2, RetroFromRound: 3,
+		RetroAfterRoundsWithMajors: 2, RetroFromRound: 3, RetrosPerTask: 1,
 		ChecksGraceMinutes: 5, CIStalledMinutes: 90, MainRedMinutes: 60, CIFailsPerHour: 3, BuildHours: 4, FlakeReruns: 1,
 		StartMinutes: 2, IdleGraceSeconds: 20, QuietMinutes: 20, InterruptSeconds: 90, ReviewMinutes: 45, BlockedMinutes: 10,
 		WorkerRestarts: 3, ReviewerRetries: 2, EnsureFailures: 3, EnsureBackoffMinutes: 1,
@@ -167,6 +169,7 @@ func (s Settings) Changed() []string {
 		{"quiet_minutes", s.QuietMinutes, d.QuietMinutes},
 		{"retro_after_rounds_with_majors", s.RetroAfterRoundsWithMajors, d.RetroAfterRoundsWithMajors},
 		{"retro_from_round", s.RetroFromRound, d.RetroFromRound},
+		{"retros_per_task", s.RetrosPerTask, d.RetrosPerTask},
 		{"review_minutes", s.ReviewMinutes, d.ReviewMinutes},
 		{"review_rounds", s.ReviewRounds, d.ReviewRounds},
 		{"reviewer_retries", s.ReviewerRetries, d.ReviewerRetries},
@@ -205,6 +208,7 @@ func (s Settings) Validate() error {
 		{"max_rounds", s.MaxRounds, s.ReviewRounds, MaxRoundsMax},
 		{"retro_after_rounds_with_majors", s.RetroAfterRoundsWithMajors, RetroMajorsMin, RetroMajorsMax},
 		{"retro_from_round", s.RetroFromRound, RetroFromMin, RetroFromMax},
+		{"retros_per_task", s.RetrosPerTask, 0, RetrosPerTaskMax},
 		{"checks_grace_minutes", s.ChecksGraceMinutes, ChecksGraceMin, ChecksGraceMax},
 		{"ci_stalled_minutes", s.CIStalledMinutes, CIStalledMin, CIStalledMax},
 		{"main_red_minutes", s.MainRedMinutes, MainRedMin, MainRedMax},

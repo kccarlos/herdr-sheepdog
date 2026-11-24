@@ -244,10 +244,35 @@ func TestStatusEveryTaskRowFreshAndStage(t *testing.T) {
 		"queued": true, "working": true, "ci": true,
 		"owner_gate": true, "owner_answer": true,
 	}
+	wantLadderStage := map[string]string{
+		"L1": "ci", "L2": "blocked_or_failed", "L3": "blocked_or_failed",
+		"L4": "working", "L5": "working", "L6": "ci",
+		"L7": "working", "L8": "working", "L9": "ci",
+		"L10": "working", "L11": "working", "L12": "blocked_or_failed",
+		"L13": "working", "L-": "blocked_or_failed",
+	}
+	seenLadder := map[string]string{}
 	for _, r := range flow.LadderRows {
 		if !validStage[r.Stage] {
 			t.Errorf("LadderRows[%s].Stage = %q, want valid 4.11 stage", r.ID, r.Stage)
 		}
+		seenLadder[r.ID] = r.Stage
+	}
+	for id, want := range wantLadderStage {
+		if got, ok := seenLadder[id]; !ok {
+			t.Errorf("LadderRows missing row %s (want Stage=%q)", id, want)
+		} else if got != want {
+			t.Errorf("LadderRows[%s].Stage = %q, want %q", id, got, want)
+		}
+	}
+	seenTask := map[string]flow.Row[flow.In]{}
+	for _, r := range flow.TaskRows {
+		seenTask[r.ID] = r
+	}
+	if r, ok := seenTask["N28"]; !ok {
+		t.Errorf("TaskRows missing row N28 (want Stage=%q WaitsOn=%q)", "working", "the retro reviewer")
+	} else if r.Stage != "working" || r.WaitsOn != "the retro reviewer" {
+		t.Errorf("TaskRows[N28] = (Stage=%q WaitsOn=%q), want (working, the retro reviewer)", r.Stage, r.WaitsOn)
 	}
 	passedTask := func(id, title string) flow.Task {
 		return flow.Task{

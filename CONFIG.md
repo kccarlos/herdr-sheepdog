@@ -574,6 +574,7 @@ These factory settings live in each project's `state.json`, not in the config fi
 | `handoff_minutes` | `5` | 1–30 | Minutes a worker or designer has to write its handoff and stop after its pool reaches `pool_floor_percent` before the engine stops it with `quota` (R31). |
 | `heartbeat_minutes` | `60` | 10–600 | Minutes with no wake while the coordinator is idle before J13 sends a heartbeat wake with the status of open tasks. |
 | `continues_per_task` | `1` | 0–3 | How many times a task may `continue`. |
+| `retros_per_task` | `1` | 0–2 | Maximum retro records a task may use across attempts (0 disables retros); every retro record counts, delta checks included, so at 2 a `FIX` and its delta check use both. |
 | `continue_lines` | `60` | 0–500 | A recap's `continue` sets the cap to the changed lines now plus this. |
 | `task_size_limit` | `400` | 50–2000 | A planned task estimated above this many changed lines is refused: split it first. |
 | `size_cap_factor` | `2` | 1–5 | A task's size cap is this times its `estimate_lines`; past it the task stops at a size recap. |

@@ -73,7 +73,7 @@ func setupPassedGateWorld(t *testing.T, taskExtraJSON string, editState func(*fl
 }
 
 // setupSplitChildRetroRecap sets up a split child T1 (SplitFrom P1 where
-// P1.HadRetro == true) at the review recap streak (3 changes rounds), ready
+// P1 has a retro record) at the review recap streak (3 changes rounds), ready
 // for N24 on the next pass.
 func setupSplitChildRetroRecap(t *testing.T) *restartWorld {
 	t.Helper()
@@ -89,10 +89,10 @@ func setupSplitChildRetroRecap(t *testing.T) *restartWorld {
 	c1 := w.commits[0]
 	w.edit(func(s *flow.State) {
 		parent := flow.Task{
-			ID:       "P1",
-			Title:    "feat: parent task",
-			Split:    &flow.Split{Children: []string{"T1"}},
-			HadRetro: true,
+			ID:     "P1",
+			Title:  "feat: parent task",
+			Split:  &flow.Split{Children: []string{"T1"}},
+			Retros: []flow.Retro{{Attempt: 1, Round: 4, Cause: "task-too-big", At: w.now}},
 		}
 		s.Tasks[0].SplitFrom = "P1"
 		s.Tasks[0].Attempts[0].Rounds = []flow.Round{

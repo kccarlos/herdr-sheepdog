@@ -19,12 +19,47 @@ const (
 	RoleReviewer    = "reviewer"
 )
 
-// Round kinds of slice 2 (design.md 3, 4.6).
+// Round kinds of slices 2 and 12 (design.md 3, 4.6).
 const (
 	RoundFull     = "full"
 	RoundDelta    = "delta"
+	RoundRetro    = "retro"
 	RoundSendBack = "send_back" // the coordinator's "changes", with a why (design.md 4.9)
 )
+
+// Retro verdicts and change kinds (design.md 3, 4.6, 7.2).
+const (
+	VerdictShip     = "ship"
+	VerdictFix      = "fix"
+	VerdictRedesign = "redesign"
+	ChangeKindCheck = "check"
+	ChangeKindBrief = "brief"
+)
+
+// RetroCauses is the fixed 8-cause set for retro reports (design.md 7.2, KB-RET-15).
+var RetroCauses = []string{
+	"task-too-big",
+	"wrong-seam",
+	"vague-brief",
+	"design-needed-first",
+	"patch-shaped-fix",
+	"worker-model",
+	"reviewer-narrow",
+	"none",
+}
+
+// Retro is one persisted retro outcome on a task, joined to its RoundRetro
+// record in Attempt.Rounds by Attempt (1-based) and Round (design.md 3, 7.2).
+type Retro struct {
+	Attempt               int       `json:"attempt"`
+	Round                 int       `json:"round"`
+	Cause                 string    `json:"cause"`
+	WorkerChange          string    `json:"worker_change"`
+	WorkerChangeKind      string    `json:"worker_change_kind"`
+	CoordinatorChange     string    `json:"coordinator_change"`
+	CoordinatorChangeKind string    `json:"coordinator_change_kind"`
+	At                    time.Time `json:"at"`
+}
 
 // State is one project's state.json. Seq counts the inputs committed to it.
 type State struct {
@@ -162,7 +197,6 @@ type Task struct {
 	EstimateLines int                    `json:"estimate_lines"`
 	Request       map[string][]Candidate `json:"request,omitempty"`
 	SplitFrom     string                 `json:"split_from,omitempty"`
-	HadRetro      bool                   `json:"had_retro,omitempty"`
 	Done          *Merged                `json:"done,omitempty"`
 	Closed        *Closed                `json:"closed,omitempty"`
 	Dropped       *Dropped               `json:"dropped,omitempty"`
@@ -172,6 +206,7 @@ type Task struct {
 	HoldKey       string                 `json:"hold_key,omitempty"`
 	LastRow       string                 `json:"last_row,omitempty"`
 	Recaps        []Recap                `json:"recaps,omitempty"`
+	Retros        []Retro                `json:"retros,omitempty"`
 	Acts          []Act                  `json:"acts,omitempty"`
 	Attempts      []Attempt              `json:"attempts"`
 }
@@ -228,8 +263,14 @@ const (
 )
 
 // SizeRecapAllowed is a size recap's choices: continue only while the task
-// has used fewer than continues_per_task (design.md 4.3).
+// has used fewer than continues_per_task and this attempt's newest counted
+// retro verdict is not FIX (design.md 4.3, KB-RET-4).
 func SizeRecapAllowed(t Task, s Settings) []string {
+	if a := OpenAttempt(t); a != nil {
+		if rs := AttemptRetros(*a); len(rs) > 0 && rs[len(rs)-1].Verdict == VerdictFix {
+			return []string{"split", "new", "drop"}
+		}
+	}
 	used := 0
 	for _, r := range t.Recaps {
 		if r.Decided != nil && r.Decided.Choice == ChoiceContinue {
@@ -333,6 +374,14 @@ type ReviewRun struct {
 	FailedModels []string      `json:"failed_models,omitempty"`
 	RefusalSent  bool          `json:"refusal_sent,omitempty"`
 	Age          time.Duration `json:"age,omitempty"`
+}
+
+// Role returns RoleRetro for a retro run in the shared review slot, else RoleReviewer.
+func (r *ReviewRun) Role() string {
+	if r != nil && r.Kind == RoundRetro {
+		return RoleRetro
+	}
+	return RoleReviewer
 }
 
 // Proof is one outcome's evidence attached to a ready report (design.md 3, 7.2):
@@ -506,7 +555,8 @@ func ActRetry(acts []Act, key string) (last *Act, tries int) {
 
 func doneActs(acts []Act, key string) []Act {
 	if strings.HasPrefix(key, AskMerge+"@") || strings.HasPrefix(key, AskUpdateBranch+"@") || strings.HasPrefix(key, AskTellDiverged+"@") ||
-		strings.HasPrefix(key, AskNudgeReview+"@") || strings.HasPrefix(key, AskStopReview+"@") {
+		strings.HasPrefix(key, AskNudgeReview+"@") || strings.HasPrefix(key, AskStopReview+"@") ||
+		strings.HasPrefix(key, AskNudgeRetro+"@") || strings.HasPrefix(key, AskStopRetro+"@") {
 		return SinceRetry(acts)
 	}
 	return acts

@@ -1,6 +1,9 @@
 package flow
 
-import "time"
+import (
+	"slices"
+	"time"
+)
 
 // Rel is how one commit stands to another (design.md 3.1).
 type Rel string
@@ -137,6 +140,8 @@ type Facts struct {
 	BaseRedWoken bool      `json:"base_red_woken,omitempty"`
 	// SplitFromHadRetro reports whether Task.SplitFrom's parent task already had a retro (N24, plan.md 6.2).
 	SplitFromHadRetro bool `json:"split_from_had_retro,omitempty"`
+	// RetroUnavailable reports that no retro run can resolve or retries exhausted (L3, L11, design.md 4.6).
+	RetroUnavailable bool `json:"retro_unavailable,omitempty"`
 	// OtherMergeInFlight reports whether another task in this project currently has a merge in flight (N17, plan.md 7.2).
 	OtherMergeInFlight bool `json:"other_merge_in_flight,omitempty"`
 }
@@ -200,8 +205,8 @@ func CoveringOverride(a Attempt, h string) *Override {
 	return nil
 }
 
-// newestCovering is the newest round that covers h, or nil.
-func newestCovering(a Attempt, h string) *Round {
+// NewestCovering is the newest counted round that covers h, or nil.
+func NewestCovering(a Attempt, h string) *Round {
 	rs := Counted(a)
 	for i := len(rs) - 1; i >= 0; i-- {
 		if Covers(a, rs[i].Head, h) {
@@ -209,6 +214,50 @@ func newestCovering(a Attempt, h string) *Round {
 		}
 	}
 	return nil
+}
+
+// AttemptRetros returns the counted retro rounds in a (after its plan-amend
+// boundary), in order (design.md 3.1, 4.6).
+func AttemptRetros(a Attempt) []Round {
+	var out []Round
+	for _, r := range Counted(a) {
+		if r.Kind == RoundRetro {
+			out = append(out, r)
+		}
+	}
+	return out
+}
+
+// LastRecapDecidedAt returns the newest coordinator recap decision timestamp on
+// t, or zero. Owner overrides close a recap temporarily while covering H and
+// resume normal rules once spent (design.md 4.1 N6, 4.3b N19b).
+func LastRecapDecidedAt(t Task) time.Time {
+	var last time.Time
+	for _, r := range t.Recaps {
+		if r.Decided != nil && r.Decided.Choice != "override" && r.Decided.At.After(last) {
+			last = r.Decided.At
+		}
+	}
+	return last
+}
+
+// SplitFromHadRetro reports whether task's split parent already has a retro
+// record (design.md 4.5 N24, 4.6 L11, 8 I1).
+func SplitFromHadRetro(tasks []Task, task Task) bool {
+	if task.SplitFrom == "" {
+		return false
+	}
+	pi := slices.IndexFunc(tasks, func(p Task) bool { return p.ID == task.SplitFrom })
+	return pi >= 0 && len(tasks[pi].Retros) > 0
+}
+
+func retroAt(t Task, attempt, round int) time.Time {
+	for i := len(t.Retros) - 1; i >= 0; i-- {
+		if t.Retros[i].Attempt == attempt && t.Retros[i].Round == round {
+			return t.Retros[i].At
+		}
+	}
+	return time.Time{}
 }
 
 func isReviewerRound(r Round) bool { return r.Kind == RoundFull || r.Kind == RoundDelta }
@@ -228,7 +277,7 @@ func LastReviewed(a Attempt) *Round {
 // RejectableRound returns the newest round covering h when it is an unrejected
 // reviewer changes round, or nil otherwise (design.md 7.2).
 func RejectableRound(a Attempt, h string) *Round {
-	r := newestCovering(a, h)
+	r := NewestCovering(a, h)
 	if r == nil || !isReviewerRound(*r) || r.Verdict != VerdictChanges || rejectFor(a, h, r.N) != nil {
 		return nil
 	}
@@ -238,7 +287,7 @@ func RejectableRound(a Attempt, h string) *Round {
 // RejectedRound returns the newest round covering h and its reject when that
 // round is a rejected reviewer changes round (design.md 4.6, L10).
 func RejectedRound(a Attempt, h string) (*Round, *Reject) {
-	r := newestCovering(a, h)
+	r := NewestCovering(a, h)
 	if r == nil || !isReviewerRound(*r) || r.Verdict != VerdictChanges {
 		return nil, nil
 	}

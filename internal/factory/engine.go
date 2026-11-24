@@ -1339,11 +1339,7 @@ func (e *Engine) observeTaskLocked(ctx context.Context, id string, s *flow.State
 	// An ended task needs no facts (N1 matches first), and cleanup may
 	// have removed its worktree.
 	task := s.Tasks[ti]
-	if task.SplitFrom != "" {
-		if pi := slices.IndexFunc(s.Tasks, func(p flow.Task) bool { return p.ID == task.SplitFrom }); pi >= 0 {
-			facts.SplitFromHadRetro = s.Tasks[pi].HadRetro
-		}
-	}
+	facts.SplitFromHadRetro = flow.SplitFromHadRetro(s.Tasks, task)
 	oa := flow.OpenAttempt(task)
 	if !flow.Ended(task) {
 		facts.DepsNotDone, facts.DepsDropped = flow.UnmetDeps(task, s.Tasks)
@@ -1386,10 +1382,30 @@ func (e *Engine) observeTaskLocked(ctx context.Context, id string, s *flow.State
 		if e.observeReviewLocked(ctx, id, s, ti, &facts, dt) {
 			return facts, false
 		}
+		if !facts.RetroUnavailable {
+			facts.RetroUnavailable = e.retroUnavailableLocked(ctx, task, s.Settings)
+		}
 	} else if oa == nil && !flow.Ended(s.Tasks[ti]) {
 		facts.NoSlot = !hasSlot && !flow.Exhausted(s.Tasks[ti].Acts, flow.AskNewAttempt, s.Settings)
 	}
 	return facts, true
+}
+
+func (e *Engine) retroUnavailableLocked(ctx context.Context, task flow.Task, settings flow.Settings) bool {
+	return retroUnavailable(task, settings, e.probeLaunchFacts(ctx, flow.RoleRetro, task, settings))
+}
+
+func retroUnavailable(task flow.Task, settings flow.Settings, rf flow.ResolveFacts) bool {
+	worker := storedWorkerModel(task)
+	if worker.Model == "" {
+		if in, r := resolveWorkerReason(task, settings, rf); r.Why == "" {
+			worker = intentCandidate(in)
+		}
+	}
+	rf.Worker = worker
+	rf.Check = launchCapability(flow.RoleRetro)
+	_, reason := flow.ResolveWithReason(flow.RoleRetro, task, settings, rf)
+	return reason.Why != "" && reason.Kind != flow.ReasonPool && !reason.PoolBlocked
 }
 
 func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti int, facts flow.Facts, baseTried *bool) {
