@@ -107,12 +107,16 @@ type relaySendPayload struct {
 
 // send posts one sealed notification.
 func (c relayClient) send(ctx context.Context, relayToken string, ciphertext, nonce []byte, n Notification) error {
+	kind := n.Kind
+	if kind == KindApproval && len(n.Options) == 0 {
+		kind = KindBlocked
+	}
 	_, err := c.do(ctx, "/v1/send", relaySend{
 		RelayToken: relayToken,
 		Payload: relaySendPayload{
 			Ciphertext: base64.StdEncoding.EncodeToString(ciphertext),
 			Nonce:      base64.StdEncoding.EncodeToString(nonce),
-			Kind:       relayKind(n.Kind),
+			Kind:       relayKind(kind),
 			CollapseID: n.CollapseID(),
 		},
 		Priority: 10,

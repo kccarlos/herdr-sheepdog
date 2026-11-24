@@ -1,0 +1,1149 @@
+{
+ "canvas": "https://claude.ai/artifact/1EmnSHAtmBAxcnkENsjwMP",
+ "boards": [
+  {
+   "id": "Main",
+   "title": "Agents — one computer",
+   "file": "Main.dc.html",
+   "png": "png/Main.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "Dark",
+   "title": "Agents — one computer, dark",
+   "file": "Dark.dc.html",
+   "png": "png/Dark.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "AgentsSeveral",
+   "title": "Agents — several computers",
+   "file": "AgentsSeveral.dc.html",
+   "png": "png/AgentsSeveral.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "ConversationOne",
+   "title": "Conversation — one computer",
+   "file": "ConversationOne.dc.html",
+   "png": "png/ConversationOne.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "ConversationSeveral",
+   "title": "Conversation — several computers",
+   "file": "ConversationSeveral.dc.html",
+   "png": "png/ConversationSeveral.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "VoiceMenu",
+   "title": "Voice menu — Talk to and End",
+   "file": "VoiceMenu.dc.html",
+   "png": "png/VoiceMenu.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "TalkTo",
+   "title": "Manage computers",
+   "file": "TalkTo.dc.html",
+   "png": null,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "PlusMenu",
+   "title": "+ menu",
+   "file": "PlusMenu.dc.html",
+   "png": "png/PlusMenu.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "MoreMenu",
+   "title": "⋯ menu",
+   "file": "MoreMenu.dc.html",
+   "png": "png/MoreMenu.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "NewAgentWhere",
+   "title": "New agent 1 — Where",
+   "file": "NewAgentWhere.dc.html",
+   "png": "png/NewAgentWhere.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "NewAgentKind",
+   "title": "New agent 2 — Which agent",
+   "file": "NewAgentKind.dc.html",
+   "png": "png/NewAgentKind.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "Spaces",
+   "title": "Spaces",
+   "file": "Spaces.dc.html",
+   "png": "png/Spaces.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "SpaceDetail",
+   "title": "A space — worktrees and wrap-up",
+   "file": "SpaceDetail.dc.html",
+   "png": null,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "AgentWindow",
+   "title": "Agent window",
+   "file": "AgentWindow.dc.html",
+   "png": "png/AgentWindow.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "MoreKeys",
+   "title": "More keys — ⌃C on top",
+   "file": "MoreKeys.dc.html",
+   "png": "png/MoreKeys.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "Settings",
+   "title": "Settings",
+   "file": "Settings.dc.html",
+   "png": "png/Settings.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "SettingsComputer",
+   "title": "Settings ▸ a computer",
+   "file": "SettingsComputer.dc.html",
+   "png": "png/SettingsComputer.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "SettingsVoice",
+   "title": "Settings ▸ Voice (this phone)",
+   "file": "SettingsVoice.dc.html",
+   "png": "png/SettingsVoice.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "Splash",
+   "title": "Splash",
+   "file": "Splash.dc.html",
+   "png": "png/Splash.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "Welcome",
+   "title": "First run",
+   "file": "Welcome.dc.html",
+   "png": "png/Welcome.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "Paired",
+   "title": "Paired",
+   "file": "Paired.dc.html",
+   "png": "png/Paired.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "PermissionMic",
+   "title": "Before the microphone prompt",
+   "file": "PermissionMic.dc.html",
+   "png": "png/PermissionMic.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "PermissionNotify",
+   "title": "Before the notification prompt",
+   "file": "PermissionNotify.dc.html",
+   "png": "png/PermissionNotify.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "ConversationEmpty",
+   "title": "Empty conversation",
+   "file": "ConversationEmpty.dc.html",
+   "png": "png/ConversationEmpty.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "ConversationEmptyDark",
+   "title": "Empty conversation, dark",
+   "file": "ConversationEmptyDark.dc.html",
+   "png": "png/ConversationEmptyDark.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "AgentsEmpty",
+   "title": "No agents",
+   "file": "AgentsEmpty.dc.html",
+   "png": "png/AgentsEmpty.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "Offline",
+   "title": "One computer, offline",
+   "file": "Offline.dc.html",
+   "png": "png/Offline.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "LiveActivity",
+   "title": "Lock-screen Live Activity",
+   "file": "LiveActivity.dc.html",
+   "png": "png/LiveActivity.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "VoiceDock",
+   "title": "Voice capsule — every state",
+   "file": "VoiceDock.dc.html",
+   "png": "png/VoiceDock.png",
+   "w": 1260,
+   "h": 780
+  },
+  {
+   "id": "ConversationTyping",
+   "title": "Type instead — the capsule becomes the composer",
+   "file": "ConversationTyping.dc.html",
+   "png": "png/ConversationTyping.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "TopBar",
+   "title": "Component — top bar",
+   "file": "TopBar.dc.html",
+   "png": "png/TopBar.png",
+   "w": 390,
+   "h": 102
+  },
+  {
+   "id": "Dock",
+   "title": "Component — voice capsule",
+   "file": "Dock.dc.html",
+   "png": "png/Dock.png",
+   "w": 366,
+   "h": 60
+  },
+  {
+   "id": "AgentCards",
+   "title": "Agent card — collapsed, expanded, waiting",
+   "file": "AgentCards.dc.html",
+   "png": "png/AgentCards.png",
+   "w": 1260,
+   "h": 1120
+  },
+  {
+   "id": "AgentCard",
+   "title": "Component — agent card",
+   "file": "AgentCard.dc.html",
+   "png": "png/AgentCard.png",
+   "w": 358,
+   "h": 300
+  },
+  {
+   "id": "IPad",
+   "title": "iPad — an agent's window",
+   "file": "IPad.dc.html",
+   "png": "png/IPad.png",
+   "w": 1376,
+   "h": 1032
+  },
+  {
+   "id": "IPadConversation",
+   "title": "iPad — Conversation",
+   "file": "IPadConversation.dc.html",
+   "png": "png/IPadConversation.png",
+   "w": 1376,
+   "h": 1032
+  },
+  {
+   "id": "IPadSplit",
+   "title": "iPad — two agents side by side",
+   "file": "IPadSplit.dc.html",
+   "png": "png/IPadSplit.png",
+   "w": 1376,
+   "h": 1032
+  },
+  {
+   "id": "IPadOverview",
+   "title": "iPad — All agents",
+   "file": "IPadOverview.dc.html",
+   "png": "png/IPadOverview.png",
+   "w": 1376,
+   "h": 1032
+  },
+  {
+   "id": "IPadPortrait",
+   "title": "iPad portrait — sidebar hidden",
+   "file": "IPadPortrait.dc.html",
+   "png": "png/IPadPortrait.png",
+   "w": 1032,
+   "h": 1376
+  },
+  {
+   "id": "IPadNewAgent",
+   "title": "iPad — sheets (New agent)",
+   "file": "IPadNewAgent.dc.html",
+   "png": "png/IPadNewAgent.png",
+   "w": 1376,
+   "h": 1032
+  },
+  {
+   "id": "IPadSidebar",
+   "title": "Component — iPad sidebar",
+   "file": "IPadSidebar.dc.html",
+   "png": "png/IPadSidebar.png",
+   "w": 390,
+   "h": 1032
+  },
+  {
+   "id": "AgentPane",
+   "title": "Component — iPad agent pane",
+   "file": "AgentPane.dc.html",
+   "png": "png/AgentPane.png",
+   "w": 986,
+   "h": 1032
+  },
+  {
+   "id": "IPadHidden",
+   "title": "iPad landscape — sidebar hidden",
+   "file": "IPadHidden.dc.html",
+   "png": "png/IPadHidden.png",
+   "w": 1376,
+   "h": 1032
+  },
+  {
+   "id": "VoiceStopped",
+   "title": "Voice ended — computer still connected",
+   "file": "VoiceStopped.dc.html",
+   "png": "png/VoiceStopped.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "ChatHour",
+   "title": "Conversation — a busy hour (iPhone)",
+   "file": "ChatHour.dc.html",
+   "png": "png/ChatHour.png",
+   "w": 390,
+   "h": 1560
+  },
+  {
+   "id": "ChatHourDark",
+   "title": "Conversation — a busy hour, dark",
+   "file": "ChatHourDark.dc.html",
+   "png": "png/ChatHourDark.png",
+   "w": 390,
+   "h": 1560
+  },
+  {
+   "id": "ChatHourAX",
+   "title": "Conversation — largest text",
+   "file": "ChatHourAX.dc.html",
+   "png": "png/ChatHourAX.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "ChatDebug",
+   "title": "Conversation — technical events shown",
+   "file": "ChatDebug.dc.html",
+   "png": "png/ChatDebug.png",
+   "w": 390,
+   "h": 1560
+  },
+  {
+   "id": "IPadChat",
+   "title": "iPad — conversation, a busy hour",
+   "file": "IPadChat.dc.html",
+   "png": "png/IPadChat.png",
+   "w": 1376,
+   "h": 1032
+  },
+  {
+   "id": "IPadChatDark",
+   "title": "iPad — conversation, dark",
+   "file": "IPadChatDark.dc.html",
+   "png": "png/IPadChatDark.png",
+   "w": 1376,
+   "h": 1032
+  },
+  {
+   "id": "ChatRow",
+   "title": "Component — conversation row",
+   "file": "ChatRow.dc.html",
+   "png": "png/ChatRow.png",
+   "w": 358,
+   "h": 200
+  },
+  {
+   "id": "ChatStates",
+   "title": "Every row kind and state",
+   "file": "ChatStates.dc.html",
+   "png": "png/ChatStates.png",
+   "w": 1664,
+   "h": 4777
+  },
+  {
+   "id": "ChatStatesDark",
+   "title": "Every row kind and state, dark",
+   "file": "ChatStatesDark.dc.html",
+   "png": "png/ChatStatesDark.png",
+   "w": 1664,
+   "h": 4777
+  },
+  {
+   "id": "ChatSpec",
+   "title": "Spec — cues, kinds, tokens, type, spacing",
+   "file": "ChatSpec.dc.html",
+   "png": "png/ChatSpec.png",
+   "w": 1640,
+   "h": 4300
+  },
+  {
+   "id": "IPadVoice",
+   "title": "iPad — where the voice goes",
+   "file": "IPadVoice.dc.html",
+   "png": "png/IPadVoice.png",
+   "w": 1240,
+   "h": 860
+  },
+  {
+   "id": "IPadRemote",
+   "title": "iPad — another computer's agent",
+   "file": "IPadRemote.dc.html",
+   "png": "png/IPadRemote.png",
+   "w": 1376,
+   "h": 1032
+  },
+  {
+   "id": "AgentsGrouped",
+   "title": "Agents — Needs you, Working, Done",
+   "file": "AgentsGrouped.dc.html",
+   "png": null,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "AgentsGroupedDark",
+   "title": "Agents — grouped, dark",
+   "file": "AgentsGroupedDark.dc.html",
+   "png": "png/AgentsGroupedDark.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "MuteDialog",
+   "title": "Mute dialog — three choices and its footer",
+   "file": "MuteDialog.dc.html",
+   "png": "png/MuteDialog.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "MuteDialogDark",
+   "title": "Mute dialog, dark",
+   "file": "MuteDialogDark.dc.html",
+   "png": "png/MuteDialogDark.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "SpacesMuted",
+   "title": "Spaces — a muted space, and swipe to Mute",
+   "file": "SpacesMuted.dc.html",
+   "png": "png/SpacesMuted.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "SpacesMutedDark",
+   "title": "Spaces — muted, dark",
+   "file": "SpacesMutedDark.dc.html",
+   "png": "png/SpacesMutedDark.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "SpaceDetailMuted",
+   "title": "A space — muted, with Unmute",
+   "file": "SpaceDetailMuted.dc.html",
+   "png": null,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "SpaceDetailMutedDark",
+   "title": "A space — muted, dark",
+   "file": "SpaceDetailMutedDark.dc.html",
+   "png": "png/SpaceDetailMutedDark.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "AgentsLargest",
+   "title": "Largest text — status wraps, capsule stays one row",
+   "file": "AgentsLargest.dc.html",
+   "png": "png/AgentsLargest.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "AgentsLargestDark",
+   "title": "Largest text, dark",
+   "file": "AgentsLargestDark.dc.html",
+   "png": "png/AgentsLargestDark.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "AgentsLargestCard",
+   "title": "Largest text — card buttons stacked, two-line status",
+   "file": "AgentsLargestCard.dc.html",
+   "png": "png/AgentsLargestCard.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "AgentAttention",
+   "title": "Agent card — unread, pinned, muted, actions",
+   "file": "AgentAttention.dc.html",
+   "png": null,
+   "w": 1260,
+   "h": 1100
+  },
+  {
+   "id": "AgentAttentionDark",
+   "title": "Agent card — marks, dark",
+   "file": "AgentAttentionDark.dc.html",
+   "png": "png/AgentAttentionDark.png",
+   "w": 1260,
+   "h": 1100
+  },
+  {
+   "id": "AgentSection",
+   "title": "Component — agents section header",
+   "file": "AgentSection.dc.html",
+   "png": "png/AgentSection.png",
+   "w": 358,
+   "h": 40
+  },
+  {
+   "id": "FilesList",
+   "title": "Files — a folder, by name",
+   "file": "FilesList.dc.html",
+   "png": "png/FilesList.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "FilesListDark",
+   "title": "Files — a folder, dark",
+   "file": "FilesListDark.dc.html",
+   "png": "png/FilesListDark.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "FilesRecent",
+   "title": "Files — recently changed first",
+   "file": "FilesRecent.dc.html",
+   "png": "png/FilesRecent.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "FilesSearch",
+   "title": "Files — search",
+   "file": "FilesSearch.dc.html",
+   "png": "png/FilesSearch.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "ViewerMarkdown",
+   "title": "Viewer — Markdown, rendered",
+   "file": "ViewerMarkdown.dc.html",
+   "png": "png/ViewerMarkdown.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "ViewerMarkdownDark",
+   "title": "Viewer — Markdown, dark",
+   "file": "ViewerMarkdownDark.dc.html",
+   "png": "png/ViewerMarkdownDark.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "ViewerRaw",
+   "title": "Viewer — Markdown, raw",
+   "file": "ViewerRaw.dc.html",
+   "png": "png/ViewerRaw.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "ViewerImage",
+   "title": "Viewer — image, fit to screen",
+   "file": "ViewerImage.dc.html",
+   "png": "png/ViewerImage.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "ViewerImageZoom",
+   "title": "Viewer — image, zoomed in",
+   "file": "ViewerImageZoom.dc.html",
+   "png": "png/ViewerImageZoom.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "ViewerCode",
+   "title": "Viewer — code",
+   "file": "ViewerCode.dc.html",
+   "png": "png/ViewerCode.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "ViewerCodeDark",
+   "title": "Viewer — code, dark",
+   "file": "ViewerCodeDark.dc.html",
+   "png": "png/ViewerCodeDark.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "ChangesList",
+   "title": "Changes — as shipped, under the Files | Changes switch",
+   "file": "ChangesList.dc.html",
+   "png": "png/ChangesList.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "ChangesListDark",
+   "title": "Changes — dark",
+   "file": "ChangesListDark.dc.html",
+   "png": "png/ChangesListDark.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "DiffFile",
+   "title": "Diff — as shipped, with the Proposed file bar",
+   "file": "DiffFile.dc.html",
+   "png": "png/DiffFile.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "DiffFileDark",
+   "title": "Diff — dark",
+   "file": "DiffFileDark.dc.html",
+   "png": "png/DiffFileDark.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "DiffJump",
+   "title": "Proposed — go to another file",
+   "file": "DiffJump.dc.html",
+   "png": "png/DiffJump.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "ViewerMarkdownAX",
+   "title": "Viewer — Markdown, largest text",
+   "file": "ViewerMarkdownAX.dc.html",
+   "png": "png/ViewerMarkdownAX.png",
+   "w": 390,
+   "h": 1300
+  },
+  {
+   "id": "ViewerCodeAX",
+   "title": "Viewer — code, largest text",
+   "file": "ViewerCodeAX.dc.html",
+   "png": "png/ViewerCodeAX.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "DiffFileAX",
+   "title": "Diff — largest text",
+   "file": "DiffFileAX.dc.html",
+   "png": "png/DiffFileAX.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "EntryCard",
+   "title": "Entry — agent card: file chips, Files, Changes",
+   "file": "EntryCard.dc.html",
+   "png": "png/EntryCard.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "EntryWindow",
+   "title": "Entry — agent window: ⋯ ▸ Files beside Changes",
+   "file": "EntryWindow.dc.html",
+   "png": "png/EntryWindow.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "EntrySpace",
+   "title": "Entry — a space: Files and Changes rows",
+   "file": "EntrySpace.dc.html",
+   "png": null,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "BrowseBar",
+   "title": "Component — Files and Changes bar",
+   "file": "BrowseBar.dc.html",
+   "png": "png/BrowseBar.png",
+   "w": 390,
+   "h": 152
+  },
+  {
+   "id": "FileState",
+   "title": "Component — a Files or Changes state",
+   "file": "FileState.dc.html",
+   "png": "png/FileState.png",
+   "w": 390,
+   "h": 560
+  },
+  {
+   "id": "FilesIPad",
+   "title": "iPad — Files: list and viewer side by side",
+   "file": "FilesIPad.dc.html",
+   "png": "png/FilesIPad.png",
+   "w": 1376,
+   "h": 1032
+  },
+  {
+   "id": "ChangesIPad",
+   "title": "iPad — Changes: list and diff side by side",
+   "file": "ChangesIPad.dc.html",
+   "png": "png/ChangesIPad.png",
+   "w": 1376,
+   "h": 1032
+  },
+  {
+   "id": "FilesIPadDark",
+   "title": "iPad — Files, dark",
+   "file": "FilesIPadDark.dc.html",
+   "png": "png/FilesIPadDark.png",
+   "w": 1376,
+   "h": 1032
+  },
+  {
+   "id": "FileStates",
+   "title": "Every empty and error state, each with a plain fix",
+   "file": "FileStates.dc.html",
+   "png": "png/FileStates.png",
+   "w": 2620,
+   "h": 1960
+  },
+  {
+   "id": "FileStatesDark",
+   "title": "Every state, dark",
+   "file": "FileStatesDark.dc.html",
+   "png": "png/FileStatesDark.png",
+   "w": 2620,
+   "h": 1960
+  },
+  {
+   "id": "FactoryAskCard",
+   "title": "Component — a factory ask in the approval card",
+   "file": "FactoryAskCard.dc.html",
+   "png": "png/FactoryAskCard.png",
+   "w": 358,
+   "h": 236
+  },
+  {
+   "id": "FactoryAgents",
+   "title": "Factory — Agents list: factory terminals in the usual sections",
+   "file": "FactoryAgents.dc.html",
+   "png": null,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "FactoryAgentsDark",
+   "title": "Factory — Agents list, dark",
+   "file": "FactoryAgentsDark.dc.html",
+   "png": "png/FactoryAgentsDark.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "FactoryWindow",
+   "title": "Factory — coordinator window",
+   "file": "FactoryWindow.dc.html",
+   "png": null,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "FactoryWindowDark",
+   "title": "Factory — coordinator window, dark",
+   "file": "FactoryWindowDark.dc.html",
+   "png": "png/FactoryWindowDark.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "FactoryAsk",
+   "title": "Factory — an ask on Agents",
+   "file": "FactoryAsk.dc.html",
+   "png": "png/FactoryAsk.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "FactoryVoice",
+   "title": "Factory — Conversation: digest and one alert",
+   "file": "FactoryVoice.dc.html",
+   "png": "png/FactoryVoice.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "FactoryPage",
+   "title": "Factory — the space page with its factory section",
+   "file": "FactoryPage.dc.html",
+   "png": null,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "FactoryPageDark",
+   "title": "Factory — the space page, dark",
+   "file": "FactoryPageDark.dc.html",
+   "png": "png/FactoryPageDark.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "FactoryWorker",
+   "title": "Factory — a task row opens the worker's window",
+   "file": "FactoryWorker.dc.html",
+   "png": null,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "FactoryAskDark",
+   "title": "Factory — an ask on Agents, dark",
+   "file": "FactoryAskDark.dc.html",
+   "png": "png/FactoryAskDark.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "FactoryIPadSpace",
+   "title": "Factory — iPad, the space page in its sheet",
+   "file": "FactoryIPadSpace.dc.html",
+   "png": "png/FactoryIPadSpace.png",
+   "w": 1376,
+   "h": 1032
+  },
+  {
+   "id": "FactoryTerminal",
+   "title": "Factory — factory log and factory doctor",
+   "file": "FactoryTerminal.dc.html",
+   "png": null,
+   "w": 1100,
+   "h": 980
+  },
+  {
+   "id": "FactoryArch",
+   "title": "Factory — architecture",
+   "file": "FactoryArch.dc.html",
+   "png": null,
+   "w": 1240,
+   "h": 760
+  },
+  {
+   "id": "FactoryLifecycle",
+   "title": "Factory — one task's lifecycle",
+   "file": "FactoryLifecycle.dc.html",
+   "png": null,
+   "w": 1600,
+   "h": 760
+  },
+  {
+   "id": "FactoryDesignLoop",
+   "title": "Factory — design loop before implementation",
+   "file": "FactoryDesignLoop.dc.html",
+   "png": null,
+   "w": 1520,
+   "h": 640
+  },
+  {
+   "id": "FactoryIPad",
+   "title": "Factory — iPad, All agents with factory terminals and an ask",
+   "file": "FactoryIPad.dc.html",
+   "png": null,
+   "w": 1376,
+   "h": 1032
+  },
+  {
+   "id": "FactoryIPadDark",
+   "title": "Factory — iPad, All agents, dark",
+   "file": "FactoryIPadDark.dc.html",
+   "png": "png/FactoryIPadDark.png",
+   "w": 1376,
+   "h": 1032
+  },
+  {
+   "id": "FactoryIPadSidebar",
+   "title": "Component — iPad sidebar with factory terminals",
+   "file": "FactoryIPadSidebar.dc.html",
+   "png": null,
+   "w": 390,
+   "h": 1032
+  },
+  {
+   "id": "FactoryStartEntry",
+   "title": "Start — one row on a space with no factory",
+   "file": "FactoryStartEntry.dc.html",
+   "png": "png/FactoryStartEntry.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "FactoryStartEntryDark",
+   "title": "Start — the row, dark",
+   "file": "FactoryStartEntryDark.dc.html",
+   "png": "png/FactoryStartEntryDark.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "FactoryStartShell",
+   "title": "Start — the terminal: doctor, notice, first prompt",
+   "file": "FactoryStartShell.dc.html",
+   "png": null,
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "FactoryStartShellDark",
+   "title": "Start — the terminal, dark",
+   "file": "FactoryStartShellDark.dc.html",
+   "png": "png/FactoryStartShellDark.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "FactoryStates",
+   "title": "States — the factory section in every state",
+   "file": "FactoryStates.dc.html",
+   "png": "png/FactoryStates.png",
+   "w": 3530,
+   "h": 964
+  },
+  {
+   "id": "FactoryStatesDark",
+   "title": "States — every state, dark",
+   "file": "FactoryStatesDark.dc.html",
+   "png": "png/FactoryStatesDark.png",
+   "w": 3530,
+   "h": 964
+  },
+  {
+   "id": "FactoryStartStates",
+   "title": "States — starting: a failed check, shell off, folder outside",
+   "file": "FactoryStartStates.dc.html",
+   "png": "png/FactoryStartStates.png",
+   "w": 1330,
+   "h": 964
+  },
+  {
+   "id": "FactoryPageAX",
+   "title": "Factory — the space page at the largest text size",
+   "file": "FactoryPageAX.dc.html",
+   "png": "png/FactoryPageAX.png",
+   "w": 390,
+   "h": 1500
+  },
+  {
+   "id": "FactoryIPadSpaceDark",
+   "title": "Factory — iPad, the space page in its sheet, dark",
+   "file": "FactoryIPadSpaceDark.dc.html",
+   "png": "png/FactoryIPadSpaceDark.png",
+   "w": 1376,
+   "h": 1032
+  },
+  {
+   "id": "FactoryIPadEntry",
+   "title": "Factory — iPad, a space with no factory",
+   "file": "FactoryIPadEntry.dc.html",
+   "png": "png/FactoryIPadEntry.png",
+   "w": 1376,
+   "h": 1032
+  },
+  {
+   "id": "FactoryOverrideCard",
+   "title": "Component — the owner's override card: merge these now",
+   "file": "FactoryOverrideCard.dc.html",
+   "png": null,
+   "w": 358,
+   "h": 330
+  },
+  {
+   "id": "EngineOverview",
+   "title": "Engine — how it works",
+   "file": "EngineOverview.dc.html",
+   "png": null,
+   "w": 1344,
+   "h": 927
+  },
+  {
+   "id": "EngineTaskRules",
+   "title": "Engine — the task rules, N1 to N43",
+   "file": "EngineTaskRules.dc.html",
+   "png": null,
+   "w": 1344,
+   "h": 5204
+  },
+  {
+   "id": "EngineReviewLadder",
+   "title": "Engine — the review ladder, L1 to L12",
+   "file": "EngineReviewLadder.dc.html",
+   "png": null,
+   "w": 1344,
+   "h": 1238
+  },
+  {
+   "id": "EngineProjectRules",
+   "title": "Engine — the project rules and alerts, J1 to J14",
+   "file": "EngineProjectRules.dc.html",
+   "png": null,
+   "w": 1344,
+   "h": 2212
+  },
+  {
+   "id": "EngineRun",
+   "title": "Engine — the run table, R1 to R37",
+   "file": "EngineRun.dc.html",
+   "png": null,
+   "w": 1344,
+   "h": 4861
+  },
+  {
+   "id": "EngineAcceptance",
+   "title": "Engine — the acceptance table",
+   "file": "EngineAcceptance.dc.html",
+   "png": null,
+   "w": 1344,
+   "h": 1299
+  },
+  {
+   "id": "EngineSettings",
+   "title": "Engine — the settings",
+   "file": "EngineSettings.dc.html",
+   "png": null,
+   "w": 1344,
+   "h": 1159
+  },
+  {
+   "id": "FactoryWebMain",
+   "title": "Factory web — home, light",
+   "file": "FactoryWebMain.dc.html",
+   "png": null,
+   "w": 1440,
+   "h": 1840
+  },
+  {
+   "id": "FactoryWebTask",
+   "title": "Factory web — one task",
+   "file": "FactoryWebTask.dc.html",
+   "png": null,
+   "w": 1440,
+   "h": 1320
+  },
+  {
+   "id": "FactoryWebEmpty",
+   "title": "Factory web — empty, no tasks",
+   "file": "FactoryWebEmpty.dc.html",
+   "png": null,
+   "w": 1280,
+   "h": 900
+  },
+  {
+   "id": "FactoryWebLoading",
+   "title": "Factory web — loading and no link",
+   "file": "FactoryWebLoading.dc.html",
+   "png": null,
+   "w": 1280,
+   "h": 760
+  },
+  {
+   "id": "FactoryWebOffline",
+   "title": "Factory web — link lost after load",
+   "file": "FactoryWebOffline.dc.html",
+   "png": null,
+   "w": 1440,
+   "h": 1900
+  },
+  {
+   "id": "FactoryWebPhone",
+   "title": "Factory web — home on a phone",
+   "file": "FactoryWebPhone.dc.html",
+   "png": null,
+   "w": 390,
+   "h": 3900
+  },
+  {
+   "id": "FactoryWebHomeDark",
+   "title": "Factory web — home, dark",
+   "file": "FactoryWebHomeDark.dc.html",
+   "png": null,
+   "w": 1440,
+   "h": 1840
+  }
+ ]
+}

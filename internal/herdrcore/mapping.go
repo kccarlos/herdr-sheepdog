@@ -1,6 +1,7 @@
 package herdrcore
 
 import (
+	"maps"
 	"path"
 	"slices"
 	"strings"
@@ -132,6 +133,7 @@ func agentInfo(t hc.Terminal, state herdr.State) herdr.AgentInfo {
 		Cwd:            cwdOf(t),
 		TerminalTitle:  t.Title,
 		StateChangeSeq: t.Turn,
+		Labels:         maps.Clone(t.Labels),
 	}
 }
 

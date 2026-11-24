@@ -52,7 +52,7 @@ func (s *Supervisor) openDecisions() []string {
 	}
 	sort.SliceStable(rows, func(i, j int) bool { return state.Say(rows[i]) < state.Say(rows[j]) })
 	for _, row := range rows {
-		if row.State == herdr.StateBlocked && row.LastBlock != nil && !row.LastBlock.Answered {
+		if row.State == herdr.StateBlocked && row.LastBlock != nil && !row.LastBlock.Answered && !herdr.IsFactoryQuiet(row.Labels, row.State) {
 			add(row, row.LastBlock.Question)
 		}
 	}

@@ -83,7 +83,7 @@ func (n Notification) Payload() map[string]any {
 		title = "Sheepdog"
 	}
 	category := CategoryAgent
-	if n.PendingID != "" {
+	if n.PendingID != "" && len(n.Options) > 0 {
 		category = CategoryApproval
 	}
 	aps := map[string]any{

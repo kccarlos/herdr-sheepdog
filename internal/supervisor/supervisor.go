@@ -10,6 +10,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/attention"
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/redact"
@@ -181,6 +182,9 @@ type Config struct {
 	// nothing; with nothing muted every decision is what it was before
 	// mutes existed.
 	Mutes *attention.Mutes
+	// Factory is the optional factory engine bridged into supervisor asks and
+	// owner voice start/stop commands (design.md 12.3).
+	Factory Factory
 	// Now overrides the clock (tests).
 	Now func() time.Time
 	// WorkerLog reads the workers' own session transcripts for the work
@@ -460,6 +464,12 @@ type Supervisor struct {
 
 	// journal is the work journal's own bookkeeping (journal.go).
 	journal journalState
+
+	factoryOpMu     sync.Mutex // lock order: factoryOpMu -> s.mu -> factoryMu
+	factoryMu       sync.Mutex
+	factoryAsks     []state.PendingAction
+	factoryAskNames map[string]string
+	factoryCh       <-chan factory.Change
 }
 
 // interruptGrace is how long after a user cancel a pane's working -> done
@@ -502,6 +512,9 @@ func New(store *state.Store, h Herdr, querier Querier, pusher Pusher, log loggin
 	if cfg.Mutes != nil {
 		cfg.Mutes.OnExpire(s.muteExpired)
 	}
+	if cfg.Factory != nil {
+		s.factoryCh = cfg.Factory.Changes()
+	}
 	if s.brain != nil {
 		s.brain.SetHost(brainHost{s})
 		// The orchestrator's notices about itself (a provider failing over and
@@ -532,11 +545,24 @@ func (s *Supervisor) Run(ctx context.Context) {
 	// Once at startup, the roster is already loaded (state.Open ran
 	// before New): catches a pane whose prompt changed while the daemon
 	// was down, which no post-answer poll ever ran for.
+	factoryCh := s.factoryCh
+	if s.cfg.Factory != nil {
+		if factoryCh == nil {
+			factoryCh = s.cfg.Factory.Changes()
+		}
+		s.syncFactoryAsks()
+	}
 	s.reconcileReprompts(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case c, ok := <-factoryCh:
+			if !ok {
+				factoryCh = nil
+			} else {
+				s.handleFactoryChange(c)
+			}
 		case <-expiry.C:
 			s.ExpirePending()
 			s.ExpirePromises()
@@ -678,6 +704,7 @@ func (s *Supervisor) SetVoiceConnected(connected bool) {
 	if !already {
 		s.announceStartupPromises()
 	}
+	s.announceFactoryAsks()
 }
 
 // OnVoiceEvent feeds voice session events: connection status maintains
@@ -780,9 +807,9 @@ func (s *Supervisor) push(paneID, text string, u voice.Urgency) {
 // kept promise or a block line is never lost to a reconnect (audit B3).
 // Only a session-less daemon (--voice=off, or no session at all) skips
 // the push outright, logged as supervisor.push_skipped.
-func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[string]any) {
+func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[string]any) bool {
 	if text == "" {
-		return
+		return false
 	}
 	if paneID != "" && u != voice.UrgencySilent {
 		s.setSubject(paneID)
@@ -798,7 +825,7 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 	}
 	tags = s.withPushID(tags)
 	if u != voice.UrgencySilent && !s.noteEventLine(paneID, text, tags) {
-		return
+		return false
 	}
 	if u != voice.UrgencySilent {
 		s.notePromptLine(text, tags) // buried.go
@@ -809,11 +836,11 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 			payload[k] = v
 		}
 		s.log.Log(logSource, "supervisor.push_skipped", paneID, payload)
-		return
+		return false
 	}
 	if err := s.pushTo(text, u, tags); err != nil {
 		s.log.Log(logSource, "supervisor.push_error", paneID, map[string]any{"text": text, "urgency": u.String(), "error": err.Error()})
-		return
+		return false
 	}
 	if u != voice.UrgencySilent && s.brain != nil {
 		// Queued is not spoken: the relay gate moves only when the voice
@@ -821,6 +848,7 @@ func (s *Supervisor) pushTagged(paneID, text string, u voice.Urgency, tags map[s
 		// markPushed).
 		s.brain.PushedLinked(s.aliasOf(paneID), text, u.String(), pushLink(tags))
 	}
+	return true
 }
 
 // pushTo hands the line to the pusher, with the tags when it takes them.

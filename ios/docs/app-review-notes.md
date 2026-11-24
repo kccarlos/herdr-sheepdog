@@ -90,8 +90,7 @@ Limit: 4,000 characters.
 ## Before submitting (CEO)
 
 - Privacy-policy URL:
-  https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/privacy.md
-  (resolves once the repository is public).
+  https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/privacy.md.
 - App Review contact (name, phone, e-mail) in App Store Connect.
 - App Privacy label: "Data Not Collected" (decided by the CEO; audit,
   section 5). EU trader status, no Mac or Vision Pro availability and the

@@ -104,6 +104,10 @@ func (a *App) Run(ctx context.Context) (err error) {
 	}
 	wg.Add(1)
 	go func() { defer wg.Done(); a.sup.Run(inner) }()
+	if a.factory != nil {
+		wg.Add(1)
+		go func() { defer wg.Done(); a.factory.Run(inner) }()
+	}
 
 	serveErr := make(chan error, 1)
 	go func() { serveErr <- a.web.Serve(inner, a.opts.Drain) }()
@@ -192,15 +196,20 @@ func (a *App) runWatcher(ctx context.Context) {
 		// closed workspace's agent survived a restart and was offered in
 		// clarify questions).
 		known := map[string]herdr.State{}
+		knownLabels := map[string]map[string]string{}
 		for _, row := range a.store.List() {
 			if !row.Synthetic {
 				known[row.PaneID] = row.State
+				if len(row.Labels) > 0 {
+					knownLabels[row.PaneID] = row.Labels
+				}
 			}
 		}
 		w := herdr.NewWatcher(a.backend, herdr.WatcherConfig{
 			Debounce:         time.Duration(a.cfg.DebounceMS) * time.Millisecond,
 			SnapshotInterval: time.Duration(a.cfg.SnapshotIntervalS) * time.Second,
 			Known:            known,
+			KnownLabels:      knownLabels,
 		}, a.log)
 		a.wref.set(w)
 		errc := make(chan error, 1)

@@ -1,7 +1,7 @@
 // Unit tests for the setup page's phone helpers: `make test-web`.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { shellSwitch, shellSaved, tsnetSwitch, tsnetSaved, countdown, deviceKind, lastSeen } from './phone.js';
+import { shellSwitch, shellSaved, tsnetSwitch, tsnetSaved, countdown, deviceKind, devicesSectionState, lastSeen } from './phone.js';
 
 test('the shell switch shows only once phone access is on', () => {
   assert.equal(shellSwitch({ enabled: false, shell: true }).show, false);
@@ -55,10 +55,18 @@ test('the code countdown runs to empty', () => {
 test('device rows name the kind and the last contact', () => {
   const now = Date.parse('2026-10-21T12:00:00Z');
   assert.equal(deviceKind({ kind: 'ios' }), 'iPhone');
+  assert.equal(deviceKind({ kind: 'macos' }), 'Mac');
   assert.equal(deviceKind({ kind: 'browser' }), 'Browser');
   assert.equal(lastSeen({}, now), 'Not seen yet');
   assert.equal(lastSeen({ last_seen: '2026-10-21T11:55:00Z', last_network: 'lan' }, now), 'Wi-Fi · 5 min ago');
   assert.equal(lastSeen({ last_seen: '2026-10-21T11:59:59Z', last_network: 'tailscale' }, now), 'Tailscale · just now');
   assert.equal(lastSeen({ last_seen: '2026-10-21T11:59:59Z', last_network: 'proxy' }, now), 'proxy · just now');
   assert.equal(lastSeen({ last_seen: '2026-10-19T12:00:00Z' }, now), '2 d ago');
+});
+
+test('devices section is shown on loopback when any device is paired, without phone empty state', () => {
+  assert.deepEqual(devicesSectionState(false, 0), { show: false, showEmpty: false });
+  assert.deepEqual(devicesSectionState(false, 1), { show: true, showEmpty: false });
+  assert.deepEqual(devicesSectionState(true, 0), { show: true, showEmpty: true });
+  assert.deepEqual(devicesSectionState(true, 1), { show: true, showEmpty: false });
 });

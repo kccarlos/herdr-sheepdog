@@ -20,6 +20,8 @@ public struct MenuItemSpec: Equatable {
         case openMicrophoneSettings
         /// The daemon updates itself (`MacUpdater`, `POST /api/update`).
         case updateApp
+        /// Request a one-time short code to pair a local browser (`POST /api/pair/browser-code`).
+        case pairBrowser
     }
 
     public enum Row: Equatable {
@@ -54,6 +56,7 @@ public final class StatusItemController: NSObject {
         rows += [
             .separator,
             .item(title: "Open panel", action: .openPanel, enabled: true, checked: false),
+            .item(title: "Pair browser…", action: .pairBrowser, enabled: daemonUp, checked: false),
             .separator,
             .item(title: "Talk", action: .talk, enabled: daemonUp && (!voice.heldHere || voice.muted), checked: false),
             .item(title: "Mute", action: .toggleMute, enabled: voice.heldHere, checked: voice.muted),
@@ -97,6 +100,9 @@ public final class StatusItemController: NSObject {
     private let log: AppLogging
     private let quit: () -> Void
     private let updater: MacUpdater
+    private let browserPairing: BrowserPairingClient?
+    private let browserPairingPresenter: BrowserPairingPresenting?
+    private var pairBrowserTask: Task<Void, Never>?
     private var statusItem: NSStatusItem?
 
     /// The state the menu shows; the daemon is "down" until it answers.
@@ -125,6 +131,8 @@ public final class StatusItemController: NSObject {
         loginItem: LoginItemControlling,
         log: AppLogging,
         updater: MacUpdater? = nil,
+        browserPairing: BrowserPairingClient? = nil,
+        browserPairingPresenter: BrowserPairingPresenting? = nil,
         quit: @escaping () -> Void = { NSApp.terminate(nil) }
     ) {
         self.updater = updater ?? MacUpdater(
@@ -138,6 +146,8 @@ public final class StatusItemController: NSObject {
         self.hotkey = hotkey
         self.loginItem = loginItem
         self.log = log
+        self.browserPairing = browserPairing
+        self.browserPairingPresenter = browserPairingPresenter
         self.quit = quit
         super.init()
         self.updater.onChange = { [weak self] in
@@ -241,6 +251,19 @@ public final class StatusItemController: NSObject {
             guard let offer else { return }
             let updater = updater
             Task { await updater.start(offer: offer) }
+        case .pairBrowser:
+            guard let browserPairing, let browserPairingPresenter else { return }
+            if pairBrowserTask != nil { NSApp?.activate(ignoringOtherApps: true); return }
+            let log = log
+            pairBrowserTask = Task {
+                defer { self.pairBrowserTask = nil }
+                do { browserPairingPresenter.showCode(BrowserPairingPresentation(code: try await browserPairing.requestCode())) }
+                catch {
+                    let failure = BrowserPairingError.map(error)
+                    log.log("could not get browser pairing code: \(failure.title)")
+                    browserPairingPresenter.showError(failure)
+                }
+            }
         }
     }
 
@@ -254,7 +277,7 @@ public final class StatusItemController: NSObject {
         item.menu = menu()
     }
 
-    private func menu() -> NSMenu {
+    func menu() -> NSMenu {
         let menu = NSMenu()
         menu.autoenablesItems = false
         for row in Self.rows(for: state, loginItemEnabled: loginItem.isEnabled, voice: voice.state, hotkey: hotkey.shortcut, update: MacUpdatePresentation(offer: offer, state: updater.state)) {
@@ -271,6 +294,8 @@ public final class StatusItemController: NSObject {
                 entry.representedObject = ActionBox(action)
                 if action == .updateApp {
                     entry.setAccessibilityLabel(MacUpdatePresentation(offer: offer, state: updater.state).accessibilityLabel)
+                } else if action == .pairBrowser {
+                    entry.setAccessibilityLabel("Pair a local browser with a one-time code")
                 }
                 menu.addItem(entry)
             case .separator:

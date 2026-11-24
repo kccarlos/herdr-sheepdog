@@ -136,6 +136,7 @@ type claim struct {
 	// reason it failed; empty for a fresh claim.
 	retryOf     string
 	retryReason string
+	stopRest    bool
 }
 
 // maxInputs bounds the remembered inputs.
@@ -581,6 +582,14 @@ func (s *Supervisor) railBlockedLocked(p state.PendingAction, keys []string, via
 // nothing and keeps it (ErrNotSent). A pane herdr reports done or idle at
 // its prompt (agy, a finish that asks, a menu) answers as any other.
 func (s *Supervisor) AnswerTap(ctx context.Context, id string, option int) (voice.ToolResult, error) {
+	return s.AnswerTapDevice(ctx, id, option, "")
+}
+
+// AnswerTapDevice is AnswerTap carrying the caller's device id (KB-ASK-19).
+func (s *Supervisor) AnswerTapDevice(ctx context.Context, id string, option int, deviceID string) (voice.ToolResult, error) {
+	if strings.HasPrefix(id, factoryAskPrefix) {
+		return s.answerFactoryTap(id, option, deviceID)
+	}
 	s.mu.Lock()
 	p, _, has := s.questionByID(id)
 	s.mu.Unlock()

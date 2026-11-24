@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Factory web — one task</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Outfit:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.sd-light{--bg:#FAF8F3;--card:#FFFFFF;--code:#F1EEE7;--line:#E4E0D7;--fg:#1F1F22;--muted:#6B6E75;--mof:#5C5F66;--primary:#D98718;--ptext:#8A5700;--onp:#1F1F22;--psoft:#FDF1DC;--blocked:#D99417;--working:#1F5F9E;--done:#1D6B46;--idle:#5C6370;--dash:#8E8A80;--dsoft:#DDEEE4;--track:#ECE8DF;--shadow:0 1px 2px rgba(31,31,34,0.12)}
+.sd-dark{--bg:#16181C;--card:#1F2126;--code:#26292F;--line:#2E3138;--fg:#F5F2EA;--muted:#A3A7AF;--mof:#A3A7AF;--primary:#F39C1F;--ptext:#F5B83D;--onp:#1F1F22;--psoft:#2A2416;--blocked:#F0A92A;--working:#6AA8EB;--done:#5CC792;--idle:#9AA1AD;--dash:#6B707A;--dsoft:#1E3428;--track:#26292F;--shadow:0 1px 2px rgba(0,0,0,0.5)}
+.sd a{color:var(--ptext)}.sd a:hover{color:var(--fg)}
+.sd :focus-visible{outline:3px solid #F39C1F;outline-offset:2px;box-shadow:0 0 0 2px var(--fg)}
+</style>
+</helmet>
+<div class="{{rootClass}}" style="min-height: 100vh; background: var(--bg); color: var(--fg); font-family: Inter, system-ui, -apple-system, sans-serif; font-size: 15px; line-height: 1.5">
+<div style="max-width: 1120px; margin: 0 auto; padding: 16px clamp(16px, 3vw, 32px) 48px; box-sizing: border-box; display: flex; flex-direction: column; gap: 20px">
+
+<a href="FactoryWebMain.dc.html" style="align-self: flex-start; display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 14px; text-decoration: none">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"></path></svg>
+board
+</a>
+
+<header style="display: flex; flex-direction: column; gap: 10px">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 13px; color: var(--muted)">
+<span style="font-family: ui-monospace, Menlo, monospace">SDF-53</span>
+<span style="display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; background: var(--wsoft); border-radius: 999px; color: var(--working); font-weight: 500"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 999px; background: var(--working)"></span>CI · Waiting on CI, 18 min</span>
+<span>PR #665 · waits on CI</span>
+</div>
+<h1 style="margin: 0; font-family: Outfit, Inter, sans-serif; font-weight: 600; font-size: 32px; line-height: 1.2">Engine: every launch states its permission mode</h1>
+<p style="margin: 0; max-width: 720px; color: var(--muted)">Each launch now names the permission mode itself, Codex runs with bypass, and the hook path for Codex is gone. The engine reads the mode from one place.</p>
+<p style="margin: 0; font-size: 14px; color: var(--muted)">Waits on CI. Merging is the engine's step: no one accepts this task by hand. To merge sooner, ask the coordinator to open the override card.</p>
+</header>
+
+<div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start">
+
+<main style="flex: 999 1 540px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+
+<section aria-label="Verdict" style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; padding: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 14px">
+<span aria-hidden="true" style="flex: none; width: 28px; height: 28px; border-radius: 999px; background: var(--dsoft); display: flex; align-items: center; justify-content: center; color: var(--done)"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"></path></svg></span>
+<div style="flex: 999 1 300px; display: flex; flex-direction: column; gap: 2px">
+<h2 style="margin: 0; font-size: 15px; font-weight: 600">the ladder says: passed</h2>
+<span style="font-size: 13px; color: var(--muted)">2 passing rounds on the final head · the engine's checks pass at this commit · now waiting on CI</span>
+</div>
+</section>
+
+<section aria-label="Review rounds" style="display: flex; flex-direction: column; gap: 14px; padding: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 14px">
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px">
+<h2 style="margin: 0; font-family: Outfit, Inter, sans-serif; font-weight: 600; font-size: 18px">review</h2>
+</div>
+<ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column">
+<sc-for list="{{rounds}}" as="r" hint-placeholder-count="3">
+<li style="{{r.rowStyle}}">
+<span aria-hidden="true" style="{{r.dot}}"></span>
+<div style="flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 2px">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px">
+<span style="font-size: 15px; font-weight: 500">round {{r.n}}</span>
+<span style="font-size: 13px; font-weight: 500; color: {{r.verdictColor}}">{{r.verdict}}</span>
+</div>
+<span style="font-size: 14px; color: var(--muted)">{{r.detail}}</span>
+<span style="font-size: 12px; color: var(--muted); font-family: ui-monospace, Menlo, monospace">{{r.head}} · another model</span>
+</div>
+</li>
+</sc-for>
+</ol>
+</section>
+
+<section aria-label="Checks" style="display: flex; flex-direction: column; gap: 10px; padding: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 14px">
+<div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: baseline; gap: 8px">
+<h2 style="margin: 0; font-family: Outfit, Inter, sans-serif; font-weight: 600; font-size: 18px">checks the engine ran</h2>
+</div>
+<sc-for list="{{checks}}" as="c" hint-placeholder-count="3">
+<div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 12px; min-height: 44px; padding: 8px 12px; box-sizing: border-box; background: var(--code); border-radius: 8px">
+<span style="font-family: ui-monospace, Menlo, monospace; font-size: 13px; overflow-wrap: anywhere">{{c.cmd}}</span>
+<span style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 500; color: var(--done)"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>{{c.result}}</span>
+</div>
+</sc-for>
+</section>
+</main>
+
+<aside style="flex: 1 1 300px; min-width: 0; display: flex; flex-direction: column; gap: 16px">
+
+<section aria-label="Size" style="display: flex; flex-direction: column; gap: 8px; padding: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 14px">
+<h2 style="margin: 0; font-family: Outfit, Inter, sans-serif; font-weight: 600; font-size: 18px">size</h2>
+<div style="display: flex; align-items: baseline; gap: 8px"><span style="font-family: Outfit, Inter, sans-serif; font-size: 30px; font-weight: 600; font-variant-numeric: tabular-nums">116</span><span style="font-size: 14px; color: var(--muted)">lines changed · cap 160 (2 × the estimate of 80)</span></div>
+<div style="position: relative; height: 6px; background: var(--track); border-radius: 999px">
+<div style="height: 100%; width: 72%; background: var(--working); border-radius: 999px"></div>
+</div>
+<p style="margin: 0; font-size: 14px; color: var(--fg); font-weight: 500">Under the cap.</p>
+<p style="margin: 0; font-size: 13px; color: var(--muted)">At the cap the engine opens a recap and the coordinator decides what to do.</p>
+</section>
+
+<section aria-label="Who worked on it" style="display: flex; flex-direction: column; gap: 8px; padding: 14px; background: var(--card); border: 1px solid var(--line); border-radius: 14px">
+<h2 style="margin: 0; font-family: Outfit, Inter, sans-serif; font-weight: 600; font-size: 18px">agents</h2>
+<div style="display: flex; justify-content: space-between; gap: 8px; font-size: 14px"><span>worker</span><span style="color: var(--muted)">claude opus</span></div>
+<div style="display: flex; justify-content: space-between; gap: 8px; font-size: 14px"><span>reviewer</span><span style="color: var(--muted)">another model</span></div>
+<div style="display: flex; justify-content: space-between; gap: 8px; font-size: 14px"><span>waits on</span><span style="color: var(--muted)">CI</span></div>
+</section>
+</aside>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"theme":{"editor":"enum","options":["light","dark"],"default":"light"},"$preview":{"width":1440,"height":1320}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const theme = this.props.theme ?? 'light';
+    const dot = (c) => 'flex:none;margin-top:7px;width:10px;height:10px;border-radius:999px;background:var(--' + c + ')';
+    const rounds = [
+      { n: 1, verdict: 'changes asked', verdictColor: 'var(--ptext)', detail: '1 major, 2 minor; all fixed', head: '3f9c1a2', dot: dot('blocked') },
+      { n: 2, verdict: 'pass', verdictColor: 'var(--done)', detail: 'nothing at major or above', head: '7be04d5', dot: dot('done') },
+      { n: 3, verdict: 'pass', verdictColor: 'var(--done)', detail: 'second passing round on the final head', head: '7be04d5', dot: dot('done') }
+    ].map((r, i, a) => ({ ...r, rowStyle: 'display:flex;gap:12px;padding:10px 0' + (i < a.length - 1 ? ';border-bottom:1px solid var(--line)' : '') }));
+    return {
+      rootClass: 'sd sd-' + theme,
+      rounds,
+      checks: [
+        { cmd: 'make test', result: 'passed' },
+        { cmd: 'make vet lint', result: 'passed' },
+        { cmd: 'GitHub checks on PR #665', result: 'running · 18 min' }
+      ]
+    };
+  }
+}
+</script>
+</body>
+</html>

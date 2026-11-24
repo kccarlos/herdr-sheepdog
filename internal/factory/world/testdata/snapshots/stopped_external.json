@@ -1,0 +1,23 @@
+{
+  "baseRefName": "main",
+  "headRefOid": "27f1ff289f5c70e91392dca5fbf435192e03e5e1",
+  "isDraft": false,
+  "mergeCommit": null,
+  "mergeStateStatus": "UNSTABLE",
+  "mergeable": "MERGEABLE",
+  "number": 55,
+  "reviewDecision": "",
+  "state": "OPEN",
+  "statusCheckRollup": [
+    {
+      "__typename": "CheckRun",
+      "completedAt": "2026-11-20T09:54:57Z",
+      "conclusion": "CANCELLED",
+      "detailsUrl": "https://github.com/kccarlos/test_repo/actions/runs/44714650262/job/136214813989",
+      "name": "check",
+      "startedAt": "2026-11-20T09:54:26Z",
+      "status": "COMPLETED",
+      "workflowName": "ci"
+    }
+  ]
+}

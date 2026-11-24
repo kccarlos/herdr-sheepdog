@@ -25,8 +25,38 @@
 | `sheepdog restart` | Stop, then start; with the login service, one restart through launchd or systemd (nothing is unloaded). Reads the env file the last run loaded (not the `./.env` of the directory you are in); `--env-file PATH` overrides it. |
 | `sheepdog status` | Running or not: pid, version, URL, models, herdr, phones, last error, and which env file the keys came from (with a warning when it is not `~/.config/sheepdog/.env`). `--json` for scripts. Exit 0 running, 3 not running, 1 error. |
 | `sheepdog logs` | The runtime log. `-f` follows, `-n N` sets the lines (default 100). |
-| `sheepdog open` | Open the voice page; `sheepdog open setup` and `sheepdog open debug` open the others. Over SSH it opens nothing and prints the `ssh -N -L` line that reaches the page. |
+| `sheepdog open` | Open the voice page; `sheepdog open setup` and `sheepdog open debug` open the others. Over SSH it opens nothing and prints the `ssh -N -L` line that reaches the page. The factory board is served directly at `http://127.0.0.1:7777/factory` (loopback only). |
 | `sheepdog serve` | Run the daemon in this terminal; Ctrl-C stops it. |
+
+## Factory
+
+Run and inspect the unattended factory over `herdr-core` ([factory.md](factory.md)). The factory web board is served at `http://127.0.0.1:7777/factory` (loopback only; use your `web.port` if changed).
+
+| Command | What it does |
+|---|---|
+| `sheepdog factory doctor` | Check unattended factory prerequisites for `[folder]` (default `.`) with one-line fixes: `herdr-core`, a timed project-volume probe, logged-in agent CLIs plus a canary start, `codexbar`, leftover sweep checks (terminals, worktrees, branches, local base, scoped Codex home), and all start checks ([factory.md](factory.md#requirements)). Exit 1 on any FAIL. `--no-canary` spends no tokens; `--folder PATH`, `--config PATH`, `--hc-socket PATH`. |
+| `sheepdog factory start` | Start the factory coordinator for `<folder>` with `--goal "<sentence>"` (needs the running daemon and `herdr-core`). Runs the start checks first and refuses on any FAIL, printing each failing line with its fix. `--max-running N` (1–20, default 3), `--config PATH`. |
+| `sheepdog factory status` | Print a factory project's tasks (id, title, stage, last logged rule, age, and why line matching `/factory`) plus any active project alerts or outages, even with zero tasks. Queries the running daemon (including in-memory alerts), or falls back to stored `state.json` and `log.jsonl` when stopped. `[folder]` (repo root or any subfolder) is optional when only one project is started or stored; `--config PATH`. |
+| `sheepdog factory log` | Print a factory project's step log (`log.jsonl`) and its first-look pass rate once any task has a reviewed round. `[folder]` is optional when only one project is started or stored; `-n N` shows the last N lines; `--config PATH`. |
+| `sheepdog factory stop` | Stop a started factory project (`[folder]`, optional when only one is running) and its runs. `--config PATH`. |
+
+### Factory agent commands
+
+These subcommands are called only by factory coordinator, worker, and reviewer runs inside `herdr-core`. Each run authenticates with its per-run `SHEEPDOG_RUN_TOKEN`; running them from your own terminal is refused.
+
+| Command | Role | What it does |
+|---|---|---|
+| `sheepdog factory plan apply` | Coordinator | Apply the initial JSON plan from `<file>` (Conventional Commit titles, scope fields, verifiable outcomes, line estimates, and optional `kind`, `gate`, `after`, `priority`, and model `request` overrides). Refused if a plan already exists or any check fails. |
+| `sheepdog factory plan amend` | Coordinator | Add tasks or update existing open tasks (`title`, `brief`, `outcomes`, `estimate_lines`, `after`, `priority`, or `request`) from `<file>` with a reason. Changing a started task's brief or outcomes resets counted review rounds and notifies a live worker. |
+| `sheepdog factory recap decide` | Coordinator | Resolve an open recap for `<task>` with `<choice>` and `--why "<why>"`: `split` (with `--child '<json>'`), `drop`, `new` (only after `plan amend` changed brief or outcomes), or `continue` (offered by size, CI, and time recaps, once per task by default; on a size recap, sets the cap to current changed lines plus 60). |
+| `sheepdog factory task` | Coordinator | Run `park`, `unpark`, `drop`, `close`, or `send-back` on `<task>` with `--why "<why>"`. `close` requires a prior nothing-to-change report with no new commits. |
+| `sheepdog factory task retry` | Coordinator | Retry `<task>` with `--why "<why>"` when it is stuck on exhausted runs or failures, a closed or wrong-base PR (starts a fresh attempt and PR), or a diverged or unreadable branch after a wake. |
+| `sheepdog factory task say` | Coordinator | Send `--why "<message>"` to `<task>`'s worker (delivered now if idle, or held until next idle). |
+| `sheepdog factory report ready` | Worker | Run proof commands (`--proof`), check artifacts (`--artifact`), save combined proof logs under the worktree's `.git` dir, and report `HEAD` ready with `--touched` and `--skipped`. Requires a clean worktree and new commit. Also supports `--reject "<why>"` and `--nothing-to-change --why "<why>"`. |
+| `sheepdog factory report review` | Reviewer | Submit a `pass` or `changes` verdict with `--code`, `--head`, `--self-check-misses`, `--deletable`, and optional `--class`, `--not-run`, and `--findings <path>` (outside the worktree). A dirty worktree voids the round and stops the reviewer. |
+| `sheepdog factory report ask` | Worker / Reviewer | Send a `decision` question (2–9 options and a `--recommend` pick) to the coordinator and wake it. |
+| `sheepdog factory ask` | Coordinator | Open a structured ask (`--kind`), or open an engine-filled override card (`--kind override --task <task> [...]`). Gated kinds go to the owner. |
+| `sheepdog factory answer` | Coordinator | Answer an open `decision` ask (`<ask> "<option>" [--why "<why>"]`) and deliver it to the asking worker (or hold it for a replacement) or live reviewer (cancelling the ask if the reviewer already ended). Gated asks require an owner proof. |
 
 ## Manage
 

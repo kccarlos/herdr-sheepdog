@@ -48,6 +48,8 @@ type Supervisor interface {
 	ShepherdInput(kind supervisor.InputKind, text string)
 	TypedTurn(ctx context.Context) (supervisor.TypedReply, error)
 	AnswerTap(ctx context.Context, id string, option int) (voice.ToolResult, error)
+	AnswerTapDevice(ctx context.Context, id string, option int, deviceID string) (voice.ToolResult, error)
+	FactoryQuestions() []state.PendingAction
 	// ConversationStartedAt and ResetConversation back GET /api/state's
 	// conversation_started_at and POST /api/conversation/reset ("New
 	// conversation", docs/dev/roles.md).
@@ -260,6 +262,8 @@ type Deps struct {
 	DataDir string
 	// GitBin is the program the changes view runs (default "git").
 	GitBin string
+	// Factory backs POST /api/factory/{start,stop,report}; nil answers 503.
+	Factory Factory
 
 	// TLS is the daemon's key and self-signed certificate (tlsid.go),
 	// served on the same port as plain HTTP; nil makes a fresh one in
@@ -292,10 +296,11 @@ type Server struct {
 	// (docs/dev/design/security.md): the paired devices, open challenges
 	// and tickets, the one-time pairing code, and every long-lived
 	// connection by device.
-	devices *deviceStore
-	auth    *authState
-	enroll  enrollCodes
-	live    liveConns
+	devices       *deviceStore
+	auth          *authState
+	enroll        enrollCodes
+	browserEnroll enrollCodes
+	live          liveConns
 	// activityWatch backs the Live Activity pushes (activity.go).
 	activityWatch activityWatch
 	// limits rate-limits sign-in and pairing per source address; conns
@@ -488,7 +493,7 @@ func (s *Server) routeTable() ([]route, error) {
 	for _, p := range []struct {
 		name string
 		a    access
-	}{{"voice", accessPublic}, {"static", accessPublic}, {"debug", accessLoopback}} {
+	}{{"voice", accessPublic}, {"static", accessPublic}, {"debug", accessLoopback}, {"factory", accessLoopback}} {
 		pages, err := s.staticRoutes(p.name, p.a)
 		if err != nil {
 			return nil, err
@@ -568,6 +573,12 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"DELETE /api/push/activity", accessDevice, s.handlePushActivityEnd},
 		route{"GET /api/push/status", accessDevice, s.handlePushStatus},
 		route{"POST /api/feedback", accessDevice, s.handleFeedback},
+		route{"GET /api/factory/projects", accessDevice, s.handleFactoryView("projects")},
+		route{"GET /api/factory/projects/{id}/graph", accessDevice, s.handleFactoryView("graph")},
+		route{"GET /api/factory/projects/{id}/log", accessDevice, s.handleFactoryView("log")},
+		route{"GET /api/factory/asks", accessDevice, s.handleFactoryAsks},
+		route{"POST /api/factory/asks/{id}/answer", accessDevice, s.handleFactoryAskAnswer},
+		route{"POST /api/pair/browser-code", accessDevice, s.handleBrowserCode},
 
 		// This computer only: pairing, debug and internal routes.
 		route{"GET /api/pair", accessLoopback, s.handlePair},
@@ -593,6 +604,10 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"GET /api/context/brain", accessLoopback, s.handleContextBrain},
 		route{"GET /api/context/voice", accessLoopback, s.handleContextVoice},
 		route{"GET /api/context/timeline", accessLoopback, s.handleContextTimeline},
+		route{"GET /api/factory/status", accessLoopback, s.handleFactoryView("status")},
+		route{"POST /api/factory/start", accessLoopback, s.handleFactory("start")},
+		route{"POST /api/factory/stop", accessLoopback, s.handleFactory("stop")},
+		route{"POST /api/factory/report", accessLoopback, s.handleFactory("report")},
 	)
 	setup, err := s.setupRoutes()
 	if err != nil {

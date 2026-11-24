@@ -127,6 +127,10 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer untrack()
+	// Subscribe before the headers go out and before replaying, so a client
+	// that sees the stream open misses nothing logged after; duplicates are
+	// skipped by id.
+	live := s.deps.Log.Subscribe(ctx)
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -135,9 +139,6 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	_, _ = fmt.Fprintf(w, ": sheepdog events %s\n\n", s.deps.Version)
 	flusher.Flush()
 
-	// Subscribe before replaying so nothing logged in between is lost;
-	// duplicates are skipped by id.
-	live := s.deps.Log.Subscribe(ctx)
 	var last int64
 	var replay []eventlog.Event
 	switch {

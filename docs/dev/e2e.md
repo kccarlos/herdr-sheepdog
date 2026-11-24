@@ -254,9 +254,9 @@ template `scripts/e2e/io.github.kccarlos.sheepdog-nightly.plist`, which runs at
 `go`, `op`, `gh`, `claude` and `codex`. It loads the job with
 `launchctl bootstrap`.
 
-Each scheduled run first moves the clone to `origin/main`. While main has no
-`nightly.sh` yet, it uses `--ref` instead. Then the run starts again from the
-new copy. launchd output goes to
+Each scheduled run first moves the clone to `origin/main` (or `--ref` when
+installed to test a branch). Then the run starts again from the new copy.
+launchd output goes to
 `~/Library/Logs/sheepdog-nightly/launchd.log`.
 
 The VM lives on an external disk, and macOS asks once before a launchd job

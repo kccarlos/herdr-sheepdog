@@ -51,7 +51,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             panel: panel,
             hotkey: HotkeyService(),
             loginItem: LoginItem(),
-            log: log
+            log: log,
+            browserPairing: BrowserPairingClient(locator: locator, sessionProvider: MacDeviceSessionProvider()),
+            browserPairingPresenter: BrowserPairingAlertPresenter()
         )
         controller.install()
         self.voice = voice

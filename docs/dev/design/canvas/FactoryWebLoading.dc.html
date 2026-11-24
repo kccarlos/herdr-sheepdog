@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Factory web — loading</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Outfit:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#FAF8F3}
+</style>
+</helmet>
+<div style="min-height: 100vh; background: #FAF8F3; color: #1F1F22; font-family: Inter, system-ui, -apple-system, sans-serif; font-size: 15px; line-height: 1.5">
+<div style="max-width: 1200px; margin: 0 auto; padding: 24px clamp(16px, 3vw, 32px) 40px; box-sizing: border-box; display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 24px">
+
+<section aria-label="First seconds" style="display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.2px; text-transform: uppercase; color: #6B6E75">first seconds</h2>
+<div style="display: flex; flex-direction: column; gap: 16px; padding: 20px; min-height: 560px; box-sizing: border-box; background: #FAF8F3; border: 1px solid #E4E0D7; border-radius: 22px">
+<div style="display: flex; align-items: center; gap: 10px">
+<img src="/_blob/1899743c7d9a9dc4065fe836d387e378" alt="" style="width: 28px; height: 28px">
+<span style="font-family: Outfit, Inter, sans-serif; font-weight: 700; font-size: 20px; line-height: 1">sheepdog</span>
+<span style="font-family: Outfit, Inter, sans-serif; font-weight: 500; font-size: 20px; line-height: 1; color: #6B6E75">factory</span>
+</div>
+<div role="status" style="display: flex; align-items: center; gap: 10px; padding: 14px; background: #FFFFFF; border: 1px solid #E4E0D7; border-radius: 14px">
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 999px; background: #1F5F9E"></span>
+<span>Loading the factory…</span>
+</div>
+<span aria-hidden="true" style="height: 92px; background: #ECE8DF; border-radius: 22px"></span>
+<span aria-hidden="true" style="display: flex; gap: 10px"><span style="flex: 1; height: 120px; background: #ECE8DF; border-radius: 14px"></span><span style="flex: 1; height: 120px; background: #ECE8DF; border-radius: 14px"></span></span>
+<span aria-hidden="true" style="height: 160px; background: #ECE8DF; border-radius: 14px"></span>
+<p style="margin: 0; font-size: 13px; color: #6B6E75">One dot, no spinner. The shapes are where the board will be, so nothing jumps when it arrives.</p>
+</div>
+</section>
+
+<section aria-label="After 8 seconds" style="display: flex; flex-direction: column; gap: 12px">
+<h2 style="margin: 0; font-size: 13px; font-weight: 600; letter-spacing: 0.2px; text-transform: uppercase; color: #6B6E75">after 8 seconds with no link</h2>
+<div style="display: flex; flex-direction: column; gap: 16px; padding: 20px; min-height: 560px; box-sizing: border-box; background: #FAF8F3; border: 1px solid #E4E0D7; border-radius: 22px">
+<div style="display: flex; align-items: center; gap: 10px">
+<img src="/_blob/1899743c7d9a9dc4065fe836d387e378" alt="" style="width: 28px; height: 28px">
+<span style="font-family: Outfit, Inter, sans-serif; font-weight: 700; font-size: 20px; line-height: 1">sheepdog</span>
+<span style="font-family: Outfit, Inter, sans-serif; font-weight: 500; font-size: 20px; line-height: 1; color: #6B6E75">factory</span>
+</div>
+<div role="status" style="display: flex; flex-direction: column; gap: 12px; padding: 16px; background: #FFFFFF; border: 1px dashed #8E8A80; border-radius: 14px">
+<div style="display: flex; align-items: center; gap: 10px">
+<span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 999px; background: #5C6370"></span>
+<span style="font-weight: 500">Can't reach sheepdog. Trying again…</span>
+</div>
+<p style="margin: 0; font-size: 14px; color: #6B6E75">This page talks to the sheepdog daemon on the Mac mini. Check that the Mac mini is awake and sheepdog is running.</p>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px">
+<button type="button" style="min-height: 44px; padding: 0 18px; background: #FFFFFF; color: #1F1F22; border: 1px solid #1F1F22; border-radius: 999px; font: inherit; font-weight: 500; cursor: pointer">Try now</button>
+<span style="font-size: 13px; color: #6B6E75; font-variant-numeric: tabular-nums">next try in 5 s</span>
+</div>
+</div>
+<span aria-hidden="true" style="height: 92px; background: #ECE8DF; border-radius: 22px"></span>
+<span aria-hidden="true" style="height: 160px; background: #ECE8DF; border-radius: 14px"></span>
+<p style="margin: 0; font-size: 13px; color: #6B6E75">Not an error colour: nothing broke on this side.</p>
+</div>
+</section>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1280,"height":760}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

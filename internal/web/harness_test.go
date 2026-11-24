@@ -475,6 +475,8 @@ type harnessOpts struct {
 	// end-to-end /ws tests exercise real flush acknowledgement slots,
 	// underruns, cuts, and stop pushes.
 	trackPlayback bool
+	// factory wires a fake or real factory engine into the supervisor.
+	factory supervisor.Factory
 }
 
 // testFleet is the fleet a test's marks follow: the injector's panes.
@@ -530,7 +532,7 @@ func newHarness(t *testing.T, o harnessOpts) *harness {
 		}
 		providers = []ProviderInfo{{ID: "gemini", Label: "Gemini", Available: true}, {ID: "deepseek", Label: "DeepSeek", Available: true}, {ID: "openai", Label: "OpenAI", Available: false, Reason: "no OPENAI_API_KEY"}}
 	}
-	scfg := supervisor.Config{Brain: b, Mutes: o.mutes}
+	scfg := supervisor.Config{Brain: b, Mutes: o.mutes, Factory: o.factory}
 	if o.marks {
 		local, err := attention.NewLocal("", testFleet{h}, attention.Options{})
 		if err != nil {

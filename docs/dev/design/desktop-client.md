@@ -1,10 +1,8 @@
 # Desktop client: a herdr-app panel and a menu-bar app
 
-*Proposal, 2026-10-30. Nothing is built yet. Where this document says
-"verified" it means one of three experiments run on a Mac on 2026-10-30
-(microphone permission, a test mod's text input and event stream, a linked
-private core); their notes are not committed. Code references are to `main`
-at `562d0054`.*
+*Built and shipped ([docs/desktop.md](../../desktop.md), `mods/sheepdog/`,
+`ios/Sources/SheepdogMac/`); kept as the design record. Original proposal from
+2026-10-30; code references below are to `main` at `562d0054`.*
 
 At the computer, the user talks to sheepdog by voice and by text, inside
 herdr-app, and sees the same conversation the phone shows. Away from the

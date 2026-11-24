@@ -1,8 +1,6 @@
 # iOS app: state and runtime architecture
 
-*Accepted 2026-10-23; built phase by phase (section 6).
-Code references are `file:line` at commit `d425f46a` (TestFlight 0.1.17);
-the fix for the three 0.1.17 bugs will move some lines.*
+Status: **built and shipped through phase 8 (approval slice #447) and phase 10** (`ComputerFleet`, `ComputerConnection`, `LinkRuntime`, `VoiceEngine`, `ApprovalFlow`, `@Observable` models); phase 8 slice 9 (deleting `SessionViewModel`) and phase 9 (chaos lane) were shelved on 2026-10-27 (section 6). Kept as the design record (accepted 2026-10-23; code references below are `file:line` at commit `d425f46a`, TestFlight 0.1.17).
 
 The app grew fast: several computers, iPad with several windows, the
 terminal, the Live Activity, push, TLS pinning, certificate rotation and

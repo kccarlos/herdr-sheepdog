@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — the owner's override card</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+button{font:inherit;cursor:pointer}
+ul{list-style:none;margin:0;padding:0}
+</style>
+</helmet>
+<section aria-label="The herdr-sheepdog factory needs your answer" style="width: {{ w }}px; box-sizing: border-box; padding: 12px 14px; border-radius: 14px; background: {{c.accentTint}}; border: 1px solid {{c.blocked}}; display: flex; flex-direction: column; gap: 10px; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <span style="font-size: {{ fq }}px; line-height: 1.33; font-weight: 600">The herdr-sheepdog factory asks: merge these 4 now, without waiting for CI and review?</span>
+  <ul style="display: flex; flex-direction: column; gap: 4px">
+    <li style="box-sizing: border-box; min-height: 32px; padding: 6px 12px; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.surface}}; font-size: {{ fo }}px; line-height: 19px">SDF-12 · CI green</li>
+    <li style="box-sizing: border-box; min-height: 32px; padding: 6px 12px; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.surface}}; font-size: {{ fo }}px; line-height: 19px">SDF-14 · CI running</li>
+    <li style="box-sizing: border-box; min-height: 32px; padding: 6px 12px; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.surface}}; font-size: {{ fo }}px; line-height: 19px">SDF-15 · CI red</li>
+    <li style="box-sizing: border-box; min-height: 32px; padding: 6px 12px; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.surface}}; font-size: {{ fo }}px; line-height: 19px">SDF-17 · not reviewed</li>
+  </ul>
+  <div style="display: flex; gap: 8px">
+    <button style="min-height: 44px; padding: 6px 14px; border-radius: 22px; border: 1.5px solid {{c.ink}}; background: {{c.surface}}; color: {{c.ink}}; font-size: {{ fo }}px; font-weight: 600; flex: 1 1 0">Merge</button>
+    <button style="min-height: 44px; padding: 6px 14px; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: {{ fo }}px; font-weight: 600; flex: 1 1 0">Not now</button>
+  </div>
+  <span style="font-size: {{ fs }}px; line-height: 1.38; color: {{c.muted}}">Only you can answer this. A conflict, or a commit newer than this card, is not merged.</span>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "w": {"editor": "int", "default": 358}, "ax": {"editor": "boolean", "default": false}, "$preview": {"width": 358, "height": 330}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = {"surface": "#FFFFFF", "ink": "#1F1F22", "line": "#E4E0D7", "muted": "#6B6E75", "accentText": "#8A5700", "accentTint": "#FDF1DC", "blocked": "#D99417", "primary": "#D98718"};
+    const dark = {"surface": "#1F2126", "ink": "#F5F2EA", "line": "#2E3138", "muted": "#A3A7AF", "accentText": "#F5B83D", "accentTint": "#2A2416", "blocked": "#F0A92A", "primary": "#F39C1F"};
+    return { c: this.props.dark ? dark : light, w: this.props.w ?? 358, fq: this.props.ax ? 22 : 15, fo: this.props.ax ? 22 : 15, fs: this.props.ax ? 18 : 13 };
+  }
+}
+</script>
+</body>
+</html>

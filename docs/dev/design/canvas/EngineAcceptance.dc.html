@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Factory engine — the acceptance table</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.eng{--bg:#FAF8F3;--surface:#FFFFFF;--fg:#1F1F22;--muted:#6B6E75;--line:#E4E0D7;--band:#F1EEE7;--edge:#8E929A;--accent:#1D6B46;--accent-soft:#DDEEE4;--in:#6A46B0;--amber:#8A5700;--amber-edge:#D99417;--amber-soft:#FDF1DC;
+--c-worker:#1F5F9E;--c-engine:#5C6370;--c-reviewer:#553591;--c-ci:#1D6B46;--c-coord:#6A46B0;--c-owner:#8A5700;--c-nobody:#646A75;--c-other:#646A75;
+--font-ui:Inter,system-ui,-apple-system,"Segoe UI",sans-serif;--font-display:Outfit,Inter,system-ui,sans-serif;--font-mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+box-sizing:border-box;background:var(--bg);color:var(--fg);font:15px/1.5 var(--font-ui);-webkit-font-smoothing:antialiased}
+.eng *{box-sizing:border-box}
+.eng h1{font:600 2rem/1.2 var(--font-display);margin:0 0 8px;letter-spacing:-0.01em}
+.eng h2{font:600 1.25rem/1.3 var(--font-display);margin:0}
+.eng h3{font-size:.8125rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:0;font-weight:600}
+.eng p{margin:0}
+.eng .intro{max-width:80ch;color:var(--muted);font-size:1rem}
+.eng .intro b{color:var(--fg);font-weight:600}
+.eng code,.eng .mono{font-family:var(--font-mono);font-size:.88em}
+.eng .sub{color:var(--muted);font-size:.9rem}
+.eng .chip{--c:var(--c-other);font:500 .875rem/1.4 var(--font-ui);border-radius:999px;padding:1px 10px;border:1px solid color-mix(in srgb,var(--c) 55%,transparent);background:color-mix(in srgb,var(--c) 12%,var(--surface));color:var(--c)}
+.eng .c-worker{--c:var(--c-worker)}.eng .c-engine{--c:var(--c-engine)}.eng .c-reviewer{--c:var(--c-reviewer)}.eng .c-ci{--c:var(--c-ci)}
+.eng .c-coordinator{--c:var(--c-coord)}.eng .c-owner{--c:var(--c-owner);background:var(--amber-soft);border-color:var(--amber-edge);font-weight:600}.eng .c-nobody{--c:var(--c-nobody);background:none}.eng .c-other{--c:var(--c-other);background:none}
+.eng .a-passed{--c:var(--c-ci)}.eng .a-fix{--c:var(--c-worker)}.eng .a-review{--c:var(--c-reviewer)}.eng .a-retro{--c:var(--c-engine)}.eng .a-recap{--c:var(--c-coord)}
+.eng .ladder{display:flex;flex-direction:column;gap:6px}
+.eng .ladder .gh{margin-top:16px;display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline}
+.eng .ladder .gh:first-child{margin-top:0}
+.eng .ladder .gh span{color:var(--muted);font-size:.9rem}
+.eng .rung{background:var(--surface);border:1px solid var(--line);border-radius:8px}
+.eng .rsum,.eng .rung-s{display:grid;grid-template-columns:3.4rem minmax(0,1fr) auto;gap:4px 12px;align-items:start;padding:9px 12px}
+.eng .rid{font:600 .95rem var(--font-mono);color:var(--accent)}
+.eng .cond{font-size:.9rem;min-width:0;overflow-wrap:anywhere}
+.eng .chips{display:flex;flex-wrap:wrap;gap:4px;justify-content:flex-end;max-width:420px}
+.eng .rbody{padding:2px 12px 12px calc(3.4rem + 24px);display:grid;gap:6px;font-size:.88rem}
+.eng .rbody b{font:600 .8125rem var(--font-ui);letter-spacing:.08em;text-transform:uppercase;color:var(--muted);display:block}
+.eng .rung.merge{border:2px solid var(--accent);background:color-mix(in srgb,var(--accent) 7%,var(--surface))}
+.eng .rung.merge .rid::after{content:" MERGE";font:600 .75rem var(--font-ui);letter-spacing:.1em}
+.eng .rung.ovr{border-color:var(--amber-edge);background:var(--amber-soft)}
+.eng .rung.ovr .rid{color:var(--amber)}
+.eng .gh.ovr h3{color:var(--amber)}
+.eng .rung.fallback{border-style:dashed;border-color:var(--edge);background:none;color:var(--muted)}
+.eng .rung.fallback .rid{color:var(--muted)}
+.eng .tunewrap{border:1px solid var(--line);border-radius:10px;background:var(--surface);overflow:hidden}
+.eng table{border-collapse:collapse;width:100%;font-size:.88rem}
+.eng th,.eng td{text-align:left;padding:8px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+.eng th{font-size:.8125rem;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)}
+.eng tr:last-child td{border-bottom:0}
+.eng td.m{font-family:var(--font-mono);font-size:.84rem}
+.eng .sect{display:flex;flex-direction:column;gap:14px}
+.eng figure{margin:0}
+.eng .diagram{background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.eng .diagram svg{display:block;width:100%;height:auto}
+.eng figcaption{font-size:.9rem;color:var(--muted);margin-top:8px;max-width:90ch}
+.eng .node rect.body{fill:var(--surface);stroke:var(--edge);stroke-width:1.5}
+.eng .node text{fill:var(--fg);font:500 12px var(--font-mono);text-anchor:middle;dominant-baseline:central}
+.eng .node.term rect.body{stroke-width:2.5}
+.eng .ln{fill:none;stroke:var(--edge);stroke-width:1.3;stroke-opacity:.8}
+.eng .edge .hit{fill:none;stroke:transparent}
+.eng .lbl rect{fill:var(--surface);stroke:var(--line);stroke-width:.8}
+.eng .lbl text{fill:var(--fg);font:400 10.5px var(--font-mono);text-anchor:middle;dominant-baseline:central}
+.eng .m-n{fill:var(--edge)}
+.eng .panel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:12px}
+.eng .grp{display:flex;flex-direction:column;gap:6px}
+.eng .row{display:grid;grid-template-columns:4.2rem minmax(0,1fr);gap:12px;padding:9px 0;border-top:1px solid var(--line)}
+.eng .rline{display:flex;flex-wrap:wrap;gap:4px 8px;align-items:baseline}
+.eng .rline .st{font-family:var(--font-mono);font-size:.875rem;background:var(--band);border-radius:5px;padding:1px 6px;overflow-wrap:anywhere}
+.eng .rline .st.to{background:var(--accent-soft)}
+.eng .rline .on{color:var(--muted);font-size:.9rem}
+.eng .rline .on b{font-family:var(--font-mono);font-weight:500;color:var(--fg)}
+.eng .rg,.eng .rd{font-size:.9rem;margin-top:3px}
+.eng .rg span,.eng .rd span{color:var(--muted)}
+.eng .tag{font-size:.8125rem;border:1px solid var(--line);border-radius:999px;padding:0 8px;color:var(--muted)}
+.eng .note{font-size:.9rem;color:var(--muted)}
+.eng .happy{list-style:none;margin:0;padding:0;display:flex;gap:10px;align-items:stretch}
+.eng .happy li{flex:1 1 0;background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px;display:flex;flex-direction:column;gap:6px;font-size:.95rem}
+.eng .happy li.mg{border:2px solid var(--accent)}
+.eng .happy .n{font:600 1rem var(--font-mono);color:var(--accent)}
+.eng .lines{display:flex;flex-direction:column;gap:12px;max-width:100ch;margin:0;padding:0;list-style:none;font-size:1.0625rem;line-height:1.5}
+.eng .lines li{display:grid;grid-template-columns:2rem minmax(0,1fr)}
+.eng .lines li span.k{font:600 1rem var(--font-mono);color:var(--accent)}
+</style>
+</helmet>
+<div class="eng" style="width:1344px;height:1299px;padding:40px 32px 48px"><header style="margin-bottom:24px"><h1>The acceptance table</h1><p class="intro">Every report and command enters here. Anything not allowed is refused, and nothing changes.</p></header><div class="sect"><div class="sub">Section 7.2. Every report and command enters here. Valid: it becomes a record. Not valid, or not listed: refused with the code and one plain sentence, and nothing changes.</div><div class="tunewrap"><table><thead><tr><th>Report or command</th><th>Who may send it</th><th>Valid when</th><th>Else</th></tr></thead><tbody><tr><td class="m">ready</td><td class="">the task's worker or designer run</td><td class="">the worktree is clean; the commit is ahead of H (if the engine moved H past the worker's tip, the refusal says &quot;pull first&quot;); every outcome names a check or is marked manual</td><td class="m">dirty_tree, nothing_new, pull_first, outcome_missing</td></tr><tr><td class="m">ready --nothing-to-change</td><td class="">the task's worker run</td><td class="">a reason is given; no commit over the base</td><td class="m">nothing_new</td></tr><tr><td class="m">recap-written</td><td class="">the task's worker run</td><td class="">a recap is open; the file exists</td><td class="m">no_recap</td></tr><tr><td class="m">check results</td><td class="">the engine's own check run</td><td class="">they are for H</td><td class="m">dropped</td></tr><tr><td class="m">verdict</td><td class="">the run the engine started for that round</td><td class="">the tag carries that run's one-time code (text the reviewer merely printed, such as a diff or a fixture written by the worker, cannot carry it); the round and commit are that run's; pass means no majors and changes means at least one; every outcome is judged &quot;the check proves it&quot; or not</td><td class="m">invalid_report; the run counts as failed, the round is not used</td></tr><tr><td class="m">retro</td><td class="">the retro run the engine started</td><td class="">the tag carries that run's one-time code; the commit is that run's; the cause is in the fixed set; the tag parses</td><td class="m">invalid_report; the task's retro is not used</td></tr><tr><td class="m">ask</td><td class="">a worker or reviewer (kind decision); the coordinator (any kind); the owner (kind override, from the phone or sheepdog factory override)</td><td class="">2 to 9 distinct options; a recommended one; one line; a way to say yes as well as no; option text the card can show as written</td><td class="m">invalid_ask, kind_not_allowed</td></tr><tr><td class="m">answer</td><td class="">the coordinator (kind decision); the owner, with the daemon's proof of a tap or spoken words; a delegation rule</td><td class="">the ask is open; the option exists; a gated kind has a verified proof</td><td class="m">already_closed, invalid_option, proof_required, not_delegable</td></tr><tr><td class="m">plan apply, plan amend</td><td class="">the coordinator</td><td class="">the plan checks pass (section 11.7); an amend has a why</td><td class="m">plan_invalid, with every failing check</td></tr><tr><td class="m">recap decision</td><td class="">the coordinator</td><td class="">a recap is open; the choice is in its allowed set; a why is given; split: the children pass the plan checks; new: the brief was amended since the recap opened</td><td class="m">not_allowed, naming the allowed set</td></tr><tr><td class="m">park, unpark, drop, close, retry, send-back</td><td class="">the coordinator</td><td class="">the task is not ended; a why is given; close only after a &quot;nothing to change&quot; report</td><td class="m">already_closed, why_missing</td></tr><tr><td class="m">say &lt;run&gt;</td><td class="">the coordinator</td><td class="">the run is alive</td><td class="m">run_ended</td></tr><tr><td class="m">start, stop, say, touch</td><td class="">the owner, through the daemon</td><td class="">a start is always recorded (J1 then runs doctor)</td><td class="m">—</td></tr><tr><td class="m">a setting change</td><td class="">anyone may propose it: the owner by voice or phone, the coordinator, or sheepdog factory set from a terminal. Each only raises an ask of kind rule</td><td class="">the value is in its range; it is saved only when the owner answers that ask with the daemon's proof. A terminal is never taken for the owner: a worker has a shell too</td><td class="m">out_of_range, proof_required</td></tr></tbody></table></div></div></div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview": {"width": 1344, "height": 1299}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

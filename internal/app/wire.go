@@ -14,6 +14,8 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/cli"
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/identity"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
@@ -123,6 +125,17 @@ func (a *App) wire() error {
 	if a.push != nil {
 		notifier = a.push
 	}
+	var factoryHC *hc.Client
+	if opts.Herdr == HerdrSocket {
+		factoryHC = hc.NewClient(cfg.Herdr.HCSocketPath())
+	}
+	a.factory = factory.New(factory.Paths{DataDir: cfg.DataDir}, factoryHC)
+	a.factory.Log = a.log
+	// A run's `sheepdog factory …` must reach this daemon, whatever config it was started with.
+	a.factory.RunEnv = map[string]string{"SHEEPDOG_WEB_PORT": strconv.Itoa(cfg.Web.Port)}
+	if exe, err := os.Executable(); err == nil {
+		a.factory.Bin = exe
+	}
 	sup, err := supervisor.New(store, a.herdr, querier, pusher, a.log, supervisor.Config{
 		Redactor:         redact.ForConfig(cfg),
 		PendingTTL:       time.Duration(cfg.PendingTTLS) * time.Second,
@@ -147,6 +160,7 @@ func (a *App) wire() error {
 		Notifier:              notifier,
 		Marker:                a.marker,
 		Mutes:                 a.mutes,
+		Factory:               a.factory,
 	})
 	if err != nil {
 		if a.brain != nil {
@@ -303,6 +317,7 @@ func (a *App) wire() error {
 	if a.push != nil {
 		deps.Push = a.push
 	}
+	deps.Factory = a.factory
 	srv, err := web.New(deps)
 	if err != nil {
 		return err

@@ -16,8 +16,7 @@ func TestResetReconnectsWithoutHandle(t *testing.T) {
 	d := &fakeDialer{results: []func() (Conn, error){ok(c1), ok(c2)}}
 	h := newHarness(t, Config{}, d)
 
-	c1.serve(handleMsg("handle-R"))
-	time.Sleep(10 * time.Millisecond)
+	acceptHandle(t, h, c1, "handle-R")
 	if !h.s.hasHandle() {
 		t.Fatal("expected a resumption handle before Reset")
 	}

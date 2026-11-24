@@ -8,6 +8,7 @@ package main
 // stop signals the pid in <data_dir>/sheepdog.pid.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -509,4 +510,35 @@ func getJSON(ctx context.Context, base, path string, v any) error {
 		return fmt.Errorf("%s: %s", path, resp.Status)
 	}
 	return json.NewDecoder(resp.Body).Decode(v)
+}
+
+// postJSON posts in as JSON to base+path on loopback.
+func postJSON(ctx context.Context, base, path string, in any) error {
+	return postJSONTimeout(ctx, base, path, in, 15*time.Second)
+}
+
+func postJSONTimeout(ctx context.Context, base, path string, in any, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	body, err := json.Marshal(in)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, base+path, bytes.NewReader(body))
+	if err != nil {
+		return err
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		var apiErr struct{ Error string }
+		if json.NewDecoder(resp.Body).Decode(&apiErr) == nil && apiErr.Error != "" {
+			return errors.New(apiErr.Error)
+		}
+		return fmt.Errorf("%s: %s", path, resp.Status)
+	}
+	return nil
 }

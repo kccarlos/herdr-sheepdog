@@ -163,8 +163,8 @@ final class StatusItemControllerTests: XCTestCase {
         let rows = StatusItemController.rows(for: MenuBarState(state: nil), loginItemEnabled: true)
         XCTAssertEqual(rows.first, .status("Sheepdog isn't running"))
         let items = items(rows)
-        XCTAssertEqual(items.map(\.title), ["Open panel", "Talk", "Mute", "Stop", "Use here", "⌥ Space", "⌃ Space", "⌃⌥ Space", "Launch at login", "Quit Sheepdog"])
-        XCTAssertEqual(items.map(\.enabled), [true, false, false, false, false, true, true, true, true, true])
+        XCTAssertEqual(items.map(\.title), ["Open panel", "Pair browser…", "Talk", "Mute", "Stop", "Use here", "⌥ Space", "⌃ Space", "⌃⌥ Space", "Launch at login", "Quit Sheepdog"])
+        XCTAssertEqual(items.map(\.enabled), [true, false, false, false, false, false, true, true, true, true, true])
         XCTAssertEqual(items.first { $0.title == "Launch at login" }?.checked, true)
         XCTAssertEqual(items.first { $0.title == "⌥ Space" }?.checked, true)
     }

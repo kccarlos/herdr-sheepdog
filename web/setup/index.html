@@ -231,14 +231,19 @@
         <label class="check"><input type="checkbox" id="tsnet-on"> Use a Tailscale certificate for browsers</label>
         <p class="small muted" id="tsnet-note" aria-live="polite"></p>
       </div>
+      <div class="row actions">
+        <button id="phone-disable">Turn phone access off</button>
+        <span id="phone-msg2" class="muted small" aria-live="polite"></span>
+      </div>
+    </div>
+    <div id="devices-section" class="hidden">
       <h3 class="devices-h">Devices</h3>
       <ul id="devices" class="devices" aria-label="Paired devices"></ul>
       <p id="devices-empty" class="small muted">No devices yet. Scan the code above with the Sheepdog app or your phone's camera.</p>
       <div class="row actions">
         <button id="disconnect-all">Disconnect all devices</button>
         <button id="reset-pairing">Reset pairing</button>
-        <button id="phone-disable">Turn phone access off</button>
-        <span id="phone-msg2" class="muted small" aria-live="polite"></span>
+        <span id="devices-msg" class="muted small" aria-live="polite"></span>
       </div>
     </div>
     <p class="small muted" id="push-note">Notifications use sheepdog's shared relay; their content is end-to-end encrypted. Or build the app with your own Apple key. <a href="https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/iphone-app.md#notifications" target="_blank" rel="noopener">How notifications work</a>.</p>

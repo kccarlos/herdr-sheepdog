@@ -1,6 +1,17 @@
-# Status (2026-10-05)
+# Status (2026-11-23)
 
-## Agent window over /ws (in 0.1.5 (57))
+Current `MARKETING_VERSION` in `ios/project.yml` is **`0.2.12`** (latest
+TestFlight tag `ios-v0.2.12`). Major features shipped since the 0.1.x notes
+below include paired-device pinned TLS ([`security.md`](../../../docs/dev/design/security.md)), the iPhone
+redesign and iPad sidebar/split/multi-window layout (`IPadRootView.swift`),
+several paired computers (`ComputerFleet`), live terminal windows (`/term`,
+SwiftTerm), Spaces and worktrees, read-only file browsing (`internal/files`),
+AI consent flow (`AIConsentModel`), and `SheepdogKitMac` / `Sheepdog.app`
+(`ios/Sources/SheepdogMac/`).
+
+## Earlier 0.1.x milestones (historical)
+
+### Agent window over /ws (in 0.1.5 (57))
 
 The agent window streams its screen over the existing `/ws` connection
 when the daemon lists the `screen` feature (daemon #151): one
@@ -27,12 +38,11 @@ are the "before" for chip, Flock, Health and Settings).
 
 ## Distribution
 
-TestFlight build **0.1.5 (57)**, internal group **Me** (VALID, IN_BETA_TESTING),
-from tag `ios-v0.1.5` (`b414dda`, PR #41): the agent window streams over /ws (#40).
-Before it, **0.1.4 (48)**: Xcode Cloud built it from tag `ios-v0.1.4` (`b90c38d`, PR #38) with the **TestFlight**
-workflow, the first signed archive with the widget extension; it exported with
-no signing change. It adds the UI polish (#36) and the Live Activity widget,
-App Intents and earbud remote (#37) to 0.1.3 (35) (Settings ▸ Languages, #33).
+Current version in `ios/project.yml` is **`0.2.12`** (tag `ios-v0.2.12`,
+check `git tag -l 'ios-v*'`). Earlier 0.1.x milestones: **0.1.5 (57)**
+(`ios-v0.1.5`, agent window over `/ws`), **0.1.4 (48)** (`ios-v0.1.4`, UI
+polish + Live Activity widget, App Intents and earbud remote), and **0.1.3
+(35)** (Settings ▸ Languages).
 Xcode Cloud only archives TestFlight builds on `ios-v*` tags ([`xcode-cloud.md`](xcode-cloud.md));
 the tests run on GitHub Actions (`.github/workflows/ios.yml`, below).
 The App Store Connect record is still **"Sheepdog for herdr"**; the store name is decided as **"Sheepdog: Voice for AI Agents"** and the CEO renames the record at submission ([app-store-review.md](../../../docs/dev/app-store-review.md)). For setup,
@@ -73,7 +83,7 @@ daemon (`PairingE2ETests`, `PairingLinkUITests`).
   `language_options`; 简体中文 and 繁體中文 are separate); each change is
   `PUT /api/settings {"languages": [...]}` and both brains are told
   (daemon #142). In 0.1.3 (35); unit tests and a simulator build only so far, not tried on the phone.
-- **Away from the screen (#37, not in TestFlight yet):** the voice
+- **Away from the screen (#37, shipped since 0.1.4 (48)):** the voice
   session's Live Activity on the lock screen and in the Dynamic Island
   (listening / speaking / muted / thinking / paused, agents waiting for
   an answer, Mute and End buttons), the earbud remote (play/pause toggles
@@ -90,9 +100,8 @@ daemon (`PairingE2ETests`, `PairingLinkUITests`).
 - **AirPods and audio route changes.** This includes AirPods going in or
   out mid-session and whether the needs-you chime reaches them.
 - **AskUserQuestion with several questions** in one prompt.
-- **The daemon's 2026-10-03 fixes** (voice session refresh, unheard
-  pushes, spoken agent names) on the phone: see the daemon's
-  `docs/dev/status.md`.
+- **Voice session refresh, unheard pushes, and spoken agent names** on a
+  real phone (shipped in the daemon on 2026-10-03).
 
 ## Known rough edges
 
@@ -107,16 +116,17 @@ daemon (`PairingE2ETests`, `PairingLinkUITests`).
 
 ```sh
 xcodegen generate
-xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17' -skipPackagePluginValidation build test
+xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -skipPackagePluginValidation build test
 ```
 
-The unit suite (`SheepdogKitTests`) has about 650 tests. `LiveDaemonTests` and
+The unit suite (`SheepdogKitTests`) has about 1,250 tests. `LiveDaemonTests` and
 the UI tests that need a daemon skip themselves when none answers on `127.0.0.1:7799`.
 
-**In CI** (`.github/workflows/ios.yml`, GitHub-hosted Macs) one build job
-builds the app and the daemon, and a smoke job and four shards split the
-suite; which changes run which jobs is in
-[development.md](../../../docs/dev/development.md#cicd). Each test job
+**In CI** (`.github/workflows/ios.yml`, GitHub-hosted Macs) a smoke job and
+five shards split the suite (the first Mac job to claim the build compiles
+the app and daemon once and shares them as an artifact, plus a `macos` job
+runs `SheepdogKitMacTests`); which changes run which jobs is in
+[development.md](../../../docs/dev/development.md#cicd). Each iPhone test job
 starts both fixture daemons on free ports with
 `scripts/fixture-daemons.sh start` (it also seeds one exchange and restarts
 the main daemon, so the history has a restart divider), and passes the
@@ -156,7 +166,7 @@ HOME=/tmp/sheepdog-ios/home SHEEPDOG_DATA_DIR=/tmp/sheepdog-ios-pair SHEEPDOG_ST
 
 cd ios
 xcrun simctl privacy <udid> grant microphone com.github.kccarlos.herdr-sheepdog-ios
-xcodebuild -scheme SheepdogUITests -destination 'platform=iOS Simulator,name=iPhone 17' -skipPackagePluginValidation test
+xcodebuild -scheme SheepdogUITests -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -skipPackagePluginValidation test
 ```
 
 - `HistoryApprovalUITests` expects a restart divider, so restart the 7799
@@ -174,7 +184,7 @@ xcodebuild -scheme SheepdogUITests -destination 'platform=iOS Simulator,name=iPh
 
 ## Screenshots
 
-These come from the simulator (iPhone 17, iOS 27) against a fixture
+These come from the simulator (iPhone 17 Pro, iOS 27) against a fixture
 daemon. The launch flags `-sheepdogFakeVoice`, `-sheepdogFakeProviders` and
 the DEBUG-only `-sheepdogDemoMarkdown` stand in for things a fixture daemon
 cannot produce.

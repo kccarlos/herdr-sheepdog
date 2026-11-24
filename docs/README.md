@@ -12,6 +12,7 @@
 | Doc | Type | Read it to |
 |---|---|---|
 | [quick-start.md](quick-start.md) | Tutorial | Go from install to your first spoken answer |
+| [factory.md](factory.md) | Explanation and how-to | Run the unattended factory over herdr-core, watch `/factory`, and answer owner asks and overrides |
 | [desktop.md](desktop.md) | How-to | Use the Sheepdog panel in herdr-app, talk through Sheepdog.app and move the voice between Mac and phone |
 | [iphone-app.md](iphone-app.md) | How-to | Install the app, pair it, use notifications and earbuds |
 | [remote-access.md](remote-access.md) | How-to | Use it away from home with Tailscale, and stay safe |

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>sheepdog factory</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<link rel="stylesheet" href="/static/tokens.css">
+<link rel="stylesheet" href="/static/fonts.css">
+<link rel="stylesheet" href="/static/shared.css">
+<link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+<link rel="stylesheet" href="/factory/style.css">
+<script type="module" src="/factory/app.js"></script>
+</head>
+<body>
+<div id="offline" class="banner" role="status" hidden></div>
+<div class="page">
+  <header class="top">
+    <div class="brand"><span class="logo" aria-hidden="true"></span><span class="wordmark">sheepdog</span> <span class="page-name">factory</span></div>
+    <span class="link"><span class="dot" id="link-dot" aria-hidden="true"></span><span id="link-text">connecting</span></span>
+  </header>
+  <div id="loading" class="card status" role="status"><span class="dot working" aria-hidden="true"></span>Loading the factory…</div>
+  <div id="unreachable" class="card dashed" role="status" hidden>
+    <span class="status"><span class="dot idle" aria-hidden="true"></span><b>Can't reach sheepdog. Trying again…</b></span>
+    <p class="muted">This page talks to the sheepdog daemon on this computer. Check that sheepdog is running.</p>
+    <span class="status"><button type="button" id="retry" class="retry">Try now</button><span class="muted">tries again every 3 s</span></span>
+  </div>
+  <div id="skeleton" class="skeleton" aria-hidden="true"><span></span><span></span></div>
+  <div id="board" class="cols" hidden>
+    <main id="main"></main>
+    <aside id="aside">
+      <section aria-label="Projects" class="card" id="projects"></section>
+      <section aria-label="Open asks" class="card" id="asks"></section>
+      <section aria-label="Agent tree" class="card" id="agents"></section>
+    </aside>
+  </div>
+</div>
+</body>
+</html>

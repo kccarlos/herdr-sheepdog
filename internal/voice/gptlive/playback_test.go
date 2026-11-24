@@ -336,6 +336,9 @@ func TestGPTLiveRealWireInterruptDropsStaleSpeech(t *testing.T) {
 		s.ClientPlayback(voice.PlaybackStarted, 0)
 
 		// Urgent push interrupts active speech.
+		s.mu.Lock()
+		preEpoch := s.out.epoch
+		s.mu.Unlock()
 		if err := s.PushTagged("urgent alert", voice.UrgencyInterrupt, map[string]any{"needs_user": true}); err != nil {
 			t.Fatal(err)
 		}
@@ -365,6 +368,16 @@ func TestGPTLiveRealWireInterruptDropsStaleSpeech(t *testing.T) {
 			s.mu.Lock()
 			defer s.mu.Unlock()
 			return strings.Contains(s.outText, "urgent alert")
+		})
+		waitFor(t, "new epoch audio chunk", func() bool {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			for _, ch := range chunks {
+				if ch.Epoch > preEpoch {
+					return true
+				}
+			}
+			return false
 		})
 
 		s.ClientPlayback(voice.PlaybackFlushed, 200)
