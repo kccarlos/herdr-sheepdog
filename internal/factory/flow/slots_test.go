@@ -3,17 +3,20 @@ package flow
 import (
 	"slices"
 	"testing"
+	"time"
 )
 
-// TestGrantSlots checks design.md 4.10 and KB-TSK-16: ordering by urgent,
-// critical path (longest remaining chain of estimate_lines through after),
-// then oldest, with up to max_running - running slots plus one extra slot for
-// an urgent task.
+// TestGrantSlots checks design.md 4.10 and KB-TSK-16: ordering by owner-answered,
+// urgent, open attempt, critical path (longest remaining chain of estimate_lines
+// through after), then oldest, with up to max_running - running slots plus one
+// extra slot for an owner-answered or urgent task.
 func TestGrantSlots(t *testing.T) {
+	t0 := time.Date(2026, 11, 22, 21, 38, 0, 0, time.UTC)
 	cases := []struct {
 		name       string
 		tasks      []Task
 		candidates []string
+		asks       []Ask
 		running    int
 		maxRunning int
 		want       []string
@@ -124,10 +127,63 @@ func TestGrantSlots(t *testing.T) {
 			running:    0, maxRunning: 2,
 			want: []string{"U1", "N1"},
 		},
+		{
+			name: "open_attempt_beats_new_attempt_with_longer_critical_path",
+			tasks: []Task{
+				{ID: "T3", EstimateLines: 300},
+				{ID: "T5", EstimateLines: 200, Attempts: []Attempt{{BaseCommit: "b0"}}},
+			},
+			candidates: []string{"T3", "T5"},
+			running:    0, maxRunning: 1,
+			want: []string{"T5"},
+		},
+		{
+			name: "owner_answered_beats_urgent_and_open_attempt",
+			tasks: []Task{
+				{ID: "O1", EstimateLines: 10},
+				{ID: "U1", EstimateLines: 10, Priority: PriorityUrgent},
+				{ID: "T5", EstimateLines: 200, Attempts: []Attempt{{BaseCommit: "b0"}}},
+				{ID: "T3", EstimateLines: 300},
+			},
+			candidates: []string{"T3", "T5", "U1", "O1"},
+			asks: []Ask{{
+				ID: "ask-1", Task: "O1", Gated: true,
+				Status: AskStatusAnswered, AnsweredBy: "owner", AnsweredAt: t0,
+			}},
+			running: 0, maxRunning: 1,
+			want: []string{"O1"},
+		},
+		{
+			name: "urgent_beats_open_attempt_and_new_attempt",
+			tasks: []Task{
+				{ID: "U1", EstimateLines: 10, Priority: PriorityUrgent},
+				{ID: "T5", EstimateLines: 200, Attempts: []Attempt{{BaseCommit: "b0"}}},
+				{ID: "T3", EstimateLines: 300},
+			},
+			candidates: []string{"T3", "T5", "U1"},
+			running:    0, maxRunning: 1,
+			want: []string{"U1"},
+		},
+		{
+			name: "owner_answered_and_urgent_beat_open_attempt_which_beats_new",
+			tasks: []Task{
+				{ID: "O1", EstimateLines: 10},
+				{ID: "U1", EstimateLines: 10, Priority: PriorityUrgent},
+				{ID: "T5", EstimateLines: 200, Attempts: []Attempt{{BaseCommit: "b0"}}},
+				{ID: "T3", EstimateLines: 300},
+			},
+			candidates: []string{"T3", "T5", "U1", "O1"},
+			asks: []Ask{{
+				ID: "ask-1", Task: "O1", Gated: true,
+				Status: AskStatusAnswered, AnsweredBy: "owner", AnsweredAt: t0,
+			}},
+			running: 0, maxRunning: 3,
+			want: []string{"O1", "U1", "T5"},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := GrantSlots(c.candidates, c.tasks, c.running, c.maxRunning)
+			got := GrantSlots(c.candidates, c.tasks, c.running, c.maxRunning, c.asks...)
 			var ids []string
 			for id := range got {
 				ids = append(ids, id)
