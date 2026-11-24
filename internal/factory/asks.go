@@ -78,6 +78,7 @@ func (e *Engine) Answer(askID, option string, proof AnswerProof) error {
 	err := e.refuse("", "not_found", fmt.Sprintf("No ask %q exists.", askID))
 	e.eachStateLocked(func(id string, s flow.State) bool {
 		if ai := slices.IndexFunc(s.Asks, func(a flow.Ask) bool { return a.ID == askID }); ai >= 0 {
+			e.mergeMemAlertsLocked(id, &s)
 			err = e.answerAskLocked(id, &s, ai, option, "", owner, proof)
 			return false
 		}
@@ -100,6 +101,7 @@ func (e *Engine) Say(project, text string) error {
 	if msg == "" {
 		return e.refuse(id, "why_missing", "Say requires non-empty text.")
 	}
+	e.mergeMemAlertsLocked(id, &s)
 	holdProjectWake(&s, fmt.Sprintf("owner_say:%d", s.Seq+1), "owner said", msg, e.now())
 	return e.commitChangeLocked(id, &s, LogLine{By: owner, Input: map[string]string{"verb": "say", "text": msg}, Rule: "say", Asked: []string{flow.AskWake}, Decision: "owner said", Why: msg}, Change{Kind: "say"})
 }

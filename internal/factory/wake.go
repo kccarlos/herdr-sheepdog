@@ -220,6 +220,6 @@ func (e *Engine) sweepProjectLocked(ctx context.Context, id string, s *flow.Stat
 		why := strings.Join(whys, "; ")
 		e.commitLogLocked(id, s, LogLine{By: "engine", Rule: "sweep", Asked: asked, Decision: "sweep: " + why, Why: why})
 	} else if changed {
-		e.saveLocked(id, *s)
+		e.saveLocked(id, s)
 	}
 }

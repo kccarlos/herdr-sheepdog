@@ -453,7 +453,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 				save = true
 			}
 			if save {
-				e.saveLocked(id, s)
+				e.saveLocked(id, &s)
 			}
 			workerRun[t.ID], workerState[t.ID], workerErr[t.ID] = r, r.State, rerr
 			if r.State == flow.RunGone && flow.WantsWorkerSlot(*t, s.Settings, e.now()) {
@@ -509,7 +509,7 @@ func (e *Engine) passProject(ctx context.Context, id string, trim bool) {
 }
 
 func (e *Engine) checkENOSPCLocked(ctx context.Context, id string, s *flow.State, now time.Time) {
-	if gitFull := e.git != nil && e.git.TakeNoSpace(s.Project.Folder); !s.Project.HasAlert(flow.AlertDisk) && (e.storeENOSPC[id] || gitFull) {
+	if gitFull := e.git != nil && e.git.TakeNoSpace(s.Project.Folder); (!s.Project.HasAlert(flow.AlertDisk) || e.memAlerts[alertKey{id, flow.AlertDisk}].cleared) && (e.storeENOSPC[id] || gitFull) {
 		e.observeDiskLocked(ctx, id, s, now, gitFull)
 	}
 }
@@ -558,7 +558,7 @@ func (e *Engine) checkInvariantsLocked(id string, s *flow.State, skipped map[str
 		if len(s.Project.Invariants) == 0 {
 			s.Project.Invariants = nil
 		}
-		e.saveLocked(id, *s)
+		e.saveLocked(id, s)
 	}
 	if len(vs) > 0 && e.onInvariant != nil {
 		e.onInvariant(vs)
@@ -640,7 +640,7 @@ func (e *Engine) observeCoordLocked(ctx context.Context, id string, s *flow.Stat
 		p.CoordWakeAt, p.CoordSilentStops, dirty = time.Time{}, map[bool]int{false: p.CoordSilentStops}[r.Turn > p.CoordWakeTurn], true
 	}
 	if dirty {
-		e.saveLocked(id, *s)
+		e.saveLocked(id, s)
 	}
 	return checked, err
 }
@@ -671,7 +671,7 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 	if r.ID != "J7" && s.Project.WaitKey != "" {
 		s.Project.WaitKey = ""
 		if len(d.Asked) == 0 {
-			e.saveLocked(id, *s)
+			e.saveLocked(id, s)
 		}
 	}
 	if len(d.Asked) == 0 {
@@ -973,7 +973,7 @@ func (e *Engine) stopCoordWithBackoffLocked(ctx context.Context, id string, s *f
 			why := map[bool]string{true: "could not stop the old coordinator", false: "gave up stopping the coordinator"}[restarting]
 			holdProjectWake(s, "failed@"+key, why, words, now)
 		}
-		e.saveLocked(id, *s)
+		e.saveLocked(id, s)
 		return false
 	}
 	p.Acts = slices.DeleteFunc(p.Acts, func(a flow.Act) bool { return a.Key == key })
@@ -1082,7 +1082,7 @@ events:
 					*handoffPools = append(*handoffPools, pool)
 				}
 			}
-			if !e.saveLocked(id, *s) {
+			if !e.saveLocked(id, s) {
 				revertR31(old)
 				continue events
 			}
@@ -1111,7 +1111,7 @@ events:
 					}
 					old.StopRetry = &flow.StopRetry{Row: row.ID, Result: next.Result, At: now, Tries: tries}
 					**recp = old
-					e.saveLocked(id, *s)
+					e.saveLocked(id, s)
 					return old.TaskRun(), nil
 				}
 				if r31Send {
@@ -1119,7 +1119,7 @@ events:
 					if act == flow.RunActInterrupt || errors.As(aerr, &he) {
 						old.HandoffDeadline, old.Reason = next.HandoffDeadline, next.Reason
 						revertR31(old)
-						e.saveLocked(id, *s)
+						e.saveLocked(id, s)
 						before = old
 					}
 					continue events
@@ -1138,7 +1138,7 @@ events:
 		}
 	}
 	if !reflect.DeepEqual(before, **recp) {
-		e.saveLocked(id, *s)
+		e.saveLocked(id, s)
 	}
 	return (*recp).TaskRun(), nil
 }
@@ -1183,7 +1183,7 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 		term, abort, err = world.StartTerminal(ctx, e.HC, spec, func() error {
 			tok := rand.Text()
 			*hash, *recp, env["SHEEPDOG_RUN_TOKEN"], minted = tokenHash(tok), &rec, tok, true
-			if sErr := e.saveStateLocked(id, *s); sErr != nil {
+			if sErr := e.saveStateLocked(id, s); sErr != nil {
 				*hash, *recp = prevHash, prevRec
 				e.logError("factory.commit_error", id, sErr)
 				return sErr
@@ -1449,7 +1449,7 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 		if holdWhy != "" && (rowChanged || holdChanged) {
 			e.commitLogLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: facts, Rule: r.ID, Decision: "waiting", Why: holdWhy})
 		} else if rowChanged || holdChanged {
-			e.saveLocked(id, *s)
+			e.saveLocked(id, s)
 		}
 		return
 	}
@@ -1501,7 +1501,7 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 		// the next pass does not ask again; the rest waits for that pass.
 		if verb == flow.AskRerunCI || verb == flow.AskDispatchCI || verb == flow.AskUpdateBranch || verb == flow.AskMerge { // persist intent (and any accept) before a GitHub call whose outcome can be lost
 			act(ask, "asked", "", "", false)
-			if !e.saveLocked(id, *s) {
+			if !e.saveLocked(id, s) {
 				return
 			}
 		}
@@ -1514,7 +1514,7 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 			if rowChanged || previousHoldKey != wait.Key || len(decs) > 0 {
 				e.commitLogLocked(id, s, LogLine{By: "engine", Task: task.ID, Rule: r.ID, Asked: d.Asked[:i+1], Decision: "waiting", Why: wait.Why})
 			} else if previousHold != wait.Why {
-				e.saveLocked(id, *s)
+				e.saveLocked(id, s)
 			}
 			return
 		}
@@ -1832,7 +1832,7 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		} else {
 			stopReviewRec(a.Review, s.Settings, e.now())
 		}
-		return !e.saveLocked(id, *s)
+		return !e.saveLocked(id, s)
 	}
 	if flow.Ended(*t) || facts.PR.State == flow.PRMerged || facts.PR.State == flow.PRClosed ||
 		flow.OpenRecap(*t) != nil || !tipKeepsRound(*a, a.Review.Head, *facts) ||
@@ -1855,7 +1855,7 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 			return true
 		}
 		a.Review.RunID, a.Review.RunTokenHash = "", ""
-		if !e.saveLocked(id, *s) {
+		if !e.saveLocked(id, s) {
 			return true
 		}
 		facts.Reviewer = a.Review.Run.TaskRun()
@@ -1881,7 +1881,7 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		save = true
 	}
 	if save {
-		e.saveLocked(id, *s)
+		e.saveLocked(id, s)
 	}
 	facts.Reviewer.AskPending = a.Review.RunID != "" && ((a.Review.Run != nil && len(a.Review.Run.Held) > 0) ||
 		slices.ContainsFunc(s.Asks, func(ask flow.Ask) bool {
@@ -1930,7 +1930,7 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 				e.logError("factory.exec_error", id, sendErr)
 			} else {
 				a.Review.RefusalSent = true
-				if !e.saveLocked(id, *s) {
+				if !e.saveLocked(id, s) {
 					return true
 				}
 			}
@@ -2656,20 +2656,53 @@ func (e *Engine) noteStoreENOSPC(id string, err error) error {
 	return err
 }
 
-func (e *Engine) saveStateLocked(id string, s flow.State) error {
-	return e.noteStoreENOSPC(id, map[bool]func(string, flow.State) error{true: e.writeState, false: SaveState}[e.writeState != nil](e.Paths.State(id), s))
+func (e *Engine) saveStateLocked(id string, s *flow.State) error {
+	var restore map[string]flow.Alert
+	prevSeq := s.Seq
+	for k, p := range e.memAlerts {
+		if k.id == id {
+			s.Seq = max(s.Seq, p.logSeq)
+			if p.cleared {
+				if cur, ok := s.Project.Alerts[k.key]; ok {
+					if restore == nil {
+						restore = map[string]flow.Alert{}
+					}
+					restore[k.key] = cur
+					delete(s.Project.Alerts, k.key)
+				}
+			}
+		}
+	}
+	if len(s.Project.Alerts) == 0 {
+		s.Project.Alerts = nil
+	}
+	if err := e.noteStoreENOSPC(id, map[bool]func(string, flow.State) error{true: e.writeState, false: SaveState}[e.writeState != nil](e.Paths.State(id), *s)); err != nil {
+		s.Seq = prevSeq
+		for k, a := range restore {
+			setProjectAlert(s, k, a)
+		}
+		return err
+	}
+	for k, p := range e.memAlerts {
+		if k.id == id && (p.cleared || p.raiseLogged && s.Project.Alerts[k.key].Kind != "") {
+			delete(e.memAlerts, k)
+		}
+	}
+	return nil
 }
 
 func (e *Engine) appendLogLocked(id string, l LogLine) error {
 	return e.noteStoreENOSPC(id, map[bool]func(string, LogLine) error{true: e.writeLog, false: AppendLog}[e.writeLog != nil](e.Paths.Log(id), l))
 }
 
-func (e *Engine) saveLocked(id string, s flow.State) bool {
-	err := e.saveStateLocked(id, s)
-	if err != nil {
+func (e *Engine) saveLocked(id string, s *flow.State) bool {
+	e.mergeMemAlertsLocked(id, s)
+	if err := e.saveStateLocked(id, s); err != nil {
 		e.logError("factory.commit_error", id, err)
+		return false
 	}
-	return err == nil
+	e.flushMemAlertsLocked(id, s)
+	return true
 }
 
 func (e *Engine) commitLogLocked(id string, s *flow.State, l LogLine) {
@@ -2679,13 +2712,14 @@ func (e *Engine) commitLogLocked(id string, s *flow.State, l LogLine) {
 }
 
 func (e *Engine) commitLocked(id string, s *flow.State, l LogLine) error {
+	e.mergeMemAlertsLocked(id, s)
 	s.Seq++
 	l.Seq, l.At, l.Project = s.Seq, time.Now(), id
 	if err := e.appendLogLocked(id, l); err != nil {
 		s.Seq--
 		return err
 	}
-	if err := e.saveStateLocked(id, *s); err != nil {
+	if err := e.saveStateLocked(id, s); err != nil {
 		s.Seq--
 		return err
 	}

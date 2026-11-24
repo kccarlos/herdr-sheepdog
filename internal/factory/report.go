@@ -389,7 +389,7 @@ func (e *Engine) acceptReviewLocked(id string, s *flow.State, role string, ti in
 		}
 		rev.Run.State, rev.Run.Result, rev.Run.EndedAt = flow.PhaseEnded, flow.EndError, e.now()
 		rev.RunTokenHash = ""
-		if sErr := e.saveStateLocked(id, *s); sErr != nil {
+		if sErr := e.saveStateLocked(id, s); sErr != nil {
 			e.logError("factory.commit_error", id, sErr)
 		}
 		e.logEvent("factory.review_void", map[string]string{
