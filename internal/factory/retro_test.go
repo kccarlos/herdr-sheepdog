@@ -10,6 +10,7 @@ package factory
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"slices"
@@ -816,6 +817,201 @@ func TestRetroHistoriesL3AndL5Engine(t *testing.T) {
 		}
 		if merges := ghCalls(t, r.gh, "pr merge"); len(merges) != 1 || !strings.Contains(merges[0], "--match-head-commit "+c2) {
 			t.Fatalf("gh pr merge calls after delta SHIP = %q, want 1 merge pinned to %s", merges, c2)
+		}
+	})
+}
+
+// TestL6RetroShipRecordsRetroRoundAfterEarlierPass checks Carbon major 2 / Neon
+// high 3 (land.go:recordAccept, KB-RET-2): when an earlier pass round also
+// covers H (1 <= len(PassingCovering) < ReviewRounds), L6 retro SHIP must still
+// be recorded in Accept.Rounds and must not mark "review" waived on override.
+func TestL6RetroShipRecordsRetroRoundAfterEarlierPass(t *testing.T) {
+	s := flow.DefaultSettings() // ReviewRounds == 2
+	base := flow.Attempt{
+		BaseCommit: "b0",
+		Ready:      []flow.Ready{{Head: "c1"}},
+		Rejects:    []flow.Reject{{Head: "c1", Round: 2, Why: "false positive"}},
+		Rounds: []flow.Round{
+			{N: 1, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictPass},
+			{N: 2, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictChanges, Majors: 1},
+			{N: 3, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictChanges, Majors: 1},
+			{N: 4, Kind: flow.RoundRetro, Head: "c1", Verdict: flow.VerdictShip},
+		},
+	}
+	if got := flow.Ladder(flow.In{Task: flow.Task{ID: "T1", Attempts: []flow.Attempt{base}}, Settings: s}); got != flow.Passed {
+		t.Fatalf("precondition failed: Ladder = %q, want %q (L6)", got, flow.Passed)
+	}
+
+	bar := base
+	recordAccept(flow.Task{ID: "T1"}, &bar, s, flow.Facts{}, "c1", false)
+	if len(bar.Accepts) != 1 || !slices.Equal(bar.Accepts[0].Rounds, []int{1, 4}) {
+		t.Errorf("bar Accept.Rounds = %v, want [1 4] (missing L6 retro SHIP round 4)", bar.Accepts)
+	}
+
+	ov := base
+	ov.Overrides = []flow.Override{{Head: "c1", ProofID: "proof-1"}}
+	recordAccept(flow.Task{ID: "T1"}, &ov, s, flow.Facts{PR: flow.PR{Checks: flow.ChecksPending}}, "c1", true)
+	if len(ov.Accepts) != 1 {
+		t.Fatalf("override Accepts = %+v, want 1", ov.Accepts)
+	}
+	if slices.Contains(ov.Accepts[0].Waived, "review") {
+		t.Errorf("override Accept.Waived = %v, must not waive \"review\" when L6 retro SHIP passed", ov.Accepts[0].Waived)
+	}
+}
+
+// TestRecapWakeFactsOmitsClosedAttemptAndSupersededRetros checks Carbon major 3
+// (wake.go:taskFacts): a recap wake must not attach a retro from a closed
+// attempt or one superseded by plan amend advancing Attempt.Boundary.
+func TestRecapWakeFactsOmitsClosedAttemptAndSupersededRetros(t *testing.T) {
+	now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+
+	t.Run("omits closed attempt retro", func(t *testing.T) {
+		task := flow.Task{
+			ID: "T1", Title: "feat: widget",
+			Attempts: []flow.Attempt{
+				{
+					BaseCommit: "b0", Closed: "new",
+					Ready:  []flow.Ready{{Head: "c1"}},
+					Rounds: []flow.Round{{N: 4, Kind: flow.RoundRetro, Head: "c1", Verdict: flow.VerdictRedesign, ReportPath: "/tmp/reports/T1-r4.md"}},
+				},
+				{
+					BaseCommit: "b0", SizeCap: 200,
+					Ready:  []flow.Ready{{Head: "c2"}},
+					Rounds: []flow.Round{{N: 4, Kind: flow.RoundFull, Head: "c2", Verdict: flow.VerdictChanges, Majors: 1, ReportPath: "/tmp/reports/T1-r4.md"}},
+				},
+			},
+			Recaps: []flow.Recap{
+				{Trigger: flow.TriggerReview, Allowed: []string{"split", "new", "drop"}, Decided: &flow.RecapDecision{Choice: "new", Why: "amended", At: now.Add(-time.Minute)}},
+				{Trigger: flow.TriggerReview, Allowed: []string{"split", "new", "drop"}},
+			},
+			Retros: []flow.Retro{{
+				Attempt: 1, Round: 4, Cause: "brief-ambiguity",
+				WorkerChange: "stop", WorkerChangeKind: flow.ChangeKindCheck,
+				CoordinatorChange: "rewrite brief", CoordinatorChangeKind: flow.ChangeKindBrief,
+				At: now.Add(-2 * time.Minute),
+			}},
+		}
+		if got := taskFacts(task, flow.Facts{}, now); strings.Contains(got, "; retro r") {
+			t.Fatalf("attempt 2 recap wake leaked closed attempt 1 retro: %s", got)
+		}
+	})
+
+	t.Run("omits retro superseded by plan amend boundary", func(t *testing.T) {
+		task := flow.Task{
+			ID: "T2", Title: "feat: gadget",
+			Attempts: []flow.Attempt{{
+				BaseCommit: "b0", SizeCap: 200, Boundary: 1,
+				Ready:  []flow.Ready{{Head: "c1"}, {Head: "c3"}},
+				Rounds: []flow.Round{{N: 4, Kind: flow.RoundRetro, Head: "c1", Verdict: flow.VerdictFix, Majors: 1, ReportPath: "/tmp/reports/T2-r4.md"}},
+			}},
+			Recaps: []flow.Recap{{Trigger: flow.TriggerSize, Allowed: []string{"continue", "split", "new", "drop"}}},
+			Retros: []flow.Retro{{
+				Attempt: 1, Round: 4, Cause: "missing-context",
+				WorkerChange: "fix", WorkerChangeKind: flow.ChangeKindCheck,
+				CoordinatorChange: "clarify", CoordinatorChangeKind: flow.ChangeKindBrief,
+				At: now.Add(-time.Minute),
+			}},
+		}
+		if got := taskFacts(task, flow.Facts{}, now); strings.Contains(got, "; retro r") {
+			t.Fatalf("post-amend recap wake leaked superseded pre-boundary retro: %s", got)
+		}
+	})
+}
+
+// TestN22RetroFixHeldWhenWorkerEnded checks Carbon major 1's remaining N22/R36
+// contract: when the worker run has ended, N22 logs held-for-next-worker (not
+// "told"), keeps the bounded-fix text in Attempt.Held, tightens SizeCap on the
+// committed N22 pass, and does not persist the tightened SizeCap prematurely
+// inside R36's intermediate commit before N22 commits.
+func TestN22RetroFixHeldWhenWorkerEnded(t *testing.T) {
+	seedEnded := func(t *testing.T) (*landing, *time.Time, string) {
+		t.Helper()
+		l := newLanding(t).withTokens()
+		now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+		l.eng.Now = func() time.Time { return now }
+		reportPath := l.paths.Report(l.id, "T1", 4)
+		l.srv.Finish(l.worker, "exited")
+		l.edit(func(s *flow.State) {
+			a := &s.Tasks[0].Attempts[0]
+			a.SizeCap = 200 // newLanding has 1 changed line; 1 + 60 = 61
+			a.RunID = ""
+			a.Run = &flow.RunRecord{
+				Role: flow.RoleWorker, CLI: "claude", Address: l.worker,
+				SessionID: "11111111-2222-4333-8444-555555555555", Resumable: true,
+				State: flow.PhaseEnded, Result: flow.EndExited, EndedAt: now,
+			}
+			a.Acts = []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now.Add(-time.Minute)}}
+			a.Rounds = []flow.Round{
+				{N: 1, Kind: flow.RoundFull, Head: l.c1, Verdict: flow.VerdictChanges, Majors: 1},
+				{N: 2, Kind: flow.RoundDelta, Head: l.c1, Verdict: flow.VerdictChanges, Majors: 1},
+				{N: 3, Kind: flow.RoundDelta, Head: l.c1, Verdict: flow.VerdictChanges, Majors: 1},
+				{N: 4, Kind: flow.RoundRetro, Head: l.c1, Verdict: flow.VerdictFix, Majors: 1, ReportPath: reportPath},
+			}
+			s.Tasks[0].Retros = []flow.Retro{{
+				Attempt: 1, Round: 4, Cause: "missing-context",
+				WorkerChange: "guard nil map", WorkerChangeKind: flow.ChangeKindCheck,
+				CoordinatorChange: "name map contract", CoordinatorChangeKind: flow.ChangeKindBrief,
+				At: now,
+			}}
+		})
+		return l, &now, reportPath
+	}
+
+	t.Run("R36 holds bounded retro fix and tightens SizeCap", func(t *testing.T) {
+		l, now, reportPath := seedEnded(t)
+		var launched []hc.RunParams
+		l.srv.OnRun = func(_ hc.Terminal, p hc.RunParams) {
+			if p.Labels["sheepdog.role"] == flow.RoleWorker {
+				launched = append(launched, p)
+			}
+		}
+
+		l.pass() // inside restart backoff: N22 -> R36 holds bounded retro fix
+
+		if r36 := logRules(t, l.paths.Log(l.id), "R36"); len(r36) != 1 || r36[0].Decision != flow.RefuseRunEnded {
+			t.Errorf("R36 log = %+v, want 1 %q line", r36, flow.RefuseRunEnded)
+		}
+		n22 := logRules(t, l.paths.Log(l.id), "N22")
+		if len(n22) != 1 || !strings.HasPrefix(n22[0].Decision, "held for the next worker:") || !strings.Contains(n22[0].Decision, "bounded retro fix") || strings.Contains(n22[0].Decision, "told") {
+			t.Errorf("N22 log = %+v, want 1 held-for-next-worker bounded retro fix decision (not told)", n22)
+		}
+		st := l.state()
+		a := st.Tasks[0].Attempts[0]
+		if wantCap := 1 + st.Settings.ContinueLines; a.SizeCap != wantCap {
+			t.Errorf("stored a.SizeCap = %d, want %d", a.SizeCap, wantCap)
+		}
+		if len(a.Held) != 1 || !strings.Contains(a.Held[0], "Retro round 4 granted one bounded fix") || !strings.Contains(a.Held[0], reportPath) || !strings.Contains(a.Held[0], "guard nil map") {
+			t.Fatalf("Attempt.Held = %q, want bounded retro fix text", a.Held)
+		}
+
+		*now = now.Add(time.Minute + time.Second)
+		l.pass() // past backoff: next worker gets the held bounded-fix prompt
+		if len(launched) != 1 {
+			t.Fatalf("launched worker count = %d, want 1", len(launched))
+		}
+		if prompt := launched[0].Argv[len(launched[0].Argv)-1]; !strings.Contains(prompt, "Retro round 4 granted one bounded fix") {
+			t.Errorf("next worker prompt missing held retro fix:\n%s", prompt)
+		}
+	})
+
+	t.Run("R36 intermediate commit must not persist tightened SizeCap before N22 commits", func(t *testing.T) {
+		l, _, _ := seedEnded(t)
+		tellKey := flow.AskTellFindings + "@4"
+		l.eng.writeState = func(path string, s flow.State) error {
+			if len(s.Tasks) > 0 && len(s.Tasks[0].Attempts) > 0 && flow.Done(s.Tasks[0].Attempts[0].Acts, tellKey) {
+				return errors.New("disk full on N22 commit")
+			}
+			return SaveState(path, s)
+		}
+
+		l.pass()
+
+		a := l.state().Tasks[0].Attempts[0]
+		if flow.Done(a.Acts, tellKey) {
+			t.Fatalf("setup bug: %s unexpectedly committed", tellKey)
+		}
+		if a.SizeCap != 200 {
+			t.Fatalf("R36 intermediate commit prematurely persisted tightened a.SizeCap = %d before N22 committed, want 200", a.SizeCap)
 		}
 	})
 }
