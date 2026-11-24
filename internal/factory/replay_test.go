@@ -27,14 +27,15 @@ var templates = map[string]*string{
 	"worker":         &workerTemplate,
 	"reviewer":       &reviewerCmdTemplate,
 	"reviewer-codex": &reviewerTemplate,
+	"retro":          &retroTemplate,
 }
 
 // filled builds role's prompt from tmpl through the engine's own fill, on a
 // fixed task whose round 1 at c1 was rejected (so the reviewer gets R2's facts).
 func filled(role, tmpl string) string {
-	t := flow.Task{ID: "T1", Title: "feat: add Greet", Brief: "Add Greet(name).", NotDoing: "localization",
+	t := flow.Task{ID: "T1", Title: "feat: add Greet", Brief: "Add Greet(name).", NotDoing: "localization", EstimateLines: 50,
 		Outcomes: []flow.Outcome{{Text: "Greet works", ProvedBy: "cmd: go test ./..."}}}
-	a := flow.Attempt{Worktree: "/wt/T1", Branch: "factory/T1", Review: &flow.ReviewRun{Code: "abc123"},
+	a := flow.Attempt{Worktree: "/wt/T1", Branch: "factory/T1", SizeCap: 100, Review: &flow.ReviewRun{Code: "abc123", Round: 4, Kind: flow.RoundRetro, Head: "c1"},
 		Rounds:  []flow.Round{{N: 1, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictChanges, Majors: 1, ReportPath: "/r/1.md"}},
 		Rejects: []flow.Reject{{Head: "c1", Round: 1, Why: "the cache key is right"}}}
 	switch role {
@@ -42,6 +43,9 @@ func filled(role, tmpl string) string {
 		return coordinatorPrompt(tmpl, flow.Project{Folder: "/repo", Goal: "Add a greeting."}, "sheepdog")
 	case "worker":
 		return workerPrompt(tmpl, t, a, "sheepdog")
+	case "retro":
+		e := &Engine{}
+		return e.retroPrompt(tmpl, t, a, flow.DefaultSettings(), "c1", "git diff b..c1", 80, 4, "sheepdog", "/tmp/draft.md")
 	}
 	e := &Engine{}
 	prompt, err := e.reviewerPromptWith(context.Background(), tmpl, t, a, "c1", flow.RoundFull, "git diff b..c1", e.rejectionPrompt("p", "T1", a, "c1"), 2, "sheepdog", "/tmp/draft.md")
@@ -128,6 +132,10 @@ var label = regexp.MustCompile(`^[A-Z][A-Za-z ]*:$`)
 // its source in brackets; the filled prompt keeps no source mark or placeholder.
 func TestTemplatesShortAndSourced(t *testing.T) {
 	for role, tmpl := range templates {
+		if strings.TrimSpace(*tmpl) == "" {
+			t.Errorf("%s: template is empty", role)
+			continue
+		}
 		lines := strings.Split(strings.TrimSpace(*tmpl), "\n")
 		if len(lines) > 40 {
 			t.Errorf("%s: %d lines, want at most 40", role, len(lines))
@@ -138,9 +146,54 @@ func TestTemplatesShortAndSourced(t *testing.T) {
 			}
 		}
 		p := filled(role, *tmpl)
+		if strings.TrimSpace(p) == "" {
+			t.Errorf("%s: filled prompt is empty", role)
+			continue
+		}
 		if m := regexp.MustCompile(`\{[a-z_]+\}`).FindString(p) + sourceMark.FindString(p); m != "" {
 			t.Errorf("%s: filled prompt keeps %q:\n%s", role, m, p)
 		}
+	}
+}
+
+// TestRetroTemplateCauseSetMatchesFlow checks design.md 7.2, prompts.md 5.5,
+// and KB-RET-15: retro.md lists the exact 8-cause set from flow.RetroCauses
+// on one rule line with no missing, misspelled, reordered or extra causes.
+func TestRetroTemplateCauseSetMatchesFlow(t *testing.T) {
+	if strings.TrimSpace(retroTemplate) == "" {
+		t.Fatal("retroTemplate is empty; retro.md is not embedded yet")
+	}
+	var line string
+	for _, raw := range strings.Split(retroTemplate, "\n") {
+		if strings.Contains(raw, flow.RetroCauses[0]) {
+			line = strings.TrimSpace(sourceMark.ReplaceAllString(raw, ""))
+			break
+		}
+	}
+	if line == "" {
+		t.Fatalf("retro.md has no line naming %q (flow.RetroCauses = %v)", flow.RetroCauses[0], flow.RetroCauses)
+	}
+	// Take the cause list after the last ':' before flow.RetroCauses[0],
+	// trim trailing sentence punctuation, and split by ',' or '|'.
+	prefixIdx := strings.Index(line, flow.RetroCauses[0])
+	listPart := line
+	if colon := strings.LastIndex(line[:prefixIdx], ":"); colon >= 0 {
+		listPart = line[colon+1:]
+	}
+	listPart = strings.TrimSpace(strings.TrimRight(listPart, ".)"))
+	sep := ","
+	if !strings.Contains(listPart, ",") && strings.Contains(listPart, "|") {
+		sep = "|"
+	}
+	var got []string
+	for _, part := range strings.Split(listPart, sep) {
+		tok := strings.Trim(strings.TrimSpace(part), "`\"'.")
+		if tok != "" {
+			got = append(got, tok)
+		}
+	}
+	if !slices.Equal(got, flow.RetroCauses) {
+		t.Fatalf("retro.md cause line = %v (from %q), want exact flow.RetroCauses %v", got, line, flow.RetroCauses)
 	}
 }
 

@@ -261,7 +261,7 @@ func (e *Engine) answerAskLocked(id string, s *flow.State, ai int, option, why, 
 		ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
 		defer cancel()
 		att := openTaskAttempt(s.Tasks, next.Task)
-		if next.AskedBy == flow.RoleReviewer {
+		if next.AskedBy == flow.RoleReviewer || next.AskedBy == flow.RoleRetro {
 			if closeWhy := e.deliverReviewerAskLocked(ctx, s, att, next.RunID, msg, now); closeWhy != "" {
 				next, row, dec = flow.StepAsk(a, flow.AskEvent{Kind: flow.EvAskCancel}, now)
 				s.Asks[ai] = next
@@ -327,7 +327,7 @@ func (e *Engine) deliverReviewerAskLocked(ctx context.Context, s *flow.State, at
 	if t, err := e.HC.Get(ctx, runID); err != nil || t.State != "live" || (att.Review.Run != nil && att.Review.Run.ID != "" && t.Labels["sheepdog.run"] != att.Review.Run.ID) {
 		return fmt.Sprintf("asking reviewer run %s is no longer live", runID)
 	} else if att.Review.Run == nil {
-		att.Review.Run = &flow.RunRecord{Address: runID, ID: t.Labels["sheepdog.run"], CreatedMS: t.CreatedMS, Role: flow.RoleReviewer, CLI: cmp.Or(att.Review.Reviewer.CLI, "claude"), State: flow.PhaseIdle}
+		att.Review.Run = &flow.RunRecord{Address: runID, ID: t.Labels["sheepdog.run"], CreatedMS: t.CreatedMS, Role: att.Review.Role(), CLI: cmp.Or(att.Review.Reviewer.CLI, "claude"), State: flow.PhaseIdle}
 	}
 	if _, _, err := e.deliverRunLocked(ctx, att.Review.Run, s.Settings, msg, false, now); err != nil {
 		return fmt.Sprintf("asking reviewer run %s delivery failed: %s", runID, flow.CleanErr(err.Error()))

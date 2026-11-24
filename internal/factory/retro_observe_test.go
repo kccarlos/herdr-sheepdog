@@ -87,11 +87,13 @@ func TestObserveTaskSetsRetroUnavailableOnNonQuotaResolveFailure(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		models map[string][]flow.Candidate
+		want   bool // facts.RetroUnavailable
 	}{
-		{name: "models_retro_unset", models: nil},
-		{name: "models_retro_set_capability_refused_in_12_1", models: map[string][]flow.Candidate{
+		{name: "models_retro_unset", models: nil, want: true},
+		// 12.2 teaches launchCapability RoleRetro, so a configured retro candidate is usable.
+		{name: "models_retro_set_launchable_from_12_2", models: map[string][]flow.Candidate{
 			flow.RoleRetro: {{CLI: world.AgyCLI, Model: "gemini-4-carbon-high", Effort: "high"}},
-		}},
+		}, want: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -115,8 +117,8 @@ func TestObserveTaskSetsRetroUnavailableOnNonQuotaResolveFailure(t *testing.T) {
 			if !ok {
 				t.Fatal("observeTaskLocked returned ok=false, want true")
 			}
-			if !facts.RetroUnavailable {
-				t.Fatalf("%s: observeTaskLocked facts.RetroUnavailable = false, want true", tc.name)
+			if facts.RetroUnavailable != tc.want {
+				t.Fatalf("%s: observeTaskLocked facts.RetroUnavailable = %v, want %v", tc.name, facts.RetroUnavailable, tc.want)
 			}
 		})
 	}

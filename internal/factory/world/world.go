@@ -94,11 +94,7 @@ func ClaudeArgv(role, model, effort, permissionMode string) []string {
 	return argv
 }
 
-// ClaudeReviewerArgv returns the launch argv for a Claude Code reviewer with
-// the read-only base tools plus Bash(<bin> factory report review:*) and
-// Edit(//<findingsPath>) for that round's scratch findings file (design.md 9.2,
-// spike S-REV-2, KB-REV-4).
-func ClaudeReviewerArgv(model, effort, bin, findingsPath string) []string {
+func claudeReadOnlyArgv(model, effort, bin, subcmd, findingsPath string) []string {
 	model, effort, bin, findingsPath = strings.TrimSpace(model), strings.TrimSpace(effort), strings.TrimSpace(bin), strings.TrimSpace(findingsPath)
 	if model == "" || effort == "" || findingsPath == "" || !filepath.IsAbs(findingsPath) {
 		return nil
@@ -108,8 +104,24 @@ func ClaudeReviewerArgv(model, effort, bin, findingsPath string) []string {
 		return nil
 	}
 	bin = cmp.Or(bin, "sheepdog")
-	tools := reviewerTools + " Bash(" + bin + " factory report review:*) Edit(//" + trimmed + ")"
+	tools := reviewerTools + " Bash(" + bin + " factory report " + subcmd + ":*) Edit(//" + trimmed + ")"
 	return []string{"env", "DISABLE_AUTOUPDATER=1", "claude", "--model", model, "--effort", effort, "--permission-mode", "dontAsk", "--allowedTools=" + tools}
+}
+
+// ClaudeReviewerArgv returns the launch argv for a Claude Code reviewer with
+// the read-only base tools plus Bash(<bin> factory report review:*) and
+// Edit(//<findingsPath>) for that round's scratch findings file (design.md 9.2,
+// spike S-REV-2, KB-REV-4).
+func ClaudeReviewerArgv(model, effort, bin, findingsPath string) []string {
+	return claudeReadOnlyArgv(model, effort, bin, "review", findingsPath)
+}
+
+// ClaudeRetroArgv returns the launch argv for a Claude Code retro run with the
+// read-only base tools plus Bash(<bin> factory report retro:*) and
+// Edit(//<findingsPath>) for that round's scratch findings file (design.md 9.2,
+// KB-RET-12, KB-RET-15).
+func ClaudeRetroArgv(model, effort, bin, findingsPath string) []string {
+	return claudeReadOnlyArgv(model, effort, bin, "retro", findingsPath)
 }
 
 // NewUUID returns a random version-4 UUID for Claude session ids (spike S0.8).
