@@ -48,7 +48,16 @@ func (e *Engine) mergeMemAlertsLocked(id string, s *flow.State) {
 
 func (e *Engine) flushMemAlertsLocked(id string, s *flow.State) {
 	for k, p := range e.memAlerts {
-		if k.id == id && !p.cleared && s.Project.Alerts[k.key].Kind != "" {
+		if k.id != id {
+			continue
+		}
+		if p.cleared {
+			if cur, ok := s.Project.Alerts[k.key]; ok {
+				e.persistAlertLocked(id, s, k.key, cur, p.rule, p.dec, true)
+			} else {
+				delete(e.memAlerts, k)
+			}
+		} else if s.Project.Alerts[k.key].Kind != "" {
 			if p.logSeq != 0 {
 				delete(e.memAlerts, k)
 			} else {
@@ -118,7 +127,8 @@ func (e *Engine) reconcileAlertLocked(id string, s *flow.State, key string, acti
 			p := e.memAlerts[ak]
 			e.persistAlertLocked(id, s, key, cur, p.rule, p.dec, true)
 		}
-	} else if cur, ok := s.Project.Alerts[key]; !ok || cur.Scope != a.Scope {
+	} else if cur, ok := s.Project.Alerts[key]; !ok || cur.Scope != a.Scope || e.memAlerts[ak].cleared {
+		s.Seq = max(s.Seq, e.memAlerts[ak].logSeq)
 		a.At = a.At.UTC()
 		setProjectAlert(s, key, a)
 		delete(e.memAlerts, ak)
