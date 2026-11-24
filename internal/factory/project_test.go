@@ -872,7 +872,7 @@ func TestQuotaEndedCoordinatorRestartsBeforeFinish(t *testing.T) {
 	h.pass() // J7 starts coord 1
 	coord1 := h.state().Project.RunID
 	h.edit(func(s *flow.State) {
-		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: open"}}
+		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: open", Parked: true}}
 		s.Project.Wakes = []flow.Wake{{Key: "worker_note", Task: "T1", Why: "review note", Facts: "note body", At: h.now}}
 	})
 

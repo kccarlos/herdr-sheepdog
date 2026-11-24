@@ -502,7 +502,7 @@ First match wins.
 | J1 | a start was asked and doctor has not passed since | the start checks run inside `Engine.Start`, for every caller (CLI, HTTP, voice), as its first step after the folder and goal are read: before the project id is written into the repo's git config and before any state is loaded; on a `fail` line the fix lines are shown, the start is dropped and the stored project is not changed; with no `fail` line the project is marked started. Agent CLIs are judged by J1a–J1d | start shell |
 | J2 | never started, or stopped by the owner | no run of this project is alive; the plan and tasks are kept | "Stopped by you" |
 | J3 | a stopping alert is active (`no_pool`, `disk`, `consent_prompt`) and no coordinator run is alive | nothing starts (every new start and restart is held; tasks wait at N10) | "Stopped", with the fix |
-| J4 | a plan exists, every milestone is done, no task is open, and the owner has given no new goal since | the final journal entry; then no coordinator | "Finished" |
+| J4 | a plan exists, every milestone is done, no task is open, the owner has given no new goal since, and no wake is still to be delivered | held wakes are delivered first (by a live coordinator through J12, or by the one J7 starts); the final journal entry; then no coordinator, and the project is recorded finished. From then on a held wake starts nothing and the base observer holds none (it still clears its alerts). Only `start` ends that: a new goal reopens, and a repeated goal starts a coordinator only if wakes are held | "Finished" |
 | J5 | the coordinator role is held on sign-out (no configured coordinator candidate has a positive sign-in check) | the alert `agents_down` with the at-the-Mac fix; recheck sign-in on schedule even with no run; use another coordinator candidate only if configured and positively signed in; hold until a positive check for the held candidate or a completed coordinator turn | running |
 | J6 | no coordinator run is alive; a start is not allowed yet (`coordinator_gap_minutes`, `coordinator_starts_per_hour`) | wait; raise `agents_down` if the hourly limit is the reason | running |
 | J7 | no coordinator run is alive | start one: fresh with the goal if there is no plan, else with a handoff built from the store; held wakes are kept for it | "Planning" with no plan, else running |
@@ -513,6 +513,8 @@ First match wins.
 | J12 | wakes are held and the coordinator is idle | deliver up to 20 as one batch and keep the rest held | running |
 | J13 | no wake for `heartbeat_minutes` and the coordinator is idle | a heartbeat wake | running |
 | J14 | otherwise | — | running ("nothing needs you" when no owner ask is open) |
+
+At the finish every open ask is cancelled, a coordinator's open question included: it is not waited for.
 
 **Agent CLIs at start (J1a–J1d).** These are parts of J1, not rows of the table. The start checks probe each agent CLI named in the project's candidate lists once, with the same sign-in check the engine uses at launch (section 7.3). A probe gives one of three answers: signed in, out (positively not installed or positively signed out), or `unknown (<reason>)`. The roles are coordinator, worker and reviewer, each with its project list (section 9.1). A task's own list comes before the project list, so the project list is always the fallback.
 
@@ -527,7 +529,7 @@ The engine's own coordinator restarts (J7) are not starts in this sense. J1 does
 
 The owner is told once per alert episode, whoever is alive. While a stopping alert is active, every new start is held: coordinator (J7), worker (N11, N23), reviewer (N29), and restarts across roles. Runs already live stay managed (a live coordinator keeps getting wakes and heartbeats through J8 to J13), and the section shows "Stopped" with the alert's fix.
 
-Held wakes merge only when their kind and their task are the same. The owner's words (`say`) are a wake marked as the owner's.
+Held wakes merge only when their kind and their task are the same. The owner's words (`say`) are a wake marked as the owner's. `say` on a finished project is refused `already_closed`, with the fix to start a different goal.
 
 **Alerts.** An alert is a persisted episode: raised once with its cause and time, logged and shown once per episode, visible in `factory status` even with zero tasks, kept across a restart without repeating, cleared when its own clear evidence is seen, and raised again as a new episode if the cause returns. Every alert has one observer that both raises and clears it, and that keeps probing while it is active. A stopped project comes back by itself. Outage signals (`github_unavailable`, `hc_unavailable`) use the same persisted episode: raised once per outage, kept across a restart without repeating, and cleared on the first good observation.
 
@@ -625,7 +627,7 @@ Every report and command enters here. Valid: it becomes a record. Not valid, or 
 | recap decision | the coordinator | the task is not ended; a recap is open; the choice is in its allowed set; a why is given; split: the children pass the plan checks; new: the brief was amended since the recap opened | `already_closed`, `no_recap`, `not_allowed` (naming the allowed set) |
 | `park`, `unpark`, `drop`, `close`, `retry`, `send-back` | the coordinator | the task is not ended; a why is given; `close` only after a "nothing to change" report | `already_closed`, `why_missing` |
 | `say <run>` | the coordinator | the run is alive | `run_ended` |
-| start, stop, say, `touch` | the owner: by voice, a paired device or the factory page, or `sheepdog factory start` and `stop` in a terminal that carries no run's token | a start is always recorded (J1 then runs doctor); a run's terminal is refused, so a worker cannot stop the factory | `kind_not_allowed` |
+| start, stop, say, `touch` | the owner: by voice, a paired device or the factory page, or `sheepdog factory start` and `stop` in a terminal that carries no run's token | a start is always recorded (J1 then runs doctor); a run's terminal is refused, so a worker cannot stop the factory; `say` on a finished project is refused `already_closed`, with the fix to start a different goal | `kind_not_allowed`, `already_closed` |
 | a setting change | the owner by voice, phone or the factory page; the coordinator; or `sheepdog factory set` from a terminal that carries no run's token (a worker's or reviewer's terminal is refused: they open only `decision` asks). Each only raises an ask of kind `rule` | the value is in its range; it is saved only when the owner answers that ask with the daemon's proof. A terminal is never taken for the owner: a worker has a shell too | `out_of_range`, `proof_required`, `kind_not_allowed` |
 
 Two rules hold for every row. A report from a run whose task has ended, and a command on an ended task, is refused `already_closed`. Every why or reason (a reject, nothing to change, a recap decision, a task command, a plan amend) is cleaned before it is stored, logged or put in a prompt (control characters and line breaks become spaces, runs of spaces become one); an empty one is `why_missing`, and one over 500 characters is `invalid_report`.

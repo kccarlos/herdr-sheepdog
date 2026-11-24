@@ -1510,7 +1510,6 @@ func TestPR5b8_OutageEpisodesGitHubAndHCUnavailable(t *testing.T) {
 // once a project has finished through J4, a held wake combined with a signed-out
 // coordinator CLI must not raise agents_down or start a coordinator.
 func TestFinishedProjectSignedOutNoAgentsDown(t *testing.T) {
-	t.Parallel()
 	w := newAlertWorld(t, "Finished sign-out check", false)
 	w.edit(func(s *flow.State) {
 		s.Settings.Models = map[string][]flow.Candidate{
