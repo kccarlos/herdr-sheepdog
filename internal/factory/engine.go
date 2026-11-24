@@ -137,9 +137,9 @@ func (e *Engine) passDelta(id string) time.Duration {
 // tipFacts are N12's and N20's git facts for one tip and H: the merge base,
 // and so the line count, moves only with the tip.
 type tipFacts struct {
-	tip, h    string
-	lines     int
-	mergeOnly bool
+	tip, h           string
+	lines, generated int
+	mergeOnly        bool
 }
 
 // New constructs an Engine. Nothing runs or touches disk until Run or Start.
@@ -1363,7 +1363,7 @@ func (e *Engine) observeTaskLocked(ctx context.Context, id string, s *flow.State
 			return facts, false
 		}
 		lctx, lcancel := context.WithTimeout(ctx, lockGitTimeout)
-		facts.Lines, facts.LinesTimeout, facts.TipMergeOnly, err = e.readTipLocked(lctx, a, tip, rel)
+		facts.Lines, facts.LinesGenerated, facts.LinesTimeout, facts.TipMergeOnly, err = e.readTipLocked(lctx, a, tip, rel)
 		lcancel()
 		if e.logOnce("factory.git_size_error", id, a.Worktree, err); err != nil {
 			return facts, false
@@ -1567,29 +1567,29 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 // has no changed lines. A changed-lines read that times out counts as over
 // size_cap (design.md 3, last_tip) and is never cached, so the next pass
 // reads again.
-func (e *Engine) readTipLocked(ctx context.Context, a flow.Attempt, tip string, rel flow.Rel) (int, bool, bool, error) {
+func (e *Engine) readTipLocked(ctx context.Context, a flow.Attempt, tip string, rel flow.Rel) (int, int, bool, bool, error) {
 	h := flow.H(a)
 	if c, ok := e.tips[a.Worktree]; ok && c.tip == tip && c.h == h {
-		return c.lines, false, c.mergeOnly, nil
+		return c.lines, c.generated, false, c.mergeOnly, nil
 	}
 	c, err := tipFacts{tip: tip, h: h}, error(nil)
 	if tip != a.BaseCommit {
-		c.lines, err = e.git.ChangedLines(ctx, a.Worktree, tip)
+		c.lines, c.generated, err = e.git.ChangedLines(ctx, a.Worktree, tip)
 		if errors.Is(err, world.ErrChangedLinesOverCap) {
-			return 0, true, false, nil
+			return 0, 0, true, false, nil
 		}
 	}
 	if err == nil && rel == flow.RelAhead {
 		c.mergeOnly, err = e.git.MergeOnly(ctx, a.Worktree, h, tip)
 	}
 	if err != nil {
-		return 0, false, false, err
+		return 0, 0, false, false, err
 	}
 	if e.tips == nil {
 		e.tips = map[string]tipFacts{}
 	}
 	e.tips[a.Worktree] = c
-	return c.lines, false, c.mergeOnly, nil
+	return c.lines, c.generated, false, c.mergeOnly, nil
 }
 
 func (e *Engine) execNewAttempt(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {

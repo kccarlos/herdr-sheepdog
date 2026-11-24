@@ -274,7 +274,11 @@ func TestRecapStopsReviewerInFlight(t *testing.T) {
 
 func commitFile(t *testing.T, dir, name, body string) string {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+	p := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	gitIn(t, dir, "add", name)
@@ -395,12 +399,13 @@ func TestChangedLinesTimeoutOpensSizeRecap(t *testing.T) {
 	}
 
 	// Once git diff recovers, continue + next pass must read again and open no second recap.
+	// Each successful ChangedLines runs two git diffs (full patch + base-attributes exclude).
 	slow.Store(false)
 	before := calls.Load()
 	l.report("tok-coord", "recap decide", `{"task":"T1","choice":"continue","why":"transient stall"}`, "")
 	l.pass()
-	if got := calls.Load() - before; got != 2 {
-		t.Errorf("continue and next pass ran git diff %d times, want 2", got)
+	if got := calls.Load() - before; got != 4 {
+		t.Errorf("continue and next pass ran git diff %d times, want 4", got)
 	}
 	if rc := l.state().Tasks[0].Recaps; len(rc) != 1 || flow.OpenRecap(l.state().Tasks[0]) != nil {
 		t.Fatalf("recaps after continue + normal pass = %+v, want no second recap", rc)
@@ -606,5 +611,127 @@ func TestWorkerAndReviewerPromptsShowOutcomesWithProofs(t *testing.T) {
 		if !strings.Contains(coordinatorTemplate, want) {
 			t.Errorf("coordinator template missing %q:\n%s", want, coordinatorTemplate)
 		}
+	}
+}
+
+// TestGeneratedLinesDoNotOpenSizeRecap checks design.md 7.3 and KB-CAP-16: a
+// tip with 50 source lines and 3,000 base-marked generated lines under cap 100
+// opens no size recap and records Facts.LinesGenerated = 3,000.
+func TestGeneratedLinesDoNotOpenSizeRecap(t *testing.T) {
+	l := newLanding(t)
+	writePRJSON(t, l.gh, "view.json", l.c1, "[]")
+	commitFile(t, l.repo, ".gitattributes", "gen/project.pbx linguist-generated\n")
+	gitIn(t, l.repo, "push", "origin", "main")
+	gitIn(t, l.wt, "fetch", "origin")
+
+	// newLanding already committed x.go (1 line); add 49 source lines = 50 total.
+	commitFile(t, l.wt, "src.go", strings.Repeat("// src\n", 49))
+	commitFile(t, l.wt, "gen/project.pbx", strings.Repeat("// gen\n", 3000))
+
+	l.pass()
+	if rc := l.state().Tasks[0].Recaps; len(rc) != 0 {
+		t.Fatalf("base-marked generated lines opened a size recap: %+v", rc)
+	}
+	s := l.state()
+	l.eng.mu.Lock()
+	f, ok := l.eng.observeTaskLocked(context.Background(), l.id, &s, 0, true, flow.Run{State: flow.RunIdle}, nil, false, 0)
+	l.eng.mu.Unlock()
+	if !ok || f.Lines != 50 || f.LinesGenerated != 3000 {
+		t.Fatalf("observeTaskLocked = (ok=%v, Lines=%d, LinesGenerated=%d), want (true, 50, 3000)", ok, f.Lines, f.LinesGenerated)
+	}
+}
+
+// TestSizeRecapWhyShowsGeneratedLines checks design.md 7.3 and KB-CAP-16: when
+// a task goes over size_cap with base-marked generated lines present, both the
+// N12 why and the coordinator wake facts report the generated lines separately.
+func TestSizeRecapWhyShowsGeneratedLines(t *testing.T) {
+	l := newLanding(t)
+	writePRJSON(t, l.gh, "view.json", l.c1, "[]")
+	commitFile(t, l.repo, ".gitattributes", "gen/project.pbx linguist-generated\n")
+	gitIn(t, l.repo, "push", "origin", "main")
+	gitIn(t, l.wt, "fetch", "origin")
+
+	// 1 line from x.go + 120 lines = 121 source lines (> cap 100), plus 500 generated.
+	commitFile(t, l.wt, "src.go", strings.Repeat("// src\n", 120))
+	commitFile(t, l.wt, "gen/project.pbx", strings.Repeat("// gen\n", 500))
+
+	l.pass() // N12 opens the size recap
+	l.pass() // N6 wakes the coordinator
+	var n12Why string
+	for _, ln := range l.logLines() {
+		if ln.Rule == "N12" {
+			n12Why = ln.Why
+		}
+	}
+	if !strings.Contains(n12Why, "121 changed lines, over the size cap 100") || !strings.Contains(n12Why, "500 generated lines not counted") {
+		t.Fatalf("N12 why = %q, want 121 changed lines over cap 100 and 500 generated lines not counted", n12Why)
+	}
+	w := l.state().Project.Wakes
+	if len(w) != 1 || !strings.Contains(w[0].Facts, "changed lines 121") || !strings.Contains(w[0].Facts, "500 generated lines not counted") {
+		t.Fatalf("wakes = %+v, want changed lines 121 and 500 generated lines not counted", w)
+	}
+}
+
+// TestContinueNeverLowersSizeCap checks design.md 4.9 (companion fix): when a
+// size recap is open and changed lines are now under size_cap, continue never
+// lowers size_cap.
+func TestContinueNeverLowersSizeCap(t *testing.T) {
+	l := newLanding(t).withTokens()
+	l.edit(func(s *flow.State) {
+		s.Tasks[0].Attempts[0].SizeCap = 560
+		s.Tasks[0].Recaps = []flow.Recap{{Trigger: flow.TriggerSize, Allowed: []string{"continue", "split", "new", "drop"}}}
+	})
+	l.finishWorkerTurn()
+	l.report("tok-coord", "recap decide", `{"task":"T1","choice":"continue","why":"lines now under cap"}`, "")
+	st := l.state()
+	if a := st.Tasks[0].Attempts[0]; a.SizeCap != 560 || flow.OpenRecap(st.Tasks[0]) != nil {
+		t.Fatalf("after continue with lines under cap: size_cap=%d (want 560), open recap=%+v", a.SizeCap, flow.OpenRecap(st.Tasks[0]))
+	}
+}
+
+// TestContinueAfterAttributeLandsOpensNoSecondRecap checks the T1 trial case
+// end to end (design.md 7.3, 4.9): a size recap opens on a generated rewrite;
+// .gitattributes then lands on the remote base and is fetched; continue closes
+// the recap and drops the stale cached tip reading; the next two passes open no
+// second recap with tip and H unmoved.
+func TestContinueAfterAttributeLandsOpensNoSecondRecap(t *testing.T) {
+	l := newLanding(t).withTokens()
+	writePRJSON(t, l.gh, "view.json", l.c1, "[]")
+
+	// Before .gitattributes exists on base: 20 source lines + 500 generated = 520 > cap 100.
+	commitFile(t, l.wt, "src.go", strings.Repeat("// src\n", 19))
+	tipBefore := commitFile(t, l.wt, "gen/project.pbx", strings.Repeat("// gen\n", 500))
+
+	l.pass() // N12 opens the size recap and caches the 520-line tip reading
+	l.pass() // N6 wakes coordinator and tells worker to stop
+	st := l.state()
+	if len(st.Tasks[0].Recaps) != 1 || st.Tasks[0].Recaps[0].Trigger != flow.TriggerSize || flow.OpenRecap(st.Tasks[0]) == nil {
+		t.Fatalf("recaps before attribute lands = %+v, want one open size recap", st.Tasks[0].Recaps)
+	}
+	hBefore := flow.H(st.Tasks[0].Attempts[0])
+
+	// Owner lands .gitattributes on the remote base and it is fetched.
+	commitFile(t, l.repo, ".gitattributes", "gen/project.pbx linguist-generated\n")
+	gitIn(t, l.repo, "push", "origin", "main")
+	gitIn(t, l.wt, "fetch", "origin")
+
+	l.finishWorkerTurn()
+	l.report("tok-coord", "recap decide", `{"task":"T1","choice":"continue","why":"generated file now marked on base"}`, "")
+
+	// Next two passes with tip and H unmoved must open no second recap.
+	l.pass()
+	l.pass()
+	st = l.state()
+	if gotTip := gitIn(t, l.wt, "rev-parse", "HEAD"); gotTip != tipBefore {
+		t.Fatalf("tip moved from %s to %s", tipBefore, gotTip)
+	}
+	if gotH := flow.H(st.Tasks[0].Attempts[0]); gotH != hBefore {
+		t.Fatalf("H moved from %s to %s", hBefore, gotH)
+	}
+	if a := st.Tasks[0].Attempts[0]; a.SizeCap != 100 {
+		t.Fatalf("size_cap = %d, want 100 (unchanged)", a.SizeCap)
+	}
+	if len(st.Tasks[0].Recaps) != 1 || flow.OpenRecap(st.Tasks[0]) != nil {
+		t.Fatalf("recaps after continue + two passes = %+v, want no second recap", st.Tasks[0].Recaps)
 	}
 }

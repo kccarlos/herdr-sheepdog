@@ -160,7 +160,7 @@ Stored timestamps and the engine's `now()` stay in wall time (the same clock her
 - `recap{trigger, allowed[], decided{choice, why}}`.
 - `acts[]` is the engine's own ledger: each thing it did or tried, with a key and a result. "Told the worker about failing run 812", "re-run asked for commit 3f9c", "nudged at turn 14", "start of run r7 failed: timeout". Rules read it to do a thing once, to count tries, and to back off.
 - `last_pr`, the latest PR snapshot, is not stored: the loop keeps it in memory per attempt and reads GitHub again after a restart.
-- `last_tip`, the latest worktree reading (the changed lines, and whether the tip is ahead of `H` by merges of the base only), is not stored: the loop keeps it in memory per worktree, keyed by the tip and `H`, so git is read again only when one of them moves. A restart reads it again. A read that times out counts as over `size_cap`, so a huge commit cannot slip past N12 (owner decision at review point 2).
+- `last_tip`, the latest worktree reading (the changed lines, and whether the tip is ahead of `H` by merges of the base only), is not stored: the loop keeps it in memory per worktree, keyed by the tip and `H`, so git is read again only when one of them moves. A restart reads it again. A read that times out counts as over `size_cap`, so a huge commit cannot slip past N12 (owner decision at review point 2). Changed lines leave out the files the base marks generated (section 7.3); the reading keeps their count beside it.
 
 A project's id is written into the repo's own git config at start, so renaming or moving the folder does not orphan its tasks.
 
@@ -381,7 +381,7 @@ Each is a record, accepted by the table in section 7.2. The rules above then lan
 | `close` (only after a "nothing to change" report) | mark | N1, with nothing to merge |
 | `retry` | an act that resets failure, restart, reviewer-try and merge-try counts, closes an attempt whose PR was closed (N4), and allows a run the owner quit to start again. Slice 1 has no `retry`: the owner starting the project again clears every failed act, a failed merge or cleanup act included | N5 and N4 no longer hold |
 | `send-back` (with a why) | a round-like record "changes" from the coordinator | N22 |
-| recap decision: `continue` | closes the recap; raises `size_cap` to lines now + `continue_lines` | N23 |
+| recap decision: `continue` | closes the recap; raises `size_cap` to lines now + `continue_lines`, and never lowers it | N23 |
 | recap decision: `split` (children pass the plan checks) | mark `split`; children carry `split_from` and the retro's worker change; dependants move to the children | N1 |
 | recap decision: `new` (the brief was amended since the recap opened) | closes the attempt and its PR (with a note); the old branch is kept | N11 |
 | recap decision: `drop` | mark | N1 |
@@ -686,7 +686,7 @@ A failed read is not a snapshot. `gh` being unreachable is the project fact `git
 | hc events (`internal/hc` Subscribe) | terminal status, exit, and "does not exist" | run events. An hc error or outage is the project fact `hc_unavailable` (an outage episode, section 6: raised once per outage and cleared on the first good observation); it never becomes `lost` for every run |
 | Start watcher | the screen of a run in `starting` with no status yet | `screen{class}` from the adapter |
 | Process observer | each live run's terminal: new output (not the adapter's spinner and timer lines), child processes and terminals the run started and their ages, minus the adapter's own helpers | `activity`; the background jobs a turn left behind. **herdr-core has no API for this today** (spike S0.8). Until it has, "quiet" means no status change for `quiet_minutes`, and background jobs are not seen: a known limit of the first version |
-| Git tips | the tip of each worktree with a live worker; its relation to `H`; the delta kind; the changed lines (added plus removed) against the merge base computed now, with the remote base when it is ahead, counted from the patch with `--text` so no attribute or NUL byte hides a line (`--numstat` still calls such a file binary); whether it is clean | `last_tip`, in memory (section 3) |
+| Git tips | the tip of each worktree with a live worker; its relation to `H`; the delta kind; the changed lines (added plus removed) against the merge base computed now, with the remote base when it is ahead, counted from the patch with `--text`, so no NUL byte and no attribute in the worker's commits or worktree hides a line (`--numstat` still calls such a file binary), less the files the base marks generated (last bullet of this section); whether it is clean | `last_tip`, in memory (section 3) |
 | Pools and sign-in | `codexbar usage --json` and each CLI's own sign-in check, every `pool_minutes` (even with no live run while J5 holds) and before each start; a check that times out or cannot run is `unknown (<reason>)`, never positive and never signed out | pool and sign-in facts; run event `pool_floor`; alerts `no_pool`, `agents_down` (J5) |
 | Base branch | the runs on the base's head commit, for push events only | `base_red`; alert `main_red`; a wake on red and on green |
 | Volume probe | a timed read of the project folder through hc | alerts `consent_prompt`, `disk` |
@@ -694,7 +694,7 @@ A failed read is not a snapshot. `gh` being unreachable is the project fact `git
 
 - **A pool is usable** when each of its windows (the 5-hour one and the weekly one) reads above `pool_floor_percent`, or when it cannot be read at all: an unknown reading is `unknown`, never "empty", and a run on it is tried. A known reading at or under the floor stays in force until its blocking window's reset even if a later refresh fails; once that reset passes, an unreadable refresh is unknown again and does not block. A pool on which a run just ended with a usage limit is unusable until the reset time it printed, or for `pool_minutes` when it printed none.
 - **Remember a quota end** for the run's CLI and pool across a restart. On R5 or R19, use the time in the CLI's own limit message, or now plus `pool_minutes` if it gives no time. Only that message supplies the reset. A pool reading or quoted output elsewhere on the screen cannot set it. The cooldown holds until that time even when a newer reading says the pool is usable.
-- Changed lines leave out files the repo marks generated in `.gitattributes` (`linguist-generated`). The engine keeps no list of file names; doctor offers once, at project start, to add the usual lock and project files there.
+- Changed lines leave out the files that the base branch's committed `.gitattributes` marks `linguist-generated` (set, or `=true`; `-linguist-generated` counts). The attributes are read from the base as git last fetched it, never from the tip or the worktree, so a `.gitattributes` the worker writes changes nothing and its lines count. `-diff` and binary files still count. The whole patch is read first: if it times out or is cut off, the task is over `size_cap` whatever is marked. If git cannot read the base's attributes, or is too old to read them from a commit, every line counts. The count left out is shown beside the changed lines in the N12 why and in the coordinator's wake. The engine keeps no list of file names and offers none: the owner marks the files in the repo.
 
 ## 8. Making sure: executors, failure, and the few invariants
 
@@ -939,7 +939,7 @@ No new table. A design task is a task with `kind: design`:
 |---|---|
 | Plan | `estimate_lines` is required. A task over `task_size_limit` is refused: split it before it exists |
 | Start | `size_cap` = `size_cap_factor` × `estimate_lines` |
-| Every pass | N12 reads the changed lines at the tip. No task can avoid it, and it needs no report from the worker |
+| Every pass | N12 reads the changed lines at the tip, less the files the base marks generated (section 7.3). No task can avoid it, and it needs no report from the worker |
 | After a `continue` | the cap becomes lines now + `continue_lines`. With `continues_per_task` used up, `continue` is no longer offered |
 | The engine's own code | each package in section 13 has a line budget; going over is the same stop-and-ask |
 
@@ -1270,6 +1270,7 @@ The first check produced 181 gaps. Absorbing them all would rebuild the old engi
 | O34 | **Decided (design review, 2026-11-23, section 12.1 V3):** dropped. The rows in `flow` are the only copy; no printer, no generated document, no check |
 | O35 | **Decided (design review, 2026-11-23, section 16 K1–K5):** C2 is `make test` plus the exit run's record, not an id count; named tests are required only for PITFALL rows whose class is not a rule table, as a follow-up after 8.4 and before C6; `KB-STA-20` is `LATER` |
 | O36 | Where the old `factory/` history is kept now that `main` has no commit that ever held `factory/` and the owner deleted the remote copy of `pre-reset-4df3a038` on 2026-11-22 keeping only a local tag. **Decided (owner, 2026-11-23):** the local tag `pre-reset-4df3a038` is enough, 8.4 deletion is authorised, and [knowledge-base.md](knowledge-base.md)'s citations of old files remain historical references under that tag |
+| O37 | The size measure trusts the repository's local `.git`: the remote-tracking base ref, and `info/attributes`, which git reads before any `.gitattributes` and cannot be told to skip. A worker that edits `.git` (not its commits) can lower its own count either way. Close both together if a trial shows it happening: compare the base ref with the remote, and refuse a non-empty `info/attributes` at start |
 
 ### 17.5 The audit by simulation, and what it means
 

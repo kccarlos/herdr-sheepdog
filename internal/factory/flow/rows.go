@@ -534,6 +534,8 @@ var TaskRows = []Row[In]{
 			why := fmt.Sprintf("%d changed lines, over the size cap %d", in.Facts.Lines, in.attempt().SizeCap)
 			if in.Facts.LinesTimeout {
 				why = fmt.Sprintf("changed-lines read timed out (counts as over the size cap %d)", in.attempt().SizeCap)
+			} else if in.Facts.LinesGenerated > 0 {
+				why += fmt.Sprintf("; %d generated lines not counted", in.Facts.LinesGenerated)
 			}
 			return say(why, ensure(in, key(AskSizeRecap, len(in.Task.Recaps))))(in)
 		}},

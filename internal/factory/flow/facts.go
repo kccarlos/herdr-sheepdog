@@ -117,6 +117,8 @@ type Facts struct {
 	// Lines is the changed lines (added + removed) at the tip against the
 	// merge base, read from git every pass (N12).
 	Lines int `json:"lines"`
+	// LinesGenerated is the changed lines left out as base-marked generated files (design.md 7.3).
+	LinesGenerated int `json:"lines_generated,omitempty"`
 	// LinesTimeout: reading changed lines timed out; N12 counts it as over
 	// size_cap (design.md 3, last_tip).
 	LinesTimeout bool `json:"lines_timeout,omitempty"`

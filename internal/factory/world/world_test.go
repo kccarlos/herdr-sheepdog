@@ -11,6 +11,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
@@ -950,8 +951,8 @@ func TestReviewRangesExcludeMergedBaseChanges(t *testing.T) {
 		tip  string
 		want int
 	}{{c1, 2}, {m1, 4}, {c2b, 4}} { // new files task.go and pre.go, 2 lines each; base_only.go never counts
-		if n, err := fixtureGit(t).ChangedLines(ctx, wt.Path, c.tip); err != nil || n != c.want {
-			t.Errorf("ChangedLines(%s) = (%d, %v), want %d", c.tip, n, err, c.want)
+		if n, gen, err := fixtureGit(t).ChangedLines(ctx, wt.Path, c.tip); err != nil || n != c.want || gen != 0 {
+			t.Errorf("ChangedLines(%s) = (%d, %d, %v), want (%d, 0, nil)", c.tip, n, gen, err, c.want)
 		}
 	}
 
@@ -1107,6 +1108,15 @@ func TestDeltaRangesIncludesHandEditedBaseMerge(t *testing.T) {
 // task worktree from it.
 func sizeRepo(t *testing.T) string {
 	t.Helper()
+	wt := sizeRepoWithBase(t, nil)
+	return wt
+}
+
+// sizeRepoWithBase builds a repo with a bare origin whose pushed base commit
+// holds README.md plus baseFiles, and returns the main checkout and a task
+// worktree branched from origin/main.
+func sizeRepoWithBase(t *testing.T, baseFiles map[string]string) (wt string) {
+	t.Helper()
 	tmp := t.TempDir()
 	bare := filepath.Join(tmp, "remote.git")
 	if out, err := exec.Command("git", "init", "--bare", "--initial-branch=main", bare).CombinedOutput(); err != nil {
@@ -1120,7 +1130,16 @@ func sizeRepo(t *testing.T) string {
 	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("v0\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	runGit(t, repo, "add", "README.md")
+	for name, body := range baseFiles {
+		p := filepath.Join(repo, name)
+		if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runGit(t, repo, "add", "-A")
 	runGit(t, repo, "commit", "-m", "chore: b0")
 	runGit(t, repo, "push", "-u", "origin", "main")
 	w, err := fixtureGit(t).NewWorktree(context.Background(), repo, filepath.Join(tmp, "wt-1"), "t1", "feat: task")
@@ -1132,7 +1151,11 @@ func sizeRepo(t *testing.T) string {
 
 func commitFile(t *testing.T, dir, name, body string) string {
 	t.Helper()
-	if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0o600); err != nil {
+	p := filepath.Join(dir, name)
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	runGit(t, dir, "add", name)
@@ -1140,15 +1163,239 @@ func commitFile(t *testing.T, dir, name, body string) string {
 	return runGit(t, dir, "rev-parse", "HEAD")
 }
 
+func numberedLines(prefix string, n int) string {
+	var b strings.Builder
+	for i := range n {
+		b.WriteString(prefix)
+		b.WriteString(strconv.Itoa(i))
+		b.WriteByte('\n')
+	}
+	return b.String()
+}
+
 // TestChangedLinesCountsBinaryMarkedFiles: neither a committed -diff
-// attribute nor a NUL byte hides a file's lines from the size cap.
+// attribute (on the base or on the branch) nor a NUL byte hides a file's lines
+// from the size cap (design.md 7.3).
 func TestChangedLinesCountsBinaryMarkedFiles(t *testing.T) {
 	wt := sizeRepo(t)
 	commitFile(t, wt, ".gitattributes", "*.gen -diff\n")
 	commitFile(t, wt, "big.gen", strings.Repeat("x\n", 100))
 	tip := commitFile(t, wt, "nul.txt", "a\x00b\nc\n") // a NUL byte makes git call it binary
-	if n, err := fixtureGit(t).ChangedLines(context.Background(), wt, tip); err != nil || n != 103 {
-		t.Fatalf("ChangedLines = (%d, %v), want 103", n, err)
+	if n, gen, err := fixtureGit(t).ChangedLines(context.Background(), wt, tip); err != nil || n != 103 || gen != 0 {
+		t.Fatalf("ChangedLines = (%d, %d, %v), want (103, 0, nil)", n, gen, err)
+	}
+
+	// A -diff attribute on the base branch itself also stays counted.
+	baseWT := sizeRepoWithBase(t, map[string]string{
+		".gitattributes": "*.gen -diff\n",
+	})
+	commitFile(t, baseWT, "big.gen", strings.Repeat("x\n", 100))
+	baseTip := commitFile(t, baseWT, "nul.txt", "a\x00b\nc\n")
+	if n, gen, err := fixtureGit(t).ChangedLines(context.Background(), baseWT, baseTip); err != nil || n != 102 || gen != 0 {
+		t.Fatalf("ChangedLines with base -diff = (%d, %d, %v), want (102, 0, nil)", n, gen, err)
+	}
+}
+
+// TestChangedLinesLeavesOutBaseGeneratedFiles checks design.md 7.3 and
+// KB-CAP-16: files marked linguist-generated (set or =true) in the base
+// branch's committed .gitattributes are excluded from ChangedLines and reported
+// separately as generated lines.
+func TestChangedLinesLeavesOutBaseGeneratedFiles(t *testing.T) {
+	wt := sizeRepoWithBase(t, map[string]string{
+		".gitattributes":  "gen/project.pbx linguist-generated\ndeps.lock linguist-generated=true\n",
+		"gen/project.pbx": numberedLines("old-pbx-", 50),
+		"deps.lock":       numberedLines("old-lock-", 10),
+	})
+	// Rewriting 50 lines -> 50 removed + 50 added = 100; 10 lines -> 20.
+	commitFile(t, wt, "gen/project.pbx", numberedLines("new-pbx-", 50))
+	commitFile(t, wt, "deps.lock", numberedLines("new-lock-", 10))
+	tip := commitFile(t, wt, "src.go", numberedLines("src-", 7))
+	if lines, gen, err := fixtureGit(t).ChangedLines(context.Background(), wt, tip); err != nil || lines != 7 || gen != 120 {
+		t.Fatalf("ChangedLines = (%d, %d, %v), want (7, 120, nil)", lines, gen, err)
+	}
+}
+
+// TestChangedLinesIgnoresAttributesTheWorkerWrites checks design.md 7.3:
+// attributes committed on the task branch, left uncommitted in the worktree, or
+// configured via core.attributesFile in .git/config never exempt any lines.
+func TestChangedLinesIgnoresAttributesTheWorkerWrites(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("tip commits .gitattributes", func(t *testing.T) {
+		wt := sizeRepo(t)
+		commitFile(t, wt, ".gitattributes", "*.swift linguist-generated\n")
+		tip := commitFile(t, wt, "app.swift", numberedLines("let x = ", 10))
+		if lines, gen, err := fixtureGit(t).ChangedLines(ctx, wt, tip); err != nil || lines != 11 || gen != 0 {
+			t.Fatalf("ChangedLines = (%d, %d, %v), want (11, 0, nil)", lines, gen, err)
+		}
+	})
+
+	t.Run("uncommitted worktree .gitattributes", func(t *testing.T) {
+		wt := sizeRepo(t)
+		tip := commitFile(t, wt, "app.swift", numberedLines("let x = ", 10))
+		if err := os.WriteFile(filepath.Join(wt, ".gitattributes"), []byte("* linguist-generated\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if lines, gen, err := fixtureGit(t).ChangedLines(ctx, wt, tip); err != nil || lines != 10 || gen != 0 {
+			t.Fatalf("ChangedLines = (%d, %d, %v), want (10, 0, nil)", lines, gen, err)
+		}
+	})
+
+	t.Run("core.attributesFile in git config", func(t *testing.T) {
+		wt := sizeRepo(t)
+		tip := commitFile(t, wt, "app.swift", numberedLines("let x = ", 10))
+		attrFile := filepath.Join(t.TempDir(), "custom.gitattributes")
+		if err := os.WriteFile(attrFile, []byte("*.swift linguist-generated\n*.swift linguist-generated=true\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		runGit(t, wt, "config", "--local", "core.attributesFile", attrFile)
+		if lines, gen, err := fixtureGit(t).ChangedLines(ctx, wt, tip); err != nil || lines != 10 || gen != 0 {
+			t.Fatalf("ChangedLines = (%d, %d, %v), want (10, 0, nil)", lines, gen, err)
+		}
+	})
+}
+
+// TestChangedLinesCountsUnsetGenerated checks design.md 7.3 and KB-CAP-16:
+// a file explicitly unset with -linguist-generated in the base's .gitattributes
+// stays counted while its generated sibling is left out.
+func TestChangedLinesCountsUnsetGenerated(t *testing.T) {
+	wt := sizeRepoWithBase(t, map[string]string{
+		".gitattributes": "gen/* linguist-generated\ngen/keep.txt -linguist-generated\n",
+	})
+	commitFile(t, wt, "gen/skip.txt", numberedLines("skip-", 40))
+	tip := commitFile(t, wt, "gen/keep.txt", numberedLines("keep-", 5))
+	if lines, gen, err := fixtureGit(t).ChangedLines(context.Background(), wt, tip); err != nil || lines != 5 || gen != 40 {
+		t.Fatalf("ChangedLines = (%d, %d, %v), want (5, 40, nil)", lines, gen, err)
+	}
+}
+
+// TestChangedLinesRenameIntoGeneratedPathStillCounts checks design.md 7.3:
+// moving an existing base file into a generated path counts at least the whole
+// file's lines (errs high) rather than hiding them.
+func TestChangedLinesRenameIntoGeneratedPathStillCounts(t *testing.T) {
+	wt := sizeRepoWithBase(t, map[string]string{
+		".gitattributes": "gen/* linguist-generated\n",
+		"hand.go":        numberedLines("hand-", 300),
+	})
+	if err := os.MkdirAll(filepath.Join(wt, "gen"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, wt, "mv", "hand.go", "gen/hand.go")
+	runGit(t, wt, "commit", "-m", "refactor: move hand.go into gen")
+	tip := runGit(t, wt, "rev-parse", "HEAD")
+	if lines, _, err := fixtureGit(t).ChangedLines(context.Background(), wt, tip); err != nil || lines < 300 {
+		t.Fatalf("ChangedLines after rename into generated path = (%d, %v), want >= 300", lines, err)
+	}
+}
+
+// TestChangedLinesAttributeReadFailure checks design.md 7.3 failure classes on
+// the base-attributes diff call (carrying GIT_ATTR_SOURCE in env): a clean
+// non-zero git exit falls back to (total, 0, nil); an RPC error returns a
+// non-ErrChangedLinesOverCap error; a timeout returns ErrChangedLinesOverCap.
+func TestChangedLinesAttributeReadFailure(t *testing.T) {
+	ctx := context.Background()
+	wt := sizeRepoWithBase(t, map[string]string{
+		".gitattributes": "gen/big.pbx linguist-generated\n",
+	})
+	commitFile(t, wt, "gen/big.pbx", numberedLines("gen-", 20))
+	tip := commitFile(t, wt, "src.go", numberedLines("src-", 5))
+	const total = 25
+
+	isAttrDiff := func(p hc.ExecParams) bool {
+		return len(p.Argv) > 1 && p.Argv[0] == "git" && p.Argv[1] == "diff" && p.Env["GIT_ATTR_SOURCE"] != ""
+	}
+
+	t.Run("exit 1 falls back to total", func(t *testing.T) {
+		srv := hctest.New(t)
+		var attrCalls atomic.Int32
+		srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+			if isAttrDiff(p) {
+				attrCalls.Add(1)
+				code := 1
+				return hc.ExecResult{Code: &code, Stderr: []byte("attr diff failed\n")}, nil
+			}
+			return hctest.GitExec(p)
+		}
+		g := NewGit(hc.NewClient(srv.Path), nil, nil)
+		lines, gen, err := g.ChangedLines(ctx, wt, tip)
+		if attrCalls.Load() != 1 || err != nil || lines != total || gen != 0 {
+			t.Fatalf("ChangedLines = (%d, %d, %v) with attrCalls=%d, want (%d, 0, nil) with 1 attr diff call", lines, gen, err, attrCalls.Load(), total)
+		}
+	})
+
+	t.Run("RPC error returns non-over-cap error", func(t *testing.T) {
+		srv := hctest.New(t)
+		var attrCalls atomic.Int32
+		srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+			if isAttrDiff(p) {
+				attrCalls.Add(1)
+				return hc.ExecResult{}, errors.New("lost machine.exec reply")
+			}
+			return hctest.GitExec(p)
+		}
+		g := NewGit(hc.NewClient(srv.Path), nil, nil)
+		_, _, err := g.ChangedLines(ctx, wt, tip)
+		if attrCalls.Load() != 1 || err == nil || errors.Is(err, ErrChangedLinesOverCap) {
+			t.Fatalf("ChangedLines on attr diff RPC error = %v (attrCalls=%d), want non-ErrChangedLinesOverCap error after 1 attr diff call", err, attrCalls.Load())
+		}
+	})
+
+	t.Run("timeout returns ErrChangedLinesOverCap", func(t *testing.T) {
+		srv := hctest.New(t)
+		var attrCalls atomic.Int32
+		srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+			if isAttrDiff(p) {
+				attrCalls.Add(1)
+				return hc.ExecResult{TimedOut: true}, nil
+			}
+			return hctest.GitExec(p)
+		}
+		g := NewGit(hc.NewClient(srv.Path), nil, nil)
+		_, _, err := g.ChangedLines(ctx, wt, tip)
+		if attrCalls.Load() != 1 || !errors.Is(err, ErrChangedLinesOverCap) {
+			t.Fatalf("ChangedLines on attr diff timeout = %v (attrCalls=%d), want ErrChangedLinesOverCap after 1 attr diff call", err, attrCalls.Load())
+		}
+	})
+}
+
+// TestChangedLinesOldGitCountsEverything checks design.md 7.3: when git ignores
+// GIT_ATTR_SOURCE (check-attr probe exits 0), ChangedLines counts every line,
+// never passes GIT_ATTR_SOURCE to diff, and runs the probe once across reads.
+func TestChangedLinesOldGitCountsEverything(t *testing.T) {
+	ctx := context.Background()
+	wt := sizeRepoWithBase(t, map[string]string{
+		".gitattributes": "gen/big.pbx linguist-generated\n",
+	})
+	commitFile(t, wt, "gen/big.pbx", numberedLines("gen-", 20))
+	tip := commitFile(t, wt, "src.go", numberedLines("src-", 5))
+
+	srv := hctest.New(t)
+	var probeCalls, attrDiffCalls atomic.Int32
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if len(p.Argv) > 1 && p.Argv[0] == "git" {
+			if p.Argv[1] == "check-attr" {
+				probeCalls.Add(1)
+				code := 0
+				return hc.ExecResult{Code: &code, Stdout: []byte(".: linguist-generated: unspecified\n")}, nil
+			}
+			if p.Argv[1] == "diff" && p.Env["GIT_ATTR_SOURCE"] != "" {
+				attrDiffCalls.Add(1)
+			}
+		}
+		return hctest.GitExec(p)
+	}
+	g := NewGit(hc.NewClient(srv.Path), nil, nil)
+	for i := range 2 {
+		lines, gen, err := g.ChangedLines(ctx, wt, tip)
+		if err != nil || lines != 25 || gen != 0 {
+			t.Fatalf("read %d: ChangedLines = (%d, %d, %v), want (25, 0, nil)", i+1, lines, gen, err)
+		}
+	}
+	if attrDiffCalls.Load() != 0 {
+		t.Errorf("diff with GIT_ATTR_SOURCE called %d times on old git, want 0", attrDiffCalls.Load())
+	}
+	if probeCalls.Load() != 1 {
+		t.Errorf("check-attr probe called %d times across 2 reads, want 1", probeCalls.Load())
 	}
 }
 
@@ -1210,7 +1457,7 @@ func TestChangedLinesTimeoutReturnsDeadlineExceeded(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	git := NewGit(hc.NewClient(srv.Path), nil, nil)
-	_, err = git.ChangedLines(ctx, wt, tip)
+	_, _, err = git.ChangedLines(ctx, wt, tip)
 	if !GitTimedOut(err) || !errors.Is(err, context.DeadlineExceeded) || !errors.Is(err, ErrChangedLinesOverCap) {
 		t.Fatalf("ChangedLines under hung git diff = %v, want a confirmed diff timeout treated as over cap", err)
 	}
