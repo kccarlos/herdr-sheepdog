@@ -113,6 +113,9 @@ func (e *Engine) Say(project, text string) error {
 }
 
 func (e *Engine) acceptAskLocked(id string, s *flow.State, role string, ti int, runID string, args json.RawMessage) error {
+	if role == flow.RolePlanReviewer {
+		return e.refuse(id, "kind_not_allowed", "A plan_reviewer may not open asks.")
+	}
 	var req struct {
 		Kind, Task, Question, Recommend string
 		Options, Tasks                  []string

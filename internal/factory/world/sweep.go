@@ -153,6 +153,11 @@ func SweepTerminals(ctx context.Context, client *hc.Client, s flow.State) flow.S
 		}
 	}
 	add(s.Project.RunID, s.Project.Run)
+	for _, pr := range s.Project.PlanReviews {
+		if pr.Run != nil {
+			add(pr.Run.RunID, pr.Run.Run)
+		}
+	}
 	for _, t := range s.Tasks {
 		for _, a := range t.Attempts {
 			add(a.RunID, a.Run)

@@ -124,6 +124,11 @@ func ClaudeRetroArgv(model, effort, bin, findingsPath string) []string {
 	return claudeReadOnlyArgv(model, effort, bin, "retro", findingsPath)
 }
 
+// ClaudePlanReviewerArgv returns the launch argv for a Claude Code plan reviewer (design.md 9.2).
+func ClaudePlanReviewerArgv(model, effort, bin, findingsPath string) []string {
+	return claudeReadOnlyArgv(model, effort, bin, "plan-review", findingsPath)
+}
+
 // NewUUID returns a random version-4 UUID for Claude session ids (spike S0.8).
 func NewUUID() string {
 	var b [16]byte

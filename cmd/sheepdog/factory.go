@@ -46,6 +46,7 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "  report ready --nothing-to-change --why \"<why>\"  (worker only) report that the task needs no change")
 	fprintln(w, "  report review <pass|changes> --code <code> --head <sha> --self-check-misses <n> --deletable \"<text>\" [--class \"<text>\"] [--not-run \"<text>\"] [--findings <path>]  (reviewer only) submit a review verdict")
 	fprintln(w, "  report retro <ship|fix|redesign> --code <code> --head <sha> --cause <cause> --worker-change \"<text>\" --worker-change-kind <check|brief> --coordinator-change \"<text>\" --coordinator-change-kind <check|brief> [--findings <path>]  (retro only) submit a retro verdict")
+	fprintln(w, "  report plan-review <pass|changes> --code <code> [--findings <path>]  (plan reviewer only) submit a plan review verdict")
 	fprintln(w, "  report ask \"<question>\" --option \"<choice>\" --option \"<choice>\" --recommend \"<choice>\"  (worker/reviewer) ask the coordinator a decision question")
 	fprintln(w, "  ask --kind <kind> [--task <task>] \"<question>\" --option \"<choice>\" --option \"<choice>\" --recommend \"<choice>\"  (coordinator) open an ask (gated kinds go to the owner)")
 	fprintln(w, "  ask --kind override --task <task> [--task <task> ...]  (coordinator) open an engine-filled override card for the owner")
@@ -325,6 +326,9 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 	}
 	if len(args) >= 1 && args[0] == "retro" {
 		return runFactoryReportRetro(ctx, args[1:], stdout, stderr)
+	}
+	if len(args) >= 1 && args[0] == "plan-review" {
+		return runFactoryReportPlanReview(ctx, args[1:], stdout, stderr)
 	}
 	if len(args) < 1 || args[0] != "ready" {
 		printFactoryUsage(stderr)
@@ -608,6 +612,35 @@ func runFactoryReportRetro(ctx context.Context, args []string, stdout, stderr io
 		"findings":                findings,
 	}
 	return sendFactoryReport(ctx, "factory report retro", "retro", body, "retro "+verdict, stdout, stderr)
+}
+
+func runFactoryReportPlanReview(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := factoryFlags("factory report plan-review", stderr)
+	code := fs.String("code", "", "round one-time code")
+	findingsPath := fs.String("findings", "", "path to findings file outside the repo")
+	if err := fs.Parse(reorderFactoryArgs(fs, args)); err != nil {
+		return flagExit(err)
+	}
+	seen := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { seen[f.Name] = true })
+	if fs.NArg() != 1 || !seen["code"] || strings.TrimSpace(*code) == "" {
+		printFactoryUsage(stderr)
+		return 2
+	}
+	verdict := strings.TrimSpace(fs.Arg(0))
+	if verdict != flow.VerdictPass && verdict != flow.VerdictChanges {
+		printFactoryUsage(stderr)
+		return 2
+	}
+	findings := ""
+	if seen["findings"] {
+		var exit int
+		if findings, exit = readFindingsFlag("factory report plan-review", *findingsPath, stderr); exit != 0 {
+			return exit
+		}
+	}
+	body := map[string]any{"verdict": verdict, "code": *code, "findings": findings}
+	return sendFactoryReport(ctx, "factory report plan-review", "plan-review", body, "plan-review "+verdict, stdout, stderr)
 }
 
 func sendFactoryReport(ctx context.Context, cmd, verb string, body any, okMsg string, stdout, stderr io.Writer) int {
