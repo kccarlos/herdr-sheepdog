@@ -16,20 +16,16 @@ type screenCell struct {
 }
 
 type inputRegion struct {
-	lines      [][]screenCell
-	styled     []bool
-	row        int
-	end        int
-	prefix     int
-	boxed      bool
-	bottomRule int
-	footer     bool
+	lines  [][]screenCell
+	styled []bool
+	row    int
+	end    int
+	prefix int
+	boxed  bool
 }
 
 // TypedInput reports whether the bottom-most input row contains non-dim text,
 // and whether its styling was available to make that decision.
-func HasTypedInput(screen string) bool { typed, _ := TypedInput(screen); return typed }
-
 func TypedInput(screen string) (bool, bool) {
 	reg, ok := findInputRegion(screen)
 	if !ok || !reg.styled[reg.row] {
@@ -50,58 +46,6 @@ func TypedInput(screen string) (bool, bool) {
 		}
 	}
 	return false, true
-}
-
-// TypedInputPlain reports whether a plain-text screen's live input box holds
-// unsent desktop text, and whether the screen clearly showed the input state.
-// Backends without colour reads (herdr-core) use this: empty prompts and known
-// idle placeholders allow sending, framed non-placeholder text blocks sending,
-// and anything unclear returns (false, false) so the caller fails open and logs.
-func TypedInputPlain(screen string) (bool, bool) {
-	reg, ok := findInputRegion(screen)
-	if !ok {
-		return false, false
-	}
-	var parts []string
-	for j := reg.row; j < reg.end; j++ {
-		l := reg.lines[j]
-		if j > reg.row && !reg.boxed && strings.TrimSpace(plainCells(l)) == "" {
-			break
-		}
-		if j == reg.row {
-			l = l[reg.prefix:]
-		}
-		if s := strings.TrimFunc(plainCells(l), unicode.IsSpace); s != "" {
-			parts = append(parts, s)
-		}
-	}
-	if len(parts) == 0 {
-		return false, true
-	}
-	if isInputPlaceholder(strings.Join(parts, " ")) {
-		return false, true
-	}
-	if !reg.boxed && reg.bottomRule < 0 && !reg.footer {
-		return false, false
-	}
-	return true, true
-}
-
-func isInputPlaceholder(s string) bool {
-	switch {
-	case strings.HasPrefix(s, `Try "`) && (strings.HasSuffix(s, `"`) || strings.HasSuffix(s, "…")):
-		return true
-	case strings.HasPrefix(s, "Press up to "):
-		return true
-	case strings.HasPrefix(s, "Press Enter to edit the selected message,"):
-		return true
-	case strings.HasPrefix(s, "Message @") && strings.HasSuffix(s, "…"):
-		return true
-	case s == "Ask Codex to do anything", s == "Ask a follow-up question":
-		return true
-	default:
-		return false
-	}
 }
 
 func plainCells(l []screenCell) string {
@@ -223,14 +167,12 @@ func findInputRegion(screen string) (inputRegion, bool) {
 			}
 		}
 		return inputRegion{
-			lines:      lines,
-			styled:     styledLines,
-			row:        i,
-			end:        end,
-			prefix:     len([]rune(s[:loc[1]])),
-			boxed:      boxed,
-			bottomRule: bottomRule,
-			footer:     footer,
+			lines:  lines,
+			styled: styledLines,
+			row:    i,
+			end:    end,
+			prefix: len([]rune(s[:loc[1]])),
+			boxed:  boxed,
 		}, true
 	}
 	return inputRegion{}, false
