@@ -707,8 +707,12 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 	if !e.cleanLocked(id) {
 		return
 	}
+	prReady, prWhy := false, ""
+	if n := len(s.Project.PlanReviews); (n == 0 || !s.Project.PlanReviews[n-1].Accepted.IsZero()) && slices.ContainsFunc(s.Tasks, func(t flow.Task) bool { return !flow.Ended(t) && t.Unreviewed }) {
+		prReady, prWhy = e.planReviewerReady(ctx, *s)
+	}
 	match := func() (flow.Row[flow.ProjectIn], flow.Decision) {
-		return flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now, CoordFallbackReady: e.passCoordFallback})
+		return flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now, CoordFallbackReady: e.passCoordFallback, PlanReviewerReady: prReady})
 	}
 	r, d := match()
 	if len(d.Asked) > 0 && d.Asked[0] == flow.AskCoordDialogStuck {
@@ -790,6 +794,8 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 		commit("stopped coordinator")
 	case flow.AskDeliverWakes:
 		e.deliverWakesLocked(ctx, id, s, now)
+	case flow.AskAcceptPlan, flow.AskStartPlanReviewer:
+		e.acceptPlanLocked(id, s, d.Asked, cmp.Or(prWhy, map[string]string{flow.AskStartPlanReviewer: "plan reviewer unavailable"}[ask], d.Why), now)
 	default:
 		msg := map[string]string{flow.AskFinalJournal: "All tasks in this plan have ended. Write one final journal line summarizing what landed and any open risks.", flow.AskCoordGoOn: "Your last turn ended with an error. Check your state and go on with the work.", flow.AskHeartbeat: coordSummary(*s, "", true)}[ask]
 		if e.sendCoordLocked(ctx, id, s, msg, now, ask != flow.AskFinalJournal) == nil {
@@ -812,6 +818,41 @@ func (e *Engine) logProjectWaitLocked(id string, s *flow.State, row, decision, w
 	}
 	s.Project.WaitKey = key
 	return e.commitLogLocked(id, s, LogLine{By: "engine", Rule: row, Decision: decision, Why: why})
+}
+
+func (e *Engine) planReviewerReady(ctx context.Context, s flow.State) (bool, string) {
+	if s.Settings.PlanReviewRounds <= 0 {
+		return false, "plan_review_rounds is 0"
+	}
+	f := e.probeLaunchFacts(ctx, flow.RolePlanReviewer, flow.Task{}, s.Settings)
+	f.Check = launchCapability(flow.RolePlanReviewer)
+	_, r := flow.ResolveWithReason(flow.RolePlanReviewer, flow.Task{}, s.Settings, f)
+	return r.Why == "", r.Why
+}
+
+func (e *Engine) acceptPlanLocked(id string, s *flow.State, asked []string, why string, now time.Time) {
+	next, dec := *s, "plan accepted"
+	next.Tasks, next.Project.PlanReviews = slices.Clone(s.Tasks), slices.Clone(s.Project.PlanReviews)
+	if n := len(next.Project.PlanReviews); n > 0 && next.Project.PlanReviews[n-1].Accepted.IsZero() {
+		pr := &next.Project.PlanReviews[n-1]
+		pr.Accepted = now
+		for i := range next.Tasks {
+			next.Tasks[i].Unreviewed = next.Tasks[i].Unreviewed && !slices.Contains(pr.Tasks, next.Tasks[i].ID)
+		}
+	} else {
+		why, dec = cmp.Or(why, "plan reviewer unavailable"), "plan accepted unreviewed (unavailable)"
+		var tasks []string
+		for i, t := range next.Tasks {
+			if t.Unreviewed && !flow.Ended(t) {
+				tasks = append(tasks, t.ID)
+			}
+			next.Tasks[i].Unreviewed = false
+		}
+		next.Project.PlanReviews = append(next.Project.PlanReviews, flow.PlanReview{N: len(next.Project.PlanReviews) + 1, Tasks: tasks, Verdict: flow.VerdictUnavailable, Why: why, At: now, Accepted: now})
+	}
+	if e.commitLogLocked(id, &next, LogLine{By: "engine", Rule: "J16", Asked: asked, Decision: dec, Why: why}) {
+		*s = next
+	}
 }
 
 type launchWait struct{ Why, Key string }

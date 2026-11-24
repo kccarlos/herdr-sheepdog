@@ -256,6 +256,7 @@ func noAttempt(in In) bool   { return in.attempt() == nil }
 func hasAttempt(in In) bool  { return in.attempt() != nil }
 func depsNotDone(in In) bool { return len(in.Facts.DepsNotDone) > 0 }
 func depsDropped(in In) bool { return len(in.Facts.DepsDropped) > 0 }
+func unreviewed(in In) bool  { return in.Task.Unreviewed }
 func noSlot(in In) bool      { return in.Facts.NoSlot && !in.probe }
 func noReady(in In) bool     { return len(in.attempt().Ready) == 0 }
 func tipAhead(in In) bool    { return in.Facts.TipRel == RelAhead } // merge_only is caught by N20 above
@@ -508,7 +509,12 @@ var TaskRows = []Row[In]{
 		return say(n9Why(in), asked)(in)
 	}},
 	// N10: milestone and quota (no worker candidate resolves) come in later slices (design.md 4.2).
-	{ID: "N10", WaitsOn: "a slot", Stage: "queued", When: all(noAttempt, noSlot), Then: say("no slot is free")},
+	{ID: "N10", WaitsOn: "a slot", Stage: "queued", When: all(noAttempt, anyOf(unreviewed, noSlot)), Then: func(in In) Decision {
+		if unreviewed(in) {
+			return say("waiting on the plan review")(in)
+		}
+		return say("no slot is free")(in)
+	}},
 	{ID: "N11", WaitsOn: "the engine", Stage: "queued", When: noAttempt, Then: func(in In) Decision {
 		return say("no attempt: start one", ensure(in, AskNewAttempt))(in)
 	}},

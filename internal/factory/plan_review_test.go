@@ -108,7 +108,7 @@ func TestPlanReviewSlotProbeExcludesUnreviewed(t *testing.T) {
 
 	wt1, br1, c1 := makeSlotWorktree(t, w.ctx, w.paths, w.repo, w.id, "T1", "t1.go")
 	writeOpenPRView(t, gh, 1, c1, pendingRollup)
-	w1, err := startRun(w.ctx, w.client, world.RunSpec{Name: "worker-t1-ci", Cwd: wt1, Argv: []string{"sh"}})
+	w1, err := startRun(w.ctx, w.client, world.RunSpec{Name: "worker-t1-ci", Cwd: wt1, Argv: []string{"sh"}, Labels: map[string]string{"sheepdog.run": "run-w1"}})
 	if err != nil {
 		t.Fatal(err)
 	}

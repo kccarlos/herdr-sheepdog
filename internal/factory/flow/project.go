@@ -11,6 +11,7 @@ import (
 const (
 	AskStartCoordinator, AskStopCoordinator, AskFinalJournal         = "coordinator", "stop_coordinator", "final_journal"
 	AskCoordGoOn, AskCoordDialogStuck, AskDeliverWakes, AskHeartbeat = "coord_go_on", "coord_dialog_stuck", "deliver_wakes", "heartbeat"
+	AskStartPlanReviewer, AskAcceptPlan                              = "start_plan_reviewer", "accept_plan"
 	coordStartWindow, firstDialogStuck                               = time.Hour, 1
 )
 
@@ -21,6 +22,7 @@ type ProjectIn struct {
 	Settings
 	Now                time.Time
 	CoordFallbackReady bool // J5: another configured coordinator candidate has a positive sign-in check
+	PlanReviewerReady  bool // J16: a plan_reviewer candidate currently resolves
 }
 
 // AllTasksEnded reports whether a plan exists and every task carries a terminal mark (J4).
@@ -56,6 +58,19 @@ func (in ProjectIn) coordError() bool {
 }
 func (in ProjectIn) heartbeatDue() bool {
 	return in.past(in.CoordLastWakeAt, in.HeartbeatMinutes) || in.CoordLastWakeAt.IsZero() && in.Run != nil && in.past(in.Run.StartedAt, in.HeartbeatMinutes)
+}
+
+func (in ProjectIn) planReviewStep() (start, accept bool) {
+	if pr := in.lastPlanReview(); pr != nil && pr.Accepted.IsZero() {
+		return false, pr.Verdict != "" && len(OpenPlanFindings(in.Project)) == 0
+	}
+	if !slices.ContainsFunc(in.Tasks, func(t Task) bool { return !Ended(t) && t.Unreviewed }) {
+		return false, false
+	}
+	if in.PlanReviewRounds > 0 && in.PlanReviewerReady {
+		return in.idle(), false
+	}
+	return false, true
 }
 
 func (in ProjectIn) coordSilent() bool {
@@ -144,5 +159,6 @@ var ProjectRows = []Row[ProjectIn]{
 	pfix("J9", "coordinator", ProjectIn.coordSilent, "coordinator stayed silent for coordinator_silent_minutes: stop it", AskStopCoordinator),
 	pfix("J12", "coordinator", func(in ProjectIn) bool { return in.idle() && len(in.Wakes) > 0 }, "wakes held and the coordinator is idle", AskDeliverWakes),
 	pfix("J13", "coordinator", func(in ProjectIn) bool { return in.idle() && in.heartbeatDue() }, "no wake for heartbeat_minutes and coordinator is idle", AskHeartbeat),
+	pcond("J16", "engine", "running", func(in ProjectIn) bool { s, a := in.planReviewStep(); return s || a }, func(in ProjectIn) bool { s, _ := in.planReviewStep(); return s }, pdec("unreviewed tasks waiting and coordinator is idle: start plan reviewer", AskStartPlanReviewer), pdec("accept held plan", AskAcceptPlan)),
 	pfix("J14", "none", nil, "running"),
 }

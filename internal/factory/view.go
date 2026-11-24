@@ -24,6 +24,7 @@ type ProjectView struct {
 	Folder  string         `json:"folder,omitempty"`
 	Goal    string         `json:"goal,omitempty"`
 	Running bool           `json:"running"`
+	Status  string         `json:"status,omitempty"`
 	Counts  map[string]int `json:"counts,omitempty"`
 	Error   string         `json:"error,omitempty"`
 }
@@ -70,11 +71,16 @@ func ProjectsView(states []flow.State) []ProjectView {
 }
 
 func projectViewOf(s flow.State) ProjectView {
-	counts := map[string]int{}
+	counts, status := map[string]int{}, ""
 	for _, tv := range GraphViewOf(s, nil).Tasks {
 		counts[tv.Stage]++
 	}
-	return ProjectView{ID: s.Project.ID, Folder: s.Project.Folder, Goal: s.Project.Goal, Running: s.Project.Started, Counts: counts}
+	if n := len(s.Project.PlanReviews); n > 0 {
+		if pr := s.Project.PlanReviews[n-1]; pr.Accepted.IsZero() && pr.Verdict == "" && pr.Run != nil && flow.RunLive(pr.Run.RunID, pr.Run.Run) {
+			status = "Plan review"
+		}
+	}
+	return ProjectView{ID: s.Project.ID, Folder: s.Project.Folder, Goal: s.Project.Goal, Running: s.Project.Started, Status: status, Counts: counts}
 }
 
 var taskRows = func() map[string]flow.Row[flow.In] {
@@ -270,6 +276,8 @@ func taskWhy(t flow.Task, a *flow.Attempt, unmet []string, started bool, stage s
 		return "Waiting on " + strings.Join(unmet, ", ")
 	case t.HoldWhy != "":
 		return t.HoldWhy
+	case a == nil && t.Unreviewed:
+		return "Waiting on the plan review"
 	case r.ID == "N19b":
 		return "Not merged: checks got worse after the override card was made"
 	case r.ID == "N15" || r.ID == "N19":
