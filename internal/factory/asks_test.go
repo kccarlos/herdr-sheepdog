@@ -1701,3 +1701,194 @@ func TestProofsStoreSafetyAndPersistence(t *testing.T) {
 		}
 	})
 }
+
+// TestSayOnFinishedProjectRefused verifies finding 11: owner Say on a finished
+// project is refused with already_closed, names "different goal", holds no
+// wake, emits no change, and starts no coordinator.
+func TestSayOnFinishedProjectRefused(t *testing.T) {
+	t.Parallel()
+	h := newProjectHarness(t, "Goal 1")
+	h.pass() // J7 starts coord 1
+	coord1 := h.state().Project.RunID
+	h.edit(func(s *flow.State) {
+		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: done", Done: &flow.Merged{MergedCommit: "m1"}}}
+	})
+	h.finishThroughJ4(coord1)
+
+	sub := h.eng.Changes()
+	err := h.eng.Say(h.repo, "Please also add dark mode.")
+	if refusalCode(err) != flow.RefuseClosed {
+		t.Fatalf("Say on finished project = %v (code %q), want %q", err, refusalCode(err), flow.RefuseClosed)
+	}
+	if !strings.Contains(strings.ToLower(err.Error()), "different goal") {
+		t.Errorf("Say refusal message = %q, want it to mention \"different goal\"", err.Error())
+	}
+	if stray := drainChanges(sub); len(stray) != 0 {
+		t.Fatalf("refused Say emitted changes: %+v", stray)
+	}
+	if wakes := h.state().Project.Wakes; len(wakes) != 0 {
+		t.Fatalf("refused Say held wakes: %+v", wakes)
+	}
+
+	h.now = h.now.Add(time.Duration(h.state().Settings.CoordinatorGapMinutes+1) * time.Minute)
+	h.pass()
+	if len(h.runs) != 1 || h.state().Project.RunID != "" {
+		t.Fatalf("Say on finished project started a coordinator: runs=%d runID=%q", len(h.runs), h.state().Project.RunID)
+	}
+}
+
+// TestFinishCancelsOpenAsks verifies finding 11: when J4 finishes a project
+// with an open coordinator ask, that ask is cancelled with one EvAskCancel
+// change, and a subsequent Answer is refused already_closed with no wake held.
+func TestFinishCancelsOpenAsks(t *testing.T) {
+	t.Parallel()
+	w := newRestartWorld(t, "Finish cancels open asks")
+	w.pass() // J7 starts coord 1
+	coord1 := w.state().Project.RunID
+	w.applyPlan()
+
+	// Coordinator opens a gated ask with no task (N1 does not touch it).
+	askPayload := `{"kind":"release","question":"Tag v1.0.0 now?","options":["Yes, tag v1.0.0","Hold"],"recommend":"Yes, tag v1.0.0"}`
+	if err := w.eng.Report(w.coordTok, "ask", json.RawMessage(askPayload)); err != nil {
+		t.Fatalf("coordinator ask: %v", err)
+	}
+	open := w.eng.Asks(true)
+	if len(open) != 1 {
+		t.Fatalf("open asks before finish = %+v, want 1", open)
+	}
+	askID := open[0].ID
+
+	// Mint a valid owner proof while the ask is open so Answer tests the closed
+	// check rather than proof validation.
+	prf, err := w.eng.MintProof(askID, "Yes, tag v1.0.0", ProofInputTap, "dev-phone-1")
+	if err != nil {
+		t.Fatalf("MintProof: %v", err)
+	}
+
+	w.edit(func(s *flow.State) {
+		s.Tasks[0].Done = &flow.Merged{MergedCommit: "m1"}
+	})
+	sub := w.eng.Changes()
+
+	// Finish through J4: ask final journal, stop coordinator, log finished.
+	w.waitIdle(coord1)
+	w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+	w.now = w.now.Add(5 * time.Second)
+	w.pass()
+	w.waitIdle(coord1)
+	w.now = w.now.Add(15 * time.Second)
+	w.pass() // J4 logs finished and cancels open asks
+
+	var cancels []Change
+	for _, c := range drainChanges(sub) {
+		if c.Kind == flow.EvAskCancel && c.AskID == askID {
+			cancels = append(cancels, c)
+		}
+	}
+	if len(cancels) != 1 {
+		t.Fatalf("EvAskCancel changes for %s = %+v, want 1", askID, cancels)
+	}
+	if st := w.state(); len(st.Asks) != 1 || st.Asks[0].Status != flow.AskStatusCancelled {
+		t.Fatalf("state.json asks after finish = %+v, want 1 cancelled", st.Asks)
+	}
+	if got := w.eng.Asks(true); len(got) != 0 {
+		t.Fatalf("open asks after finish = %+v, want none", got)
+	}
+
+	// Answering the cancelled ask is refused already_closed and holds no wake.
+	err = w.eng.Answer(askID, "Yes, tag v1.0.0", prf)
+	if refusalCode(err) != flow.RefuseClosed {
+		t.Fatalf("Answer after finish = %v (code %q), want %q", err, refusalCode(err), flow.RefuseClosed)
+	}
+	if wakes := w.state().Project.Wakes; len(wakes) != 0 {
+		t.Fatalf("wakes after refused Answer = %+v, want none", wakes)
+	}
+
+	w.now = w.now.Add(time.Duration(w.state().Settings.CoordinatorGapMinutes+1) * time.Minute)
+	w.pass()
+	if st := w.state(); st.Project.RunID != "" || len(logRules(t, w.paths.Log(w.id), "J7")) != 1 {
+		t.Fatalf("coordinator restarted after finish + Answer: runID=%q j7=%+v", st.Project.RunID, logRules(t, w.paths.Log(w.id), "J7"))
+	}
+}
+
+// TestSayBeforeFinishReachesNextCoordinator pins finding 11's pre-finish Say
+// behavior: Say accepted while the coordinator works reaches the replacement
+// coordinator if the first is lost before J12 and the last task ends; and Say
+// accepted during the final journal turn is delivered before stop_coordinator.
+func TestSayBeforeFinishReachesNextCoordinator(t *testing.T) {
+	t.Parallel()
+
+	t.Run("lost_before_j12", func(t *testing.T) {
+		t.Parallel()
+		h := newProjectHarness(t, "Say before loss")
+		h.pass() // J7 starts coord 1
+		coord1 := h.state().Project.RunID
+		h.edit(func(s *flow.State) {
+			s.Tasks = []flow.Task{{ID: "T1", Title: "feat: open"}}
+		})
+		h.setCoordWorking(coord1)
+
+		const ownerWords = "Check the migration notes before closing."
+		if err := h.eng.Say(h.repo, ownerWords); err != nil {
+			t.Fatalf("Say while working: %v", err)
+		}
+
+		// Coordinator is lost before J12 delivers the wake, then the last task ends.
+		h.srv.Finish(coord1, "killed")
+		h.now = h.now.Add(15 * time.Second)
+		h.pass()
+		h.edit(func(s *flow.State) {
+			s.Tasks[0].Done = &flow.Merged{MergedCommit: "m1"}
+		})
+
+		h.now = h.now.Add(time.Duration(h.state().Settings.CoordinatorGapMinutes+1) * time.Minute)
+		h.pass() // J7 starts coord 2
+		coord2 := h.state().Project.RunID
+		if len(h.runs) != 2 || coord2 == "" || coord2 == coord1 {
+			t.Fatalf("replacement coordinator did not start: runs=%d runID=%q", len(h.runs), coord2)
+		}
+
+		h.coordIdleWithStatus(coord2, "idle") // J12 delivers held Say in first batch
+		sends := sendsTo(t, h.srv.Requests(), coord2)
+		if len(sends) != 1 || !strings.Contains(sends[0], ownerWords) {
+			t.Fatalf("coord2 first batch = %q, want 1 send containing %q", sends, ownerWords)
+		}
+	})
+
+	t.Run("during_final_journal_turn", func(t *testing.T) {
+		t.Parallel()
+		h := newProjectHarness(t, "Say during final journal")
+		h.pass() // J7 starts coord 1
+		coord1 := h.state().Project.RunID
+		h.edit(func(s *flow.State) {
+			s.Tasks = []flow.Task{{ID: "T1", Title: "feat: done", Done: &flow.Merged{MergedCommit: "m1"}}}
+		})
+
+		h.coordIdleWithStatus(coord1, "idle") // J4 asks final journal
+		h.setCoordWorking(coord1)
+
+		const ownerWords = "Also mention the follow-up PR."
+		if err := h.eng.Say(h.repo, ownerWords); err != nil {
+			t.Fatalf("Say during final journal turn: %v", err)
+		}
+
+		// Coordinator finishes its turn and goes idle -> J12 delivers Say before J4 stops it.
+		h.coordIdleWithStatus(coord1, "idle")
+		if h.state().Project.RunID != coord1 {
+			t.Fatalf("coordinator stopped before receiving Say during final journal turn: runID=%q", h.state().Project.RunID)
+		}
+		sends := sendsTo(t, h.srv.Requests(), coord1)
+		if len(sends) != 2 || !strings.Contains(sends[1], ownerWords) {
+			t.Fatalf("coord1 sends = %q, want final journal then %q", sends, ownerWords)
+		}
+
+		// After handling Say, coordinator goes idle and J4 stops it and finishes.
+		h.setCoordWorking(coord1)
+		h.coordIdleWithStatus(coord1, "idle")
+		h.now = h.now.Add(15 * time.Second)
+		h.pass()
+		if h.state().Project.RunID != "" || len(h.runs) != 1 {
+			t.Fatalf("after delivering Say and stopping: runs=%d runID=%q", len(h.runs), h.state().Project.RunID)
+		}
+	})
+}

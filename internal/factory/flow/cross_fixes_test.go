@@ -37,6 +37,30 @@ func TestVerify6WakesBeforeFinalJournal(t *testing.T) {
 	}
 }
 
+func TestJ4FinishedFactHoldsOverWakes(t *testing.T) {
+	tasks := []Task{{ID: "T1", Done: &Merged{MergedCommit: "m1"}}}
+	wakes := []Wake{{Key: "base_green@abc1234@1", Why: "base turned green"}}
+
+	// Fact set: J4 holds over held wakes and asks nothing (no J7 restart).
+	in := ProjectIn{
+		Project:  Project{Started: true, Finished: true, Wakes: wakes},
+		Tasks:    tasks,
+		Settings: DefaultSettings(),
+	}
+	r, d := FirstMatch(ProjectRows, in)
+	if r.ID != "J4" || len(d.Asked) != 0 {
+		t.Errorf("finished fact set with held wake: row %s asks %v, want J4 with nothing asked", r.ID, d.Asked)
+	}
+
+	// Fact unset (pin): a coordinator that ended before the finish with wakes held
+	// must still be restarted by J7 so J12 can deliver them before J4.
+	in.Finished = false
+	r, d = FirstMatch(ProjectRows, in)
+	if r.ID != "J7" || !slices.Equal(d.Asked, []string{AskStartCoordinator}) {
+		t.Errorf("finished fact unset with held wake: row %s asks %v, want J7 coordinator", r.ID, d.Asked)
+	}
+}
+
 func TestVerify6StaleIdleAfterDeliver(t *testing.T) {
 	s := DefaultSettings()
 	t0 := time.Date(2026, 11, 20, 12, 0, 0, 0, time.UTC)

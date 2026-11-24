@@ -599,3 +599,108 @@ func TestBaseRedCleanCancelStaysRed(t *testing.T) {
 		t.Fatalf("update-branch called after clean cancel on red base: %q", got)
 	}
 }
+
+// TestFinishedProjectClearsMainRed verifies finding 11 (round 2): when main_red
+// is active and the last task is dropped so the project finishes, a later green
+// base still clears main_red via observeBaseLocked without holding a base_green
+// wake, recording a base_green act, or starting a second coordinator.
+func TestFinishedProjectClearsMainRed(t *testing.T) {
+	t.Parallel()
+	h := newGitProjectHarness(t, "Main red then finish")
+	h.pass() // J7 starts coord 1
+	coord1 := h.state().Project.RunID
+	h.edit(func(s *flow.State) {
+		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: open", Parked: true}}
+	})
+	h.setCoordWorking(coord1)
+
+	// Base turns red and stays red past main_red_minutes -> main_red alert active.
+	redHead := commitBaseHead(t, h.repo, h.gh, "red1")
+	writeCountedBaseRun(t, h.gh, 101, redHead, "failure")
+	h.now = h.now.Add(15 * time.Second)
+	h.pass()
+	h.now = h.now.Add(time.Duration(h.state().Settings.MainRedMinutes+1) * time.Minute)
+	h.setCoordWorking(coord1)
+	if !h.state().Project.HasAlert(flow.AlertMainRed) {
+		t.Fatalf("expected main_red alert before finish: %+v", h.state().Project.Alerts)
+	}
+
+	// Drop the last task, deliver the pending base_red wake, and finish through J4.
+	h.edit(func(s *flow.State) {
+		s.Tasks[0].Dropped = &flow.Dropped{Why: "no longer needed"}
+	})
+	h.coordIdleWithStatus(coord1, "idle") // J12 delivers base_red wake
+	h.setCoordWorking(coord1)
+	h.finishThroughJ4(coord1)
+
+	if st := h.state(); len(h.runs) != 1 || st.Project.RunID != "" || !st.Project.HasAlert(flow.AlertMainRed) || len(st.Project.Wakes) != 0 {
+		t.Fatalf("after finish with main_red: runs=%d runID=%q alerts=%+v wakes=%+v", len(h.runs), st.Project.RunID, st.Project.Alerts, st.Project.Wakes)
+	}
+
+	// Base turns green on a new head -> main_red clears, no wake held, one run ever.
+	greenHead := commitBaseHead(t, h.repo, h.gh, "green1")
+	writeCountedBaseRun(t, h.gh, 102, greenHead, "success")
+	h.now = h.now.Add(time.Duration(h.state().Settings.CoordinatorGapMinutes+1) * time.Minute)
+	h.pass()
+	h.pass()
+
+	st := h.state()
+	if st.Project.HasAlert(flow.AlertMainRed) {
+		t.Fatalf("main_red did not clear after base turned green on finished project: %+v", st.Project.Alerts)
+	}
+	if len(st.Project.Wakes) != 0 {
+		t.Fatalf("base_green on finished project held wakes: %+v", st.Project.Wakes)
+	}
+	for _, a := range st.Project.Acts {
+		if strings.HasPrefix(a.Key, flow.AskWake+"@base_green@") {
+			t.Fatalf("base_green on finished project recorded wake act: %+v", a)
+		}
+	}
+	if len(h.runs) != 1 || st.Project.RunID != "" {
+		t.Fatalf("base_green on finished project started a second coordinator: runs=%d runID=%q", len(h.runs), st.Project.RunID)
+	}
+}
+
+// TestFinishedProjectClearsGitHubUnavailable pins finding 11 (round 2): when
+// github_unavailable is raised and the project finishes, observeBaseLocked
+// keeps running so the first good GitHub response clears github_unavailable.
+func TestFinishedProjectClearsGitHubUnavailable(t *testing.T) {
+	t.Parallel()
+	h := newGitProjectHarness(t, "GitHub outage then finish")
+	h.pass() // J7 starts coord 1
+	coord1 := h.state().Project.RunID
+	h.edit(func(s *flow.State) {
+		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: open", Parked: true}}
+	})
+	h.setCoordWorking(coord1)
+
+	writeGHFile(t, h.gh, "fail", "")
+	h.now = h.now.Add(15 * time.Second)
+	h.pass()
+	if !h.state().Project.HasAlert(flow.AlertGitHubUnavailable) {
+		t.Fatalf("expected github_unavailable before finish: %+v", h.state().Project.Alerts)
+	}
+
+	h.edit(func(s *flow.State) {
+		s.Tasks[0].Dropped = &flow.Dropped{Why: "no longer needed"}
+	})
+	h.finishThroughJ4(coord1)
+	if st := h.state(); len(h.runs) != 1 || st.Project.RunID != "" || !st.Project.HasAlert(flow.AlertGitHubUnavailable) {
+		t.Fatalf("after finish with github_unavailable: runs=%d runID=%q alerts=%+v", len(h.runs), st.Project.RunID, st.Project.Alerts)
+	}
+
+	// GitHub answers again -> github_unavailable clears, no wake held, one run ever.
+	_ = os.Remove(filepath.Join(h.gh, "fail"))
+	greenHead := commitBaseHead(t, h.repo, h.gh, "green1")
+	writeCountedBaseRun(t, h.gh, 201, greenHead, "success")
+	h.now = h.now.Add(time.Minute)
+	h.pass()
+
+	st := h.state()
+	if st.Project.HasAlert(flow.AlertGitHubUnavailable) {
+		t.Fatalf("github_unavailable did not clear on finished project when GitHub answered again: %+v", st.Project.Alerts)
+	}
+	if len(h.runs) != 1 || st.Project.RunID != "" || len(st.Project.Wakes) != 0 {
+		t.Fatalf("after github_unavailable cleared on finished project: runs=%d runID=%q wakes=%+v", len(h.runs), st.Project.RunID, st.Project.Wakes)
+	}
+}
