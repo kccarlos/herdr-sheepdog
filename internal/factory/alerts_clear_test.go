@@ -559,7 +559,7 @@ func TestTrial_SecondEpisodeLogsRaiseClearRaise(t *testing.T) {
 	if logs[2].Decision == "alert cleared: no_pool" {
 		t.Errorf("line 2 must be episode 2 raise, got %+v", logs[2])
 	}
-	if !(logs[0].Seq < logs[1].Seq && logs[1].Seq < logs[2].Seq) {
+	if logs[0].Seq >= logs[1].Seq || logs[1].Seq >= logs[2].Seq {
 		t.Errorf("expected strictly increasing sequence numbers, got %d, %d, %d", logs[0].Seq, logs[1].Seq, logs[2].Seq)
 	}
 }

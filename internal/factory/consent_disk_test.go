@@ -347,8 +347,9 @@ func (w *cdWorld) getDiskReadCalls() int {
 	return w.diskReadCalls
 }
 
-func (w *cdWorld) addQueuedTask(id string) {
+func (w *cdWorld) addQueuedTask() {
 	w.t.Helper()
+	const id = "T1"
 	s, err := LoadState(w.paths.State(w.id))
 	if err != nil {
 		w.t.Fatal(err)
@@ -446,7 +447,7 @@ func findAlertRow(rows []TaskStatus, kind string) (TaskStatus, bool) {
 // timeout followed by a good probe does not raise consent_prompt.
 func TestPR5b9_ConsentPromptTwoTimeoutsRaisesOnceAndClearsOnGoodProbe(t *testing.T) {
 	w := newCDWorld(t, "Consent timeout episode")
-	w.addQueuedTask("T1")
+	w.addQueuedTask()
 
 	// Single timeout followed by a good probe: must NOT raise consent_prompt.
 	w.setFolderProbe(cdProbeTimeout)
@@ -617,7 +618,7 @@ func TestPR5b9_ConsentPromptHCOutageAndInconclusiveNeverRaiseConsent(t *testing.
 // threshold.
 func TestPR5b9_DiskENOSPCStaysVisibleInMemoryAndClearsOnRecovery(t *testing.T) {
 	w := newCDWorld(t, "Disk ENOSPC in memory")
-	w.addQueuedTask("T1")
+	w.addQueuedTask()
 	w.setDisks(
 		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 40, Known: true},
 		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 95, Known: true},
@@ -690,7 +691,7 @@ func TestPR5b9_DiskENOSPCStaysVisibleInMemoryAndClearsOnRecovery(t *testing.T) {
 // new starts, and clears when writes succeed and readings are under threshold.
 func TestPR5b9_DiskGitENOSPCRaisesWithProjectVolumeAndClearsOnRecovery(t *testing.T) {
 	w := newCDWorld(t, "Git write ENOSPC")
-	w.addQueuedTask("T1")
+	w.addQueuedTask()
 	w.setDisks(
 		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 75, Known: true},
 		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
@@ -1184,7 +1185,7 @@ func TestPR5b9R2_DiskOneStepRecoveryAndPartialCommitLogging(t *testing.T) {
 // names consent_prompt, and exactly one factory.volume_slow event is logged.
 func TestTrial_ConsentSlowFolderWhileGitAnswersDoesNotRaise(t *testing.T) {
 	w := newCDWorld(t, "Slow folder while git answers")
-	w.addQueuedTask("T1")
+	w.addQueuedTask()
 	w.setFolderProbe(cdProbeTimeout)
 	w.setGitAnswersOnProbeTimeout(true)
 
@@ -1219,7 +1220,7 @@ func TestTrial_ConsentSlowFolderWhileGitAnswersDoesNotRaise(t *testing.T) {
 // within three passes, holds new starts, and logs once.
 func TestTrial_ConsentBlockedFolderStillRaises(t *testing.T) {
 	w := newCDWorld(t, "Blocked folder raises consent_prompt")
-	w.addQueuedTask("T1")
+	w.addQueuedTask()
 	w.setFolderProbe(cdProbeTimeout) // fake git on w.repo also times out
 
 	w.pass()

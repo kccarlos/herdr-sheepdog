@@ -24,6 +24,7 @@ type pendingAlert struct {
 	alert        flow.Alert
 	rule, dec    string
 	logSeq       int64
+	cleared      bool
 	stderrLogged bool
 }
 
@@ -37,7 +38,7 @@ func setProjectAlert(s *flow.State, key string, a flow.Alert) {
 func (e *Engine) mergeMemAlertsLocked(id string, s *flow.State) {
 	for k, p := range e.memAlerts {
 		if k.id == id {
-			if s.Project.Alerts[k.key].Kind == "" {
+			if !p.cleared && s.Project.Alerts[k.key].Kind == "" {
 				setProjectAlert(s, k.key, p.alert)
 			}
 			s.Seq = max(s.Seq, p.logSeq)
@@ -47,7 +48,7 @@ func (e *Engine) mergeMemAlertsLocked(id string, s *flow.State) {
 
 func (e *Engine) flushMemAlertsLocked(id string, s *flow.State) {
 	for k, p := range e.memAlerts {
-		if k.id == id && s.Project.Alerts[k.key].Kind != "" {
+		if k.id == id && !p.cleared && s.Project.Alerts[k.key].Kind != "" {
 			if p.logSeq != 0 {
 				delete(e.memAlerts, k)
 			} else {
@@ -60,15 +61,24 @@ func (e *Engine) flushMemAlertsLocked(id string, s *flow.State) {
 func (e *Engine) persistAlertLocked(id string, s *flow.State, key string, a flow.Alert, logRule, logDec string, clear bool) {
 	rule, dec, ak := cmp.Or(logRule, "alert"), cmp.Or(logDec, "alert raised: "+a.Kind), alertKey{id, key}
 	p, err := e.memAlerts[ak], error(nil)
-	if (!clear || p.alert.Kind != "") && p.logSeq == 0 {
+	s.Seq = max(s.Seq, p.logSeq)
+	appendLine := func(r, d, why string) error {
 		s.Seq++
-		if err = e.appendLogLocked(id, LogLine{Seq: s.Seq, At: time.Now(), Project: id, By: "engine", Rule: rule, Asked: []string{a.Kind}, Decision: dec, Why: a.Cause}); err != nil {
+		if aerr := e.appendLogLocked(id, LogLine{Seq: s.Seq, At: e.now(), Project: id, By: "engine", Rule: r, Asked: []string{a.Kind}, Decision: d, Why: why}); aerr != nil {
 			s.Seq--
-		} else {
-			p.logSeq = s.Seq
+			return aerr
 		}
-	} else {
-		s.Seq = max(s.Seq, p.logSeq)
+		p.logSeq = s.Seq
+		return nil
+	}
+	if (!clear || p.alert.Kind != "") && p.logSeq == 0 {
+		err = appendLine(rule, dec, a.Cause)
+	}
+	if err == nil && clear && !p.cleared {
+		mins := max(0, int(e.now().Sub(a.At)/time.Minute))
+		if err = appendLine(cmp.Or(a.Rule, "alert"), "alert cleared: "+a.Kind, fmt.Sprintf("%s; lasted %dm", a.Cause, mins)); err == nil {
+			p.cleared = true
+		}
 	}
 	if err == nil {
 		if clear {
@@ -85,16 +95,18 @@ func (e *Engine) persistAlertLocked(id string, s *flow.State, key string, a flow
 		}
 	}
 	e.logError("factory.commit_error", id, err)
-	if (clear || a.Kind != flow.AlertDisk) && p.alert.Kind == "" {
+	if !p.cleared && (clear || a.Kind != flow.AlertDisk) && p.alert.Kind == "" {
 		if p.logSeq != 0 {
 			s.Seq--
 		}
 		return
 	}
-	p.alert, p.rule, p.dec = a, rule, dec
-	if !p.stderrLogged {
-		_, _ = fmt.Fprintf(cmp.Or[io.Writer](e.Stderr, os.Stderr), "factory: alert %s (unpersisted): %s (%v)\n", a.Kind, a.Cause, err)
-		p.stderrLogged = true
+	if !p.cleared {
+		p.alert, p.rule, p.dec = a, rule, dec
+		if !p.stderrLogged {
+			_, _ = fmt.Fprintf(cmp.Or[io.Writer](e.Stderr, os.Stderr), "factory: alert %s (unpersisted): %s (%v)\n", a.Kind, a.Cause, err)
+			p.stderrLogged = true
+		}
 	}
 	e.memAlerts[ak] = p
 }
@@ -111,7 +123,7 @@ func (e *Engine) reconcileAlertLocked(id string, s *flow.State, key string, acti
 		setProjectAlert(s, key, a)
 		delete(e.memAlerts, ak)
 		e.persistAlertLocked(id, s, key, a, logRule, logDec, false)
-	} else if p, up := e.memAlerts[ak]; up && !e.storeENOSPC[id] {
+	} else if p, up := e.memAlerts[ak]; up && !p.cleared && !e.storeENOSPC[id] {
 		e.persistAlertLocked(id, s, key, cur, p.rule, p.dec, false)
 	}
 }
@@ -214,10 +226,11 @@ func (e *Engine) observeCoordSignInLocked(ctx context.Context, id string, s *flo
 		if runSignedOut {
 			s.Project.Acts = append(s.Project.Acts, flow.Act{Key: "j5@" + flow.CoordStuckKey(run), Result: "done", At: now})
 		}
-		if delete(s.Project.Alerts, flow.AlertAgentsDown); len(s.Project.Alerts) == 0 {
-			s.Project.Alerts = nil
+		if _, ok := s.Project.Alerts[flow.AlertAgentsDown]; ok {
+			e.reconcileAlertLocked(id, s, flow.AlertAgentsDown, false, flow.Alert{}, "", "")
+		} else if runSignedOut {
+			e.saveLocked(id, *s)
 		}
-		e.saveLocked(id, *s)
 		return false
 	}
 	raiseJ5(heldCLI)
@@ -288,12 +301,22 @@ func (e *Engine) observeConsentLocked(ctx context.Context, id string, s *flow.St
 		return terr
 	}
 	prev := e.consentStreaks[id]
+	streak := prev == badKind || badKind == "timeout" && prev == "slow"
 	e.consentStreaks[id] = badKind
-	if prev == badKind || s.Project.HasAlert(flow.AlertConsentPrompt) {
+	if streak && (badKind != "timeout" || e.git.Stalled(s.Project.Folder)) || s.Project.HasAlert(flow.AlertConsentPrompt) {
 		home, _ := os.UserHomeDir()
 		prompt, fix := consentPrompt(home, s.Project.Folder)
-		cause := fmt.Sprintf("project folder %s %s twice in herdr-core (%s)", s.Project.Folder, map[string]string{"timeout": "timed out", "blank": "returned blank"}[badKind], prompt)
+		cause := fmt.Sprintf("project folder %s returned blank twice in herdr-core (%s)", s.Project.Folder, prompt)
+		if badKind == "timeout" {
+			cause = fmt.Sprintf("project folder %s did not answer twice in herdr-core: the volume is stalling, or a macOS prompt is waiting (%s)", s.Project.Folder, prompt)
+			fix += "; if no prompt is showing, the volume is slow and this clears by itself"
+		}
 		e.reconcileAlertLocked(id, s, flow.AlertConsentPrompt, true, flow.Alert{Kind: flow.AlertConsentPrompt, Cause: cause, Fix: fix, At: now, Rule: "J3"}, "J3", "")
+	} else if badKind == "timeout" && streak {
+		e.consentStreaks[id] = "slow"
+		if prev == "timeout" {
+			e.logEvent("factory.volume_slow", map[string]string{"project": id, "folder": s.Project.Folder})
+		}
 	}
 	return nil
 }
