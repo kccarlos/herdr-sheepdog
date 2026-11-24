@@ -636,7 +636,7 @@ var TaskRows = []Row[In]{
 	}},
 	{ID: "N33", WaitsOn: "CI; then the worker", Stage: "ci", When: ciReady(all(checksRed, notBehindOrUpdated)), Then: func(in In) Decision {
 		h := headH(in)
-		if asks, wait := rerunOrWait(in, h); !prBehindBase(in) && (len(asks) > 0 || wait) {
+		if asks, wait := rerunOrWait(in, h); len(asks) > 0 || wait {
 			return say("checks red: re-run failed jobs, or wait for the re-run or for checks still running", asks)(in)
 		}
 		var tells []string
@@ -651,7 +651,7 @@ var TaskRows = []Row[In]{
 			return say("a CI job was stopped by its own time limit or for an unread reason ("+string(in.Facts.PR.Checks)+")",
 				once(in.acts(), key(AskWake, "checks_stopped", "limit", h)))(in)
 		}
-		if asks, wait := rerunOrWait(in, h); !prBehindBase(in) && (len(asks) > 0 || wait) {
+		if asks, wait := rerunOrWait(in, h); len(asks) > 0 || wait {
 			return say("checks cancelled from outside: re-run, or wait for the re-run or for checks still running", asks)(in)
 		}
 		return say("checks cancelled from outside with no re-runs left", once(in.acts(), key(AskWake, "checks_stopped", "external", h)))(in)
@@ -869,9 +869,9 @@ func ciRuns(in In) []string {
 
 // rerunOrWait waits while a check runs (a re-run of an unfinished run is
 // refused). Else it asks one re-run per failing run with flake_reruns left
-// for that run at H (a failed request counts), keyed by the run's red jobs,
-// and waits while a done re-run still reads those jobs red, at most
-// checks_grace_minutes from the request.
+// for that run at H (a failed request counts), never on a behind PR, keyed by
+// the run's red jobs, and waits while a done re-run still reads those jobs red,
+// at most checks_grace_minutes from the request.
 func rerunOrWait(in In, h string) (asks []string, wait bool) {
 	if in.Facts.PR.Running || in.Facts.PR.ChecksUnread && in.Now.Sub(in.Facts.PR.HeadSince) < checksGrace(in) {
 		return nil, true // H's runs unread: never a re-run; tell or wake after the grace
@@ -892,7 +892,7 @@ func rerunOrWait(in In, h string) (asks []string, wait bool) {
 		}
 		if a := LastAct(in.acts(), k); a != nil {
 			wait = wait || a.Result == "done" && in.Now.Sub(a.At) < checksGrace(in)
-		} else if run != "none" && spent < in.Settings.FlakeReruns {
+		} else if !prBehindBase(in) && run != "none" && spent < in.Settings.FlakeReruns {
 			asks = append(asks, k)
 		}
 	}
