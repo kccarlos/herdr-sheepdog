@@ -30,6 +30,12 @@ type factoryAsker interface {
 	Answer(askID, option string, proof factory.AnswerProof) error
 }
 
+// factorySettings is the optional half of Factory backing settings views and proposals.
+type factorySettings interface {
+	SettingRows(project string) ([]flow.SettingRow, error)
+	ProposeSetting(project, name, value, deviceID string) (flow.Ask, error)
+}
+
 // handleFactory serves POST /api/factory/{start,stop,report}. A start or stop
 // carrying a run's token goes to the engine's acceptance step, which refuses
 // it (design.md 7.2).
@@ -160,6 +166,43 @@ func (s *Server) handleFactoryAskAnswer(w http.ResponseWriter, r *http.Request) 
 	}
 	s.log.Log(logSource, "web.factory.ask_answered", "", map[string]any{"ask_id": askID, "device_id": dev})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "ask_id": askID, "device_id": dev})
+}
+
+func (s *Server) handleFactorySettings(w http.ResponseWriter, r *http.Request) {
+	id, dev := strings.TrimSpace(r.PathValue("id")), deviceOf(r)
+	if r.Method == http.MethodPost && (dev == "" || dev == localDevice) {
+		writeJSON(w, http.StatusForbidden, map[string]string{"code": "proof_required", "error": "proof_required"})
+		return
+	}
+	fs, ok := s.deps.Factory.(factorySettings)
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "factory is not available")
+		return
+	}
+	if r.Method == http.MethodPost {
+		var req struct{ Name, Value string }
+		if err := readJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, `want {"name": "…", "value": "…"}`)
+			return
+		}
+		ask, err := fs.ProposeSetting(id, req.Name, req.Value, dev)
+		if err != nil {
+			writeFactoryRefusal(w, err)
+			return
+		}
+		s.log.Log(logSource, "web.factory.setting_proposed", "", map[string]any{"project": id, "ask_id": ask.ID, "name": ask.Set.Name, "device_id": dev})
+		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "ask": ask})
+		return
+	}
+	if r.PathValue("id") != "" && id == "" {
+		writeError(w, http.StatusNotFound, factory.ErrProjectNotFound.Error())
+	} else if rows, err := fs.SettingRows(id); errors.Is(err, factory.ErrProjectNotFound) {
+		writeError(w, http.StatusNotFound, err.Error())
+	} else if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+	} else {
+		writeJSON(w, http.StatusOK, map[string]any{"protocol": 1, "rows": append([]flow.SettingRow{}, rows...)})
+	}
 }
 
 func writeFactoryRefusal(w http.ResponseWriter, err error) {

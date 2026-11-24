@@ -1,6 +1,7 @@
 package flow
 
 import (
+	"cmp"
 	"fmt"
 	"regexp"
 	"slices"
@@ -18,8 +19,21 @@ const (
 	GateOptionMerge, GateOptionHold                                                                              = "Merge", "Hold"
 	N24OptionDrop, N24OptionContinue                                                                             = "Drop", "Continue"
 	OverrideOptionMerge, OverrideOptionCancel                                                                    = "Yes, merge now", "No, wait"
+	RuleOptionSave, RuleOptionKeep                                                                               = "Save", "Keep current"
 	AskedByN24, AskedByN31                                                                                       = "N24", "N31"
 )
+
+// SettingChange is the typed setting mutation on an engine-opened rule ask (design.md 10.1 SE1).
+type SettingChange struct {
+	Name  string `json:"name"`
+	Value string `json:"value"`
+	Was   string `json:"was"`
+}
+
+// RuleQuestion formats the read-back question for an engine-opened setting proposal (SE1, SE3).
+func RuleQuestion(c SettingChange) string {
+	return fmt.Sprintf("This project: %s %s (now %s). Save?", settingLabel(c.Name), cmp.Or(c.Value, "empty"), cmp.Or(c.Was, "empty"))
+}
 
 // OverrideTarget is one task bound into an engine-filled override card (design.md 4.3b, plan.md 7.1).
 type OverrideTarget struct {
@@ -43,6 +57,7 @@ type Ask struct {
 	Task       string           `json:"task,omitempty"`
 	Head       string           `json:"head,omitempty"`
 	Targets    []OverrideTarget `json:"targets,omitempty"`
+	Set        *SettingChange   `json:"set,omitempty"`
 	AskedBy    string           `json:"asked_by,omitempty"`
 	RunID      string           `json:"run_id,omitempty"`
 	At         time.Time        `json:"at"`
@@ -66,7 +81,7 @@ var (
 // DelegableAsk reports whether a delegation rule may answer a (design.md 4.3b, 7.1).
 // Slice 14's A1 must call this check.
 func DelegableAsk(a Ask) bool {
-	return a.Kind != KindOverride
+	return a.Kind != KindOverride && a.Kind != KindRule
 }
 
 // StepAsk applies pure ask table rows A2–A5 (design.md 7.1).
@@ -81,8 +96,14 @@ func StepAsk(a Ask, ev AskEvent, now time.Time) (Ask, string, Decision) {
 		if ev.By == "rule" && !DelegableAsk(a) {
 			return a, "", Decision{Why: RefuseNotDelegable}
 		}
+		var asked []string
+		if a.RunID != "" && a.AskedBy != RoleCoordinator {
+			asked = []string{AskDeliverAnswer}
+		} else if a.Set == nil {
+			asked = []string{AskWake}
+		}
 		a.Status, a.Answer, a.Why, a.AnsweredBy, a.AnsweredAt, a.ProofID, a.DeviceID = AskStatusAnswered, ev.Answer, ev.Why, ev.By, now, ev.ProofID, ev.DeviceID
-		return a, "A3", Decision{Asked: []string{map[bool]string{false: AskWake, true: AskDeliverAnswer}[a.RunID != "" && a.AskedBy != RoleCoordinator]}, Why: "ask answered"}
+		return a, "A3", Decision{Asked: asked, Why: "ask answered"}
 	case a.Status == AskStatusOpen && ev.Kind == EvAskCancel:
 		a.Status = AskStatusCancelled
 		return a, "A4", Decision{Why: "ask cancelled"}

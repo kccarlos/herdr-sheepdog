@@ -61,6 +61,10 @@ func (e *Engine) Asks(open bool) []flow.Ask {
 		for _, a := range s.Asks {
 			if !open || a.Status == flow.AskStatusOpen {
 				a.Project, a.Folder, a.Options, a.Targets = cmp.Or(a.Project, id), cmp.Or(a.Folder, s.Project.Folder), slices.Clone(a.Options), slices.Clone(a.Targets)
+				if a.Set != nil {
+					cp := *a.Set
+					a.Set = &cp
+				}
 				out = append(out, a)
 			}
 		}
@@ -265,6 +269,21 @@ func (e *Engine) answerAskLocked(id string, s *flow.State, ai int, option, why, 
 	if !ok {
 		return e.refuse(id, "invalid_option", fmt.Sprintf("%q is not one of ask %q's options.", option, a.ID))
 	}
+	decText := ""
+	if a.Set != nil && by != owner {
+		return e.refuse(id, "proof_required", "Only the owner may answer a setting ask.")
+	} else if a.Set != nil && resolved == flow.RuleOptionSave {
+		before := s.Settings.Rows()
+		bi := slices.IndexFunc(before, func(r flow.SettingRow) bool { return r.Name == a.Set.Name })
+		if bi < 0 {
+			return e.refuse(id, "unknown_setting", fmt.Sprintf("Unknown setting %q.", a.Set.Name))
+		}
+		nextSettings, err := s.Settings.With(a.Set.Name, a.Set.Value)
+		if err != nil {
+			return e.refuse(id, "out_of_range", err.Error())
+		}
+		s.Settings, decText = nextSettings, fmt.Sprintf("saved %s %s (was %s)", a.Set.Name, cmp.Or(a.Set.Value, "empty"), cmp.Or(before[bi].Value, "empty"))
+	}
 	next, row, dec := flow.StepAsk(a, flow.AskEvent{Kind: flow.EvAskAnswer, Answer: resolved, Why: why, By: by, ProofID: proof.ID, DeviceID: proof.DeviceID}, now)
 	msg := fmt.Sprintf("Answer to %s: %s", next.ID, next.Answer) + map[bool]string{true: " — " + next.Why}[next.Why != ""]
 	input := map[string]any{"verb": "answer", "ask": next.ID, "option": next.Answer, "why": next.Why, "proof_id": next.ProofID, "device_id": next.DeviceID}
@@ -311,7 +330,7 @@ func (e *Engine) answerAskLocked(id string, s *flow.State, ai int, option, why, 
 			}
 		}
 	}
-	return e.commitChangeLocked(id, s, LogLine{By: next.AnsweredBy, Task: next.Task, Input: input, Rule: row, Asked: dec.Asked, Decision: "answered " + next.ID, Why: next.Answer}, Change{Kind: "ask_answer", AskID: next.ID, Task: next.Task})
+	return e.commitChangeLocked(id, s, LogLine{By: next.AnsweredBy, Task: next.Task, Input: input, Rule: row, Asked: dec.Asked, Decision: cmp.Or(decText, "answered "+next.ID), Why: next.Answer}, Change{Kind: "ask_answer", AskID: next.ID, Task: next.Task})
 }
 
 func (e *Engine) emitOverrideResultsLocked(id string, s *flow.State, now time.Time) {

@@ -80,6 +80,10 @@ When you want to merge a ready task without waiting for review or CI, tell the c
 
 An approved override applies only to that exact commit (or clean base merges ahead of it). It always needs your confirmation — it cannot be auto-approved by a rule — and cancels itself if CI checks become worse than what the card showed before the merge runs. Once the merge finishes or stops, sheepdog announces the result by voice and notification.
 
+### Project settings
+
+Number and choice settings live per project in `state.json` ([CONFIG.md](../CONFIG.md#factory-settings)). When a setting change is proposed from a paired browser session, the engine opens a gated **rule** ask that reads back the new and current values (*"This project: review rounds 3 (now 2). Save?"*) with **Save** (recommended) and **Keep current**. Answering **Save** with your owner proof writes the setting and takes effect on the next pass without restarting running agents.
+
 ## Quiet by default
 
 While the factory runs, routine worker, reviewer, and coordinator transitions are silenced so they do not interrupt your voice session or phone notifications. Only owner asks, override results, and a coordinator stuck on a terminal prompt reach voice and phone pushes. Project alerts — such as exhausted quota, a full disk, a macOS folder-access prompt, a red base branch, stalled CI, or a signed-out or stopped coordinator — appear in `sheepdog factory status` and `sheepdog factory log` (stopping alerts pause new work until resolved and do not send voice or phone alerts).
