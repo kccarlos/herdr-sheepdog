@@ -711,6 +711,15 @@ func TestTrial_CIStalledScopeChangeLogsClearBeforeSecondRaise(t *testing.T) {
 
 	assertAlertLogMatchesState(t, w.paths.State(w.id), w.paths.Log(w.id), flow.AlertCIStalled)
 	logs := alertEpisodeLogs(t, w.paths, w.repo, flow.AlertCIStalled)
+	// Count only the episode lines (raise and clear), not the coordinator wake lines
+	// that also name ci_stalled in their asked keys.
+	var episode []LogLine
+	for _, l := range logs {
+		if strings.HasPrefix(l.Decision, "alert raised: ") || strings.HasPrefix(l.Decision, "alert cleared: ") {
+			episode = append(episode, l)
+		}
+	}
+	logs = episode
 	if len(logs) != 3 {
 		t.Fatalf("expected 3 ci_stalled episode lines [raise(c1), clear(c1), raise(c2)], got %d: %+v", len(logs), logs)
 	}

@@ -68,6 +68,12 @@ func (e *Engine) reconcileAlertLocked(id string, s *flow.State, key string, acti
 			}
 		}
 	} else if cur, ok := s.Project.Alerts[key]; !ok || cur.Scope != a.Scope {
+		if ok {
+			e.reconcileAlertLocked(id, s, key, false, flow.Alert{}, "", "")
+			if !e.cleanLocked(id) {
+				return
+			}
+		}
 		a.At = a.At.UTC()
 		rule, dec := cmp.Or(logRule, "alert"), cmp.Or(logDec, "alert raised: "+a.Kind)
 		setProjectAlert(s, key, a)
