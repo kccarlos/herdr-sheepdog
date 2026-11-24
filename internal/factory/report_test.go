@@ -731,10 +731,12 @@ func TestReportReadyRejectRefusedWhenLadderSaysRecap(t *testing.T) {
 	}
 	for name, rounds := range cases {
 		t.Run(name, func(t *testing.T) {
+			settings := flow.DefaultSettings()
+			settings.RetrosPerTask = 0 // disable retro so a 3-round streak hits L12 recap
 			st := flow.State{
 				Seq:      1,
 				Project:  flow.Project{ID: projID, Folder: repo, Started: true},
-				Settings: flow.DefaultSettings(),
+				Settings: settings,
 				Tasks: []flow.Task{{
 					ID: "T1", Title: "feat: x",
 					Attempts: []flow.Attempt{{SizeCap: 100,

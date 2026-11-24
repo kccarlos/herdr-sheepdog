@@ -78,7 +78,7 @@ exec %q "$@"
 	// Resume from the captured state, as if the daemon stopped during the call.
 	l.edit(func(s *flow.State) { *s = st })
 	l.eng = newTestEngine(t, l.paths, l.client)
-	l.writeMerged(mergedSHA)
+	l.writeMerged()
 	l.pass()
 	if got := l.state().Tasks[0].Done; got == nil || got.MergedCommit != mergedSHA {
 		t.Fatalf("after merged snapshot on restart: done=%+v", got)

@@ -133,8 +133,8 @@ func (l *landing) logLines() []LogLine {
 	return out
 }
 
-func (l *landing) writeMerged(commit string) {
-	body := `{"number":7,"state":"MERGED","headRefOid":"` + l.c1 + `","mergeable":"UNKNOWN","statusCheckRollup":` + greenRollup + `,"baseRefName":"main","mergeCommit":{"oid":"` + commit + `"}}`
+func (l *landing) writeMerged() {
+	body := `{"number":7,"state":"MERGED","headRefOid":"` + l.c1 + `","mergeable":"UNKNOWN","statusCheckRollup":` + greenRollup + `,"baseRefName":"main","mergeCommit":{"oid":"` + mergedSHA + `"}}`
 	if err := os.WriteFile(filepath.Join(l.gh, "view.json"), []byte(body), 0o600); err != nil {
 		l.t.Fatal(err)
 	}
@@ -220,7 +220,7 @@ func TestLandMergesOncePinnedDoneOnlyOnMergedSnapshot(t *testing.T) {
 		t.Fatalf("open snapshot after merge call: done=%+v merges=%q", s.Tasks[0].Done, ghCalls(t, l.gh, "pr merge"))
 	}
 
-	l.writeMerged(mergedSHA)
+	l.writeMerged()
 	l.pass() // N2
 	if s := l.state(); s.Tasks[0].Done == nil || s.Tasks[0].Done.MergedCommit != mergedSHA {
 		t.Fatalf("after merged snapshot: done=%+v", s.Tasks[0].Done)
@@ -260,7 +260,7 @@ func TestLandMergeErrorStillDoneOnMergedSnapshot(t *testing.T) {
 	if len(ghCalls(t, l.gh, "pr merge")) != 1 || flow.Count(a.Acts, "merge@"+l.c1) != 1 || flow.Done(a.Acts, "merge@"+l.c1) || len(a.Accepts) != 1 {
 		t.Fatalf("failed merge: acts=%+v accepts=%+v merges=%q", a.Acts, a.Accepts, ghCalls(t, l.gh, "pr merge"))
 	}
-	l.writeMerged(mergedSHA)
+	l.writeMerged()
 	l.pass()
 	if d := l.state().Tasks[0].Done; d == nil || d.MergedCommit != mergedSHA {
 		t.Fatalf("merged snapshot after a failed merge call: done=%+v", d)

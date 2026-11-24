@@ -25,6 +25,11 @@ func recordAccept(t flow.Task, a *flow.Attempt, settings flow.Settings, f flow.F
 	for _, r := range flow.PassingCovering(*a, h) {
 		rounds = append(rounds, r.N)
 	}
+	if !byOverride && len(rounds) == 0 {
+		if r := flow.NewestCovering(*a, h); r != nil && r.Kind == flow.RoundRetro && r.Verdict == flow.VerdictShip {
+			rounds = append(rounds, r.N)
+		}
+	}
 	ac := flow.Accept{Head: h, By: "bar", Rounds: rounds}
 	msg := fmt.Sprintf("accepted %s by the bar (rounds %v)", h, rounds)
 	if byOverride {

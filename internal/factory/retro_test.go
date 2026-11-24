@@ -256,7 +256,7 @@ func TestL6RetroShipMergesWhenPassingCoveringEmpty(t *testing.T) {
 			t.Fatalf("gh pr merge calls = %q, want 1 merge pinned to %s", merges, l.c1)
 		}
 
-		l.writeMerged(mergedSHA)
+		l.writeMerged()
 		l.pass() // N2 marks done
 		if d := l.state().Tasks[0].Done; d == nil || d.MergedCommit != mergedSHA {
 			t.Fatalf("after merged snapshot: Done = %+v, want %s", d, mergedSHA)

@@ -105,6 +105,20 @@ func taskFacts(t flow.Task, f flow.Facts, now time.Time) string {
 		if rc.Trigger == flow.TriggerTime {
 			out += fmt.Sprintf("; working time %s", flow.WorkingTime(t).Truncate(time.Minute))
 		}
+		if n := len(t.Retros); n > 0 {
+			ret := t.Retros[n-1]
+			rv, rp := "none", "none"
+			if ret.Attempt >= 1 && ret.Attempt <= len(t.Attempts) {
+				for _, r := range t.Attempts[ret.Attempt-1].Rounds {
+					if r.N == ret.Round && r.Kind == flow.RoundRetro {
+						rv, rp = cmp.Or(r.Verdict, "none"), cmp.Or(r.ReportPath, "none")
+						break
+					}
+				}
+			}
+			out += fmt.Sprintf("; retro r%d %s (cause %s; coordinator %s: %s; report %s)",
+				ret.Round, rv, ret.Cause, ret.CoordinatorChangeKind, ret.CoordinatorChange, rp)
+		}
 	}
 	return out
 }

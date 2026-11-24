@@ -628,34 +628,41 @@ func TestRetroAmendRequestAndAnswerAsk(t *testing.T) {
 // scripts/e2e/factory-retro.sh --mode launch must be implemented (no TODO(12.2)
 // stub exiting 2), configure models.retro with agy/gemini-4-carbon-high, and
 // assert the 12.2 launch -> "In retro" -> M4 N25/N6 path.
-func TestFactoryRetroScriptLaunchModeImplemented(t *testing.T) {
+func TestFactoryRetroScriptRecapAndShipModesImplemented(t *testing.T) {
+	// 12.3 replaced --mode regression and --mode launch with --mode recap and --mode ship.
 	scriptPath := filepath.Join("..", "..", "scripts", "e2e", "factory-retro.sh")
 	raw, err := os.ReadFile(scriptPath)
 	if err != nil {
 		t.Fatalf("read %s: %v", scriptPath, err)
 	}
 	src := string(raw)
-	if strings.Contains(src, "TODO(12.2)") {
-		t.Errorf("%s still contains TODO(12.2) stub", scriptPath)
-	}
-	for _, want := range []string{"gemini-4-carbon-high", "start_retro", "In retro", "retro_unavailable"} {
-		if !strings.Contains(src, want) {
-			t.Errorf("%s missing %q required for --mode launch", scriptPath, want)
+	for _, stub := range []string{"TODO(12.2)", "TODO(12.3)"} {
+		if strings.Contains(src, stub) {
+			t.Errorf("%s still contains %s stub", scriptPath, stub)
 		}
 	}
-	if zshPath, err := exec.LookPath("zsh"); err == nil {
-		cmd := exec.Command(zshPath, scriptPath, "--mode", "launch", t.TempDir())
-		out, runErr := cmd.CombinedOutput()
+	for _, want := range []string{"start_retro", "In retro", "open_recap@review", "N22"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("%s missing %q required for --mode recap and --mode ship", scriptPath, want)
+		}
+	}
+	zshPath, err := exec.LookPath("zsh")
+	if err != nil {
+		return
+	}
+	for _, mode := range []string{"recap", "ship"} {
+		out, runErr := exec.Command(zshPath, scriptPath, "--mode", mode, t.TempDir()).CombinedOutput()
 		var exitErr *exec.ExitError
 		if !errors.As(runErr, &exitErr) {
-			t.Fatalf("factory-retro.sh --mode launch on empty dir: err=%v out=%s", runErr, out)
+			t.Fatalf("factory-retro.sh --mode %s on an empty dir: err=%v out=%s", mode, runErr, out)
 		}
-		if exitErr.ExitCode() == 2 || strings.Contains(string(out), "TODO(12.2)") {
-			t.Fatalf("factory-retro.sh --mode launch hit TODO(12.2) stub (exit %d): %s", exitErr.ExitCode(), out)
+		if exitErr.ExitCode() == 2 || strings.Contains(string(out), "not implemented") {
+			t.Errorf("--mode %s is not implemented: exit %d out=%s", mode, exitErr.ExitCode(), out)
 		}
-		if exitErr.ExitCode() != 1 || !strings.Contains(string(out), "missing executable") {
-			t.Fatalf("factory-retro.sh --mode launch on empty dir exited %d, want preflight exit 1 (missing executable): %s", exitErr.ExitCode(), out)
-		}
+	}
+	out, runErr := exec.Command(zshPath, scriptPath, "--mode", "launch", t.TempDir()).CombinedOutput()
+	if runErr == nil || !strings.Contains(string(out), "Unknown mode") {
+		t.Errorf("--mode launch should be refused as unknown after 12.3: err=%v out=%s", runErr, out)
 	}
 }
 
