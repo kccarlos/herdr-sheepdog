@@ -2,7 +2,7 @@
 
 Current `MARKETING_VERSION` in `ios/project.yml` is **`0.2.12`** (latest
 TestFlight tag `ios-v0.2.12`). Major features shipped since the 0.1.x notes
-below include paired-device pinned TLS (`design/security.md`), the iPhone
+below include paired-device pinned TLS ([`security.md`](../../../docs/dev/design/security.md)), the iPhone
 redesign and iPad sidebar/split/multi-window layout (`IPadRootView.swift`),
 several paired computers (`ComputerFleet`), live terminal windows (`/term`,
 SwiftTerm), Spaces and worktrees, read-only file browsing (`internal/files`),
@@ -100,9 +100,8 @@ daemon (`PairingE2ETests`, `PairingLinkUITests`).
 - **AirPods and audio route changes.** This includes AirPods going in or
   out mid-session and whether the needs-you chime reaches them.
 - **AskUserQuestion with several questions** in one prompt.
-- **The daemon's 2026-10-03 fixes** (voice session refresh, unheard
-  pushes, spoken agent names) on the phone: see the daemon's
-  `docs/dev/status.md`.
+- **Voice session refresh, unheard pushes, and spoken agent names** on a
+  real phone (shipped in the daemon on 2026-10-03).
 
 ## Known rough edges
 
@@ -120,14 +119,14 @@ xcodegen generate
 xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -skipPackagePluginValidation build test
 ```
 
-The unit suite (`SheepdogKitTests`) has about 650 tests. `LiveDaemonTests` and
+The unit suite (`SheepdogKitTests`) has about 1,250 tests. `LiveDaemonTests` and
 the UI tests that need a daemon skip themselves when none answers on `127.0.0.1:7799`.
 
 **In CI** (`.github/workflows/ios.yml`, GitHub-hosted Macs) a smoke job and
 five shards split the suite (the first Mac job to claim the build compiles
 the app and daemon once and shares them as an artifact, plus a `macos` job
 runs `SheepdogKitMacTests`); which changes run which jobs is in
-[development.md](../../../docs/dev/development.md#cicd). Each test job
+[development.md](../../../docs/dev/development.md#cicd). Each iPhone test job
 starts both fixture daemons on free ports with
 `scripts/fixture-daemons.sh start` (it also seeds one exchange and restarts
 the main daemon, so the history has a restart divider), and passes the

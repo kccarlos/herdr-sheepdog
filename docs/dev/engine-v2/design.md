@@ -1023,15 +1023,15 @@ Sources: [notes/go-surface-notes.md](notes/go-surface-notes.md) (historical pre-
 
 | Code | Lines | State on `main` |
 |---|---|---|
-| `internal/factory/proof.go` | ~100 | **Rebuilt in slice 6.** The engine mints and verifies `AnswerProof` in process (`MintProof`, `Answer`, stored in `proofs.json`) |
-| `internal/factory/doctor.go` | ~1,258 | **Kept and trimmed for v2:** old engine and Python checks removed; `StartChecks` runs at `Engine.Start` (J1, slice 8.1); "Running now" summary from the sweep remains later |
+| `internal/factory/proof.go` | ~80 | **Rebuilt in slice 6.** The engine mints and verifies `AnswerProof` in process (`MintProof`, `Answer`, stored in `proofs.json`) |
+| `internal/factory/doctor.go`, `startcheck.go` | ~1,258 / ~807 | **Kept and trimmed for v2:** old engine and Python checks removed from `doctor.go`; `StartChecks` lives in `startcheck.go` and runs at `Engine.Start` (J1, slice 8.1); "Running now" summary from the sweep remains later |
 | `internal/factory/contract.go` | — | **Gone from `main`.** Ask, view and refusal shapes live in `flow` and `factory` |
 | `internal/factory/client.go` | — | **Gone from `main`.** Replaced by `Engine`'s Go methods |
 | `internal/factory/tick.go` | — | **Gone from `main`.** The 15 s loop runs in `internal/factory/engine.go` |
 | `internal/factory/engine.go`, `python.go`, `factory_embed.go` | — | **Old Python glue gone from `main`** (`internal/factory/engine.go` is the v2 engine) |
 | `internal/web/factory.go`, the loopback proof route | — | **Loopback proof route gone from `main`** (`internal/web/factory.go` serves v2's nine `/api/factory/*` routes) |
 | `internal/supervisor/factory.go` | ~454 | **Rebuilt in slice 6 + O25/O32:** bridges `Engine.Changes()` to `fask-` cards, O25 live voice answers, override results, and O32 no-quick-reply pushes |
-| `internal/herdr/factory.go`, `supervisor/factory_quiet.go` | — | **Rebuilt in slice 6.** Coordinator rule follows the addendum (`blocked` speaks; `done` and `idle` are silent; non-coordinator factory roles silent) |
+| `internal/herdr/factory.go` (`IsFactoryQuiet`) | ~7 | **Rebuilt in slice 6.** `internal/supervisor/factory_quiet.go` does not exist on `main` (callers live in `internal/supervisor/{decisions,reprompt,transitions,briefing}.go`, tested by `factory_quiet_test.go`). Coordinator rule follows the addendum (`blocked` speaks; `done` and `idle` are silent; non-coordinator factory roles silent) |
 | `cmd/sheepdog/factory.go` | ~777 | **Built for v2:** `python-*` gone; has `start`, `stop`, `status`, `log`, `plan` (`apply`, `amend`), `task` (`park`, `unpark`, `drop`, `close`, `send-back`, `retry`, `say`), `recap decide`, `report` (`ready`, `review`, `ask`), `ask` (including `--kind override`), `answer`, and `doctor` |
 | `Makefile` `test-factory`, the CI factory job | — | **Gone from `main`** |
 | `factory/` (Python, tests, templates) | — | **Gone from `main`** |

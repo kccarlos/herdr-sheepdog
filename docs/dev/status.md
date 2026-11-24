@@ -9,7 +9,7 @@ are [`engine-v2/design.md`](engine-v2/design.md) and
 
 ## Where main is
 
-`main` is past `ecd322b3` (2026-11-23). The voice + orchestrator daemon, the
+`main` is past `622c04fa` (2026-11-23). The voice + orchestrator daemon, the
 desktop client (herdr-app panel + `Sheepdog.app`), the iPhone/iPad app in
 [`ios/`](../../ios/README.md), and **factory engine v2** version 1 (slices 1–8)
 plus slice 9 (`/factory` web board) are all on `main`.
