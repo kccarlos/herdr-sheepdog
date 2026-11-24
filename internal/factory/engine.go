@@ -1188,6 +1188,7 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 		}
 	}
 	spec.Labels["sheepdog.run"], spec.Labels["sheepdog.cli"], spec.Env = runID, rec.CLI, env
+	spec.Labels["herdr.space"] = id
 	rec.ID, rec.Model = runID, spec.Labels["sheepdog.model"]
 	now := e.now()
 	rec.State, rec.StartedAt, rec.LastActivity = flow.PhaseStarting, now, now
