@@ -57,18 +57,19 @@ type cdWorld struct {
 	daemonLog *bytes.Buffer
 	stderrBuf *bytes.Buffer
 
-	mu              sync.Mutex
-	folderProbe     cdProbeMode
-	tmpProbeTimeout bool
-	probeCalls      int
-	gitENOSPC       bool
-	storeENOSPC     bool
-	stateENOSPC     bool
-	projectDisk     DiskReading
-	dataDisk        DiskReading
-	diskReadPaths   []string
-	diskReadCalls   int
-	runs            []hc.RunParams
+	mu                       sync.Mutex
+	folderProbe              cdProbeMode
+	gitAnswersOnProbeTimeout bool
+	tmpProbeTimeout          bool
+	probeCalls               int
+	gitENOSPC                bool
+	storeENOSPC              bool
+	stateENOSPC              bool
+	projectDisk              DiskReading
+	dataDisk                 DiskReading
+	diskReadPaths            []string
+	diskReadCalls            int
+	runs                     []hc.RunParams
 }
 
 func newCDWorld(t *testing.T, goal string) *cdWorld {
@@ -168,6 +169,7 @@ func newCDWorld(t *testing.T, goal string) *cdWorld {
 		mode := w.folderProbe
 		tmpTO := w.tmpProbeTimeout
 		gitFull := w.gitENOSPC
+		gitAns := w.gitAnswersOnProbeTimeout
 		w.mu.Unlock()
 
 		if isShellProbe {
@@ -191,7 +193,7 @@ func newCDWorld(t *testing.T, goal string) *cdWorld {
 			return hc.ExecResult{Code: &zero, Stdout: []byte(probedDirStart + target + probedDirEnd + "\n")}, nil
 		}
 
-		if targetsRepo && mode == cdProbeTimeout {
+		if targetsRepo && mode == cdProbeTimeout && !gitAns {
 			w.mu.Lock()
 			w.probeCalls++
 			w.mu.Unlock()
@@ -287,6 +289,12 @@ func (w *cdWorld) advanceMinute() {
 func (w *cdWorld) setFolderProbe(m cdProbeMode) {
 	w.mu.Lock()
 	w.folderProbe = m
+	w.mu.Unlock()
+}
+
+func (w *cdWorld) setGitAnswersOnProbeTimeout(v bool) {
+	w.mu.Lock()
+	w.gitAnswersOnProbeTimeout = v
 	w.mu.Unlock()
 }
 
@@ -1165,6 +1173,156 @@ func TestPR5b9R2_DiskOneStepRecoveryAndPartialCommitLogging(t *testing.T) {
 		}
 		if raises := diskRaiseLogs(t, w.paths, w.repo); len(raises) != 1 {
 			t.Fatalf("restart after partial commit retry logged raise %d times, want 1: %+v", len(raises), raises)
+		}
+	})
+}
+
+// Trial finding 2 (KB-ENV-4):
+// Folder probe times out on four passes in a row while temp dir answers and
+// the engine's own git calls on the project folder answer every time: no
+// consent_prompt is raised or persisted, starts are not held, no log line
+// names consent_prompt, and exactly one factory.volume_slow event is logged.
+func TestTrial_ConsentSlowFolderWhileGitAnswersDoesNotRaise(t *testing.T) {
+	w := newCDWorld(t, "Slow folder while git answers")
+	w.addQueuedTask("T1")
+	w.setFolderProbe(cdProbeTimeout)
+	w.setGitAnswersOnProbeTimeout(true)
+
+	for range 4 {
+		w.advanceMinute()
+		w.pass()
+	}
+
+	if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, flow.AlertConsentPrompt); ok {
+		t.Fatalf("slow folder while git answers must not raise consent_prompt in live status; got %+v", ts)
+	}
+	if ts, ok := statusAlert(t, w.paths, w.repo, flow.AlertConsentPrompt); ok {
+		t.Fatalf("slow folder while git answers must not raise consent_prompt in persisted status; got %+v", ts)
+	}
+	if blob := persistedAlertBlob(t, w.paths, w.id); strings.Contains(blob, flow.AlertConsentPrompt) {
+		t.Fatalf("slow folder while git answers must not persist consent_prompt in state.json; got %s", blob)
+	}
+	if w.runCount() == 0 {
+		t.Fatal("slow folder while git answers must not hold starts")
+	}
+	if logs := alertEpisodeLogs(t, w.paths, w.repo, flow.AlertConsentPrompt); len(logs) != 0 {
+		t.Fatalf("slow folder while git answers must not log consent_prompt; got %+v", logs)
+	}
+	if n := strings.Count(w.daemonLog.String(), "factory.volume_slow"); n != 1 {
+		t.Fatalf("expected exactly 1 factory.volume_slow daemon log event per streak, got %d:\n%s", n, w.daemonLog.String())
+	}
+}
+
+// Trial finding 2 (KB-ENV-5, KB-ENV-6):
+// When both the folder probe and the engine's git calls on the project folder
+// time out (a real consent prompt or stalled volume), consent_prompt is raised
+// within three passes, holds new starts, and logs once.
+func TestTrial_ConsentBlockedFolderStillRaises(t *testing.T) {
+	w := newCDWorld(t, "Blocked folder raises consent_prompt")
+	w.addQueuedTask("T1")
+	w.setFolderProbe(cdProbeTimeout) // fake git on w.repo also times out
+
+	w.pass()
+	runsAfterPass1 := w.runCount()
+	w.advanceMinute()
+	w.pass()
+	w.advanceMinute()
+	w.pass()
+
+	if _, ok := cdEngineStatusAlert(t, w.eng, w.repo, flow.AlertConsentPrompt); !ok {
+		rows, _ := w.eng.ProjectStatus(w.repo)
+		t.Fatalf("expected consent_prompt within three passes for blocked folder; got rows=%+v", rows)
+	}
+	if _, ok := statusAlert(t, w.paths, w.repo, flow.AlertConsentPrompt); !ok {
+		t.Fatal("expected consent_prompt persisted in state.json")
+	}
+	if w.runCount() != runsAfterPass1 {
+		t.Fatalf("consent_prompt must hold new starts; runs grew from %d to %d", runsAfterPass1, w.runCount())
+	}
+	if logs := alertEpisodeLogs(t, w.paths, w.repo, flow.AlertConsentPrompt); len(logs) != 1 {
+		t.Fatalf("expected 1 consent_prompt raise log line, got %d: %+v", len(logs), logs)
+	}
+}
+
+// Trial finding 2 (KB-ENV-4, KB-ENV-5):
+// Probes time out while git answers (nothing raised, one factory.volume_slow),
+// then a git call on the folder times out; the next pass raises consent_prompt.
+func TestTrial_ConsentRaisesOnFirstGitStallAfterSlowProbes(t *testing.T) {
+	w := newCDWorld(t, "Slow probes then git stall")
+	w.setFolderProbe(cdProbeTimeout)
+	w.setGitAnswersOnProbeTimeout(true)
+
+	for range 3 {
+		w.advanceMinute()
+		w.pass()
+	}
+	if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, flow.AlertConsentPrompt); ok {
+		t.Fatalf("expected no consent_prompt while git still answers; got %+v", ts)
+	}
+	if n := strings.Count(w.daemonLog.String(), "factory.volume_slow"); n != 1 {
+		t.Fatalf("expected 1 factory.volume_slow event during slow streak, got %d:\n%s", n, w.daemonLog.String())
+	}
+
+	// Now git calls on the folder stall too: the next pass raises consent_prompt.
+	w.setGitAnswersOnProbeTimeout(false)
+	w.advanceMinute()
+	w.pass()
+
+	if _, ok := cdEngineStatusAlert(t, w.eng, w.repo, flow.AlertConsentPrompt); !ok {
+		rows, _ := w.eng.ProjectStatus(w.repo)
+		t.Fatalf("expected consent_prompt on pass where git stalls after slow probes; got rows=%+v", rows)
+	}
+	if _, ok := statusAlert(t, w.paths, w.repo, flow.AlertConsentPrompt); !ok {
+		t.Fatal("expected consent_prompt persisted in state.json")
+	}
+	if logs := alertEpisodeLogs(t, w.paths, w.repo, flow.AlertConsentPrompt); len(logs) != 1 {
+		t.Fatalf("expected 1 consent_prompt raise log line, got %d: %+v", len(logs), logs)
+	}
+}
+
+// Trial finding 2 (KB-ENV-4, KB-ENV-5):
+// The timeout cause says the folder did not answer and names both a stalling
+// volume and the macOS prompt; the fix includes the Settings step and notes
+// that it clears by itself when no prompt is showing. The blank cause and fix
+// are unchanged.
+func TestTrial_ConsentTimeoutCauseNamesBothCauses(t *testing.T) {
+	home, _ := os.UserHomeDir()
+
+	t.Run("timeout", func(t *testing.T) {
+		w := newCDWorld(t, "Consent timeout cause wording")
+		w.setFolderProbe(cdProbeTimeout)
+		w.pass()
+		w.advanceMinute()
+		w.pass()
+
+		a := findStoredAlert(t, w.paths, w.id, flow.AlertConsentPrompt)
+		prompt, baseFix := consentPrompt(home, w.repo)
+		for _, want := range []string{"did not answer", "stalling", prompt} {
+			if !strings.Contains(a.Cause, want) {
+				t.Errorf("timeout cause = %q, want substring %q", a.Cause, want)
+			}
+		}
+		for _, want := range []string{baseFix, "clears by itself"} {
+			if !strings.Contains(a.Fix, want) {
+				t.Errorf("timeout fix = %q, want substring %q", a.Fix, want)
+			}
+		}
+	})
+
+	t.Run("blank_unchanged", func(t *testing.T) {
+		w := newCDWorld(t, "Consent blank cause unchanged")
+		w.setFolderProbe(cdProbeBlank)
+		w.pass()
+		w.advanceMinute()
+		w.pass()
+
+		a := findStoredAlert(t, w.paths, w.id, flow.AlertConsentPrompt)
+		prompt, baseFix := consentPrompt(home, w.repo)
+		if !strings.Contains(a.Cause, "returned blank twice in herdr-core") || !strings.Contains(a.Cause, prompt) {
+			t.Errorf("blank cause = %q, want unchanged blank wording naming %q", a.Cause, prompt)
+		}
+		if a.Fix != baseFix {
+			t.Errorf("blank fix = %q, want unchanged %q", a.Fix, baseFix)
 		}
 	})
 }
