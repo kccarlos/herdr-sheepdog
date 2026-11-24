@@ -302,14 +302,17 @@ func prHeadIsH(in In) bool { return in.Facts.PR.Head == headH(in) }
 func prHeadAheadMergeOnly(in In) bool {
 	return prOpen(in) && answered(in) && in.Facts.PR.HeadRel == RelAhead && in.Facts.PR.HeadMergeOnly
 }
-func answered(in In) bool             { return in.Facts.PR.Answered }
-func unanswered(in In) bool           { return !answered(in) }
-func githubUnavail(in In) bool        { return in.Facts.GitHubUnavailable }
-func githubAvail(in In) bool          { return !githubUnavail(in) }
-func prBehindBase(in In) bool         { return in.Facts.PR.Behind && !in.Facts.PR.BehindUnknown }
-func prBehindUnknown(in In) bool      { return in.Facts.PR.BehindUnknown }
-func notBehind(in In) bool            { return !in.Facts.PR.Behind && !in.Facts.PR.BehindUnknown }
-func baseRed(in In) bool              { return in.Facts.BaseRed }
+func answered(in In) bool        { return in.Facts.PR.Answered }
+func unanswered(in In) bool      { return !answered(in) }
+func githubUnavail(in In) bool   { return in.Facts.GitHubUnavailable }
+func githubAvail(in In) bool     { return !githubUnavail(in) }
+func prBehindBase(in In) bool    { return in.Facts.PR.Behind && !in.Facts.PR.BehindUnknown }
+func prBehindUnknown(in In) bool { return in.Facts.PR.BehindUnknown }
+func notBehind(in In) bool       { return !in.Facts.PR.Behind && !in.Facts.PR.BehindUnknown }
+func baseRed(in In) bool         { return in.Facts.BaseRed }
+func notBehindOrUpdated(in In) bool {
+	return !prBehindBase(in) || Done(in.acts(), key(AskMergeOnly, headH(in))) && !baseRed(in)
+}
 func checksGreen(in In) bool          { return in.Facts.PR.Checks == ChecksGreen }
 func checksRed(in In) bool            { return in.Facts.PR.Checks == ChecksRed }
 func checksStoppedExt(in In) bool     { return in.Facts.PR.Checks == ChecksStoppedExternal }
@@ -631,9 +634,9 @@ var TaskRows = []Row[In]{
 		return say("PR conflicts with the base: tell the worker once to merge the base (never rebase)",
 			EnsureRun(in, RoleWorker), ensure(in, key(AskTellConflict, headH(in))))(in)
 	}},
-	{ID: "N33", WaitsOn: "CI; then the worker", Stage: "ci", When: ciReady(checksRed), Then: func(in In) Decision {
+	{ID: "N33", WaitsOn: "CI; then the worker", Stage: "ci", When: ciReady(all(checksRed, notBehindOrUpdated)), Then: func(in In) Decision {
 		h := headH(in)
-		if asks, wait := rerunOrWait(in, h); len(asks) > 0 || wait {
+		if asks, wait := rerunOrWait(in, h); !prBehindBase(in) && (len(asks) > 0 || wait) {
 			return say("checks red: re-run failed jobs, or wait for the re-run or for checks still running", asks)(in)
 		}
 		var tells []string
@@ -642,13 +645,13 @@ var TaskRows = []Row[In]{
 		}
 		return say("checks red at H: tell the worker once per failing run", EnsureRun(in, RoleWorker), tells)(in)
 	}},
-	{ID: "N34", WaitsOn: "CI; then the coordinator", Stage: "ci", When: ciReady(anyOf(checksStoppedExt, checksStoppedTimeout, checksStoppedUnknown)), Then: func(in In) Decision {
+	{ID: "N34", WaitsOn: "CI; then the coordinator", Stage: "ci", When: ciReady(all(anyOf(checksStoppedExt, checksStoppedTimeout, checksStoppedUnknown), notBehindOrUpdated)), Then: func(in In) Decision {
 		h := headH(in)
 		if !checksStoppedExt(in) { // a time limit, or a cancel with no evidence of who: one wake for both, never a re-run
 			return say("a CI job was stopped by its own time limit or for an unread reason ("+string(in.Facts.PR.Checks)+")",
 				once(in.acts(), key(AskWake, "checks_stopped", "limit", h)))(in)
 		}
-		if asks, wait := rerunOrWait(in, h); len(asks) > 0 || wait {
+		if asks, wait := rerunOrWait(in, h); !prBehindBase(in) && (len(asks) > 0 || wait) {
 			return say("checks cancelled from outside: re-run, or wait for the re-run or for checks still running", asks)(in)
 		}
 		return say("checks cancelled from outside with no re-runs left", once(in.acts(), key(AskWake, "checks_stopped", "external", h)))(in)
