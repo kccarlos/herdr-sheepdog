@@ -39,3 +39,10 @@ test("the agent opens through herdr-app's agent.focus with the card's pane_id as
   assert.equal(focusCommand({ kind: "card" }), null);
   assert.equal(focusCommand({ pane_id: "  " }), null);
 });
+
+test("focusTarget maps remote pane ids back to hc addresses", () => {
+  assert.equal(focusTarget({ pane_id: "box~t4" }), "box/t4");
+  assert.deepEqual(focusCommand({ pane_id: "box~t4" }), { name: "agent.focus", args: { terminal: "box/t4" } });
+  assert.equal(focusTarget({ pane_id: "t7" }), "t7");
+  assert.equal(focusTarget({ pane_id: "" }), null);
+});
