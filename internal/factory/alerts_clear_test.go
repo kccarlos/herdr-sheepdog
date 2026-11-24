@@ -13,6 +13,7 @@ package factory
 import (
 	"cmp"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -540,5 +541,192 @@ func TestTrial_ClearAcrossRestartLogsOnce(t *testing.T) {
 	w.pass()
 	if clears := alertClearLogs(t, w.paths, w.repo, flow.AlertNoPool); len(clears) != 1 {
 		t.Fatalf("restart while clear added extra clear line: got %d (%+v)", len(clears), clears)
+	}
+}
+
+// Review round 1 blocking finding 1 (reviewer probe):
+// When ci_stalled@T1 is active on head c1, head moves to c2 with pending checks,
+// the clear commit for c1 fails on a transient store error, and the store recovers
+// after ci_stalled_minutes has elapsed on c2, c1 must log its clear line before
+// c2 logs its raise line.
+func TestProbe_CIStalledScopeChangeAfterFailedClearLogsClearBeforeSecondRaise(t *testing.T) {
+	w := newAlertWorld(t, "ci_stalled scope change clear", false)
+	w.pass()
+	w.makeCoordinatorIdle()
+
+	// 1. Set up T1 at head c1 with 2 passing review rounds and CIStalledMinutes = 10.
+	wt, err := fixtureGit(t).NewWorktree(w.ctx, w.repo, w.paths.Worktree(w.id, "T1", 1), "T1-1", "feat: ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "a.go"), []byte("package demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt.Path, "add", "a.go")
+	gitIn(t, wt.Path, "commit", "-m", "feat: c1")
+	c1 := gitIn(t, wt.Path, "rev-parse", "HEAD")
+	gitIn(t, wt.Path, "push", "origin", c1+":refs/heads/"+wt.Branch)
+	wk, err := startRun(w.ctx, w.client, world.RunSpec{Name: workerName(w.id, "T1", 1), Cwd: wt.Path, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setIdle(t, w.srv, w.client, wk, "idle")
+	w.edit(func(s *flow.State) {
+		s.Settings.CIStalledMinutes = flow.CIStalledMin
+		s.Tasks = []flow.Task{{
+			ID: "T1", Title: "feat: ci", Brief: "b", EstimateLines: 30,
+			Outcomes: []flow.Outcome{{Text: "ok", ProvedBy: "manual: a.go"}},
+			Attempts: []flow.Attempt{{
+				SizeCap: 100, BaseCommit: w.baseSHA, Branch: wt.Branch, Worktree: wt.Path, PR: 7,
+				RunID: wk,
+				Run:   &flow.RunRecord{ID: wk, Role: flow.RoleWorker, CLI: "claude", Model: "sonnet", State: flow.PhaseIdle, StartedAt: w.now.Add(-5 * time.Minute), Turn: 1},
+				Ready: []flow.Ready{{Head: c1}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+				},
+			}},
+		}}
+	})
+	stalledDur := time.Duration(flow.CIStalledMin) * time.Minute
+
+	// Raise ci_stalled on c1.
+	writePRJSON(t, w.gh, "view.json", c1, `[{"__typename":"CheckRun","name":"ci","status":"IN_PROGRESS"}]`)
+	w.pass()
+	w.advance(stalledDur + time.Second)
+	w.pass()
+	assertAlertLogMatchesState(t, w.paths.State(w.id), w.paths.Log(w.id), flow.AlertCIStalled)
+
+	// 2. Head moves to c2 with pending checks; readPRLocked commits PendingChecks{Head: c2},
+	//    then the clear commit for c1 fails (transient store error).
+	if err := os.WriteFile(filepath.Join(wt.Path, "b.go"), []byte("package demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt.Path, "add", "b.go")
+	gitIn(t, wt.Path, "commit", "-m", "feat: c2")
+	c2 := gitIn(t, wt.Path, "rev-parse", "HEAD")
+	gitIn(t, wt.Path, "push", "origin", c2+":refs/heads/"+wt.Branch)
+	w.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.Ready = append(a.Ready, flow.Ready{Head: c2})
+		a.Rounds = append(a.Rounds,
+			flow.Round{N: 3, Kind: flow.RoundFull, Head: c2, Verdict: flow.VerdictPass},
+			flow.Round{N: 4, Kind: flow.RoundFull, Head: c2, Verdict: flow.VerdictPass},
+		)
+	})
+	writePRJSON(t, w.gh, "view.json", c2, `[{"__typename":"CheckRun","name":"ci","status":"IN_PROGRESS"}]`)
+	w.eng.writeLog = func(path string, l LogLine) error {
+		if l.Decision == "alert cleared: "+flow.AlertCIStalled {
+			return errors.New("injected clear failure")
+		}
+		return AppendLog(path, l)
+	}
+	w.advance(time.Minute)
+	w.pass()
+
+	// 3. Store recovers after ci_stalled_minutes has elapsed on c2:
+	//    c1 must log a clear line before c2 logs its raise line.
+	w.eng.writeLog = nil
+	w.advance(stalledDur + time.Second)
+	w.pass()
+
+	assertAlertLogMatchesState(t, w.paths.State(w.id), w.paths.Log(w.id), flow.AlertCIStalled)
+	if clears := alertClearLogs(t, w.paths, w.repo, flow.AlertCIStalled); len(clears) != 1 {
+		t.Fatalf("expected 1 clear line for superseded head c1, got %d: %+v", len(clears), clears)
+	}
+}
+
+// Review round 1 blocking finding 1 (plain scope-change, no store failure):
+// When an active ci_stalled@T1 alert at Scope c1 is directly superseded by a new
+// Scope c2 in state.json (e.g. PendingChecks for c2 is already past ci_stalled_minutes
+// after a restart between observation and act, with no store failure), the pass
+// commits a clear line for c1 before the raise line for c2 in order.
+func TestTrial_CIStalledScopeChangeLogsClearBeforeSecondRaise(t *testing.T) {
+	w := newAlertWorld(t, "ci_stalled plain scope change clear", false)
+	w.pass()
+	w.makeCoordinatorIdle()
+
+	wt, err := fixtureGit(t).NewWorktree(w.ctx, w.repo, w.paths.Worktree(w.id, "T1", 1), "T1-1", "feat: ci")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt.Path, "a.go"), []byte("package demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt.Path, "add", "a.go")
+	gitIn(t, wt.Path, "commit", "-m", "feat: c1")
+	c1 := gitIn(t, wt.Path, "rev-parse", "HEAD")
+	gitIn(t, wt.Path, "push", "origin", c1+":refs/heads/"+wt.Branch)
+	wk, err := startRun(w.ctx, w.client, world.RunSpec{Name: workerName(w.id, "T1", 1), Cwd: wt.Path, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setIdle(t, w.srv, w.client, wk, "idle")
+	w.edit(func(s *flow.State) {
+		s.Settings.CIStalledMinutes = flow.CIStalledMin
+		s.Tasks = []flow.Task{{
+			ID: "T1", Title: "feat: ci", Brief: "b", EstimateLines: 30,
+			Outcomes: []flow.Outcome{{Text: "ok", ProvedBy: "manual: a.go"}},
+			Attempts: []flow.Attempt{{
+				SizeCap: 100, BaseCommit: w.baseSHA, Branch: wt.Branch, Worktree: wt.Path, PR: 7,
+				RunID: wk,
+				Run:   &flow.RunRecord{ID: wk, Role: flow.RoleWorker, CLI: "claude", Model: "sonnet", State: flow.PhaseIdle, StartedAt: w.now.Add(-5 * time.Minute), Turn: 1},
+				Ready: []flow.Ready{{Head: c1}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+				},
+			}},
+		}}
+	})
+	stalledDur := time.Duration(flow.CIStalledMin) * time.Minute
+
+	// Raise ci_stalled on c1.
+	writePRJSON(t, w.gh, "view.json", c1, `[{"__typename":"CheckRun","name":"ci","status":"IN_PROGRESS"}]`)
+	w.pass()
+	w.advance(stalledDur + time.Second)
+	w.pass()
+	assertAlertLogMatchesState(t, w.paths.State(w.id), w.paths.Log(w.id), flow.AlertCIStalled)
+
+	// Move head to c2 with PendingChecks already past ci_stalled_minutes (no store failure).
+	if err := os.WriteFile(filepath.Join(wt.Path, "b.go"), []byte("package demo\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt.Path, "add", "b.go")
+	gitIn(t, wt.Path, "commit", "-m", "feat: c2")
+	c2 := gitIn(t, wt.Path, "rev-parse", "HEAD")
+	gitIn(t, wt.Path, "push", "origin", c2+":refs/heads/"+wt.Branch)
+	w.advance(time.Minute)
+	w.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.Ready = append(a.Ready, flow.Ready{Head: c2})
+		a.Rounds = append(a.Rounds,
+			flow.Round{N: 3, Kind: flow.RoundFull, Head: c2, Verdict: flow.VerdictPass},
+			flow.Round{N: 4, Kind: flow.RoundFull, Head: c2, Verdict: flow.VerdictPass},
+		)
+		a.PendingChecks = &flow.PendingChecks{Head: c2, Since: w.now.Add(-(stalledDur + time.Second))}
+	})
+	writePRJSON(t, w.gh, "view.json", c2, `[{"__typename":"CheckRun","name":"ci","status":"IN_PROGRESS"}]`)
+	w.pass()
+
+	assertAlertLogMatchesState(t, w.paths.State(w.id), w.paths.Log(w.id), flow.AlertCIStalled)
+	logs := alertEpisodeLogs(t, w.paths, w.repo, flow.AlertCIStalled)
+	if len(logs) != 3 {
+		t.Fatalf("expected 3 ci_stalled episode lines [raise(c1), clear(c1), raise(c2)], got %d: %+v", len(logs), logs)
+	}
+	if logs[0].Decision != "alert raised: "+flow.AlertCIStalled || !strings.Contains(logs[0].Why, c1[:7]) {
+		t.Errorf("line 0 = %+v, want raise for c1 (%s)", logs[0], c1[:7])
+	}
+	if logs[1].Decision != "alert cleared: "+flow.AlertCIStalled || !strings.Contains(logs[1].Why, c1[:7]) || !strings.Contains(logs[1].Why, "lasted") {
+		t.Errorf("line 1 = %+v, want clear for c1 (%s) with duration", logs[1], c1[:7])
+	}
+	if logs[2].Decision != "alert raised: "+flow.AlertCIStalled || !strings.Contains(logs[2].Why, c2[:7]) {
+		t.Errorf("line 2 = %+v, want raise for c2 (%s)", logs[2], c2[:7])
+	}
+	if logs[0].Seq >= logs[1].Seq || logs[1].Seq >= logs[2].Seq {
+		t.Errorf("expected strictly increasing sequence numbers, got %d, %d, %d", logs[0].Seq, logs[1].Seq, logs[2].Seq)
+	}
+	if cur := findStoredAlert(t, w.paths, w.id, flow.AlertCIStalled); cur.Scope != c2 {
+		t.Errorf("stored ci_stalled Scope = %q, want %q", cur.Scope, c2)
 	}
 }

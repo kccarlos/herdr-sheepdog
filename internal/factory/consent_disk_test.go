@@ -1239,6 +1239,60 @@ func TestTrial_ConsentSlowFolderWhileGitAnswersDoesNotRaise(t *testing.T) {
 	}
 }
 
+// Review round 1 non-blocking coverage note 3 (KB-ENV-4):
+// An "ok" folder probe between two slow streaks resets the streak so the second
+// slow streak logs factory.volume_slow once again (and still raises no alert).
+func TestTrial_ConsentSlowStreakResetsAfterOKProbe(t *testing.T) {
+	w := newCDWorld(t, "Slow folder streak resets after ok")
+	w.setFolderProbe(cdProbeTimeout)
+	w.setGitAnswersOnProbeTimeout(true)
+
+	// First slow streak (3 passes): logs factory.volume_slow once.
+	for range 3 {
+		w.advanceMinute()
+		w.pass()
+	}
+	if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, flow.AlertConsentPrompt); ok {
+		t.Fatalf("first slow streak must not raise consent_prompt; got %+v", ts)
+	}
+	if n := strings.Count(w.daemonLog.String(), "factory.volume_slow"); n != 1 {
+		t.Fatalf("expected 1 factory.volume_slow after first streak, got %d:\n%s", n, w.daemonLog.String())
+	}
+
+	// Intervening "ok" probe resets the slow streak.
+	w.setFolderProbe(cdProbeOK)
+	w.advanceMinute()
+	w.pass()
+	if n := strings.Count(w.daemonLog.String(), "factory.volume_slow"); n != 1 {
+		t.Fatalf("ok probe must not log factory.volume_slow; got %d:\n%s", n, w.daemonLog.String())
+	}
+
+	// Second slow streak: pass 1 does not log yet; pass 2 logs a second
+	// factory.volume_slow; pass 3 does not duplicate it.
+	w.setFolderProbe(cdProbeTimeout)
+	w.advanceMinute()
+	w.pass()
+	if n := strings.Count(w.daemonLog.String(), "factory.volume_slow"); n != 1 {
+		t.Fatalf("first timeout of new streak must not log factory.volume_slow yet; got %d:\n%s", n, w.daemonLog.String())
+	}
+	w.advanceMinute()
+	w.pass()
+	if n := strings.Count(w.daemonLog.String(), "factory.volume_slow"); n != 2 {
+		t.Fatalf("second timeout of new streak must log a second factory.volume_slow; got %d:\n%s", n, w.daemonLog.String())
+	}
+	w.advanceMinute()
+	w.pass()
+	if n := strings.Count(w.daemonLog.String(), "factory.volume_slow"); n != 2 {
+		t.Fatalf("third timeout of new streak must not duplicate factory.volume_slow; got %d:\n%s", n, w.daemonLog.String())
+	}
+	if ts, ok := cdEngineStatusAlert(t, w.eng, w.repo, flow.AlertConsentPrompt); ok {
+		t.Fatalf("second slow streak while git answers must not raise consent_prompt; got %+v", ts)
+	}
+	if ts, ok := statusAlert(t, w.paths, w.repo, flow.AlertConsentPrompt); ok {
+		t.Fatalf("second slow streak while git answers must not persist consent_prompt; got %+v", ts)
+	}
+}
+
 // Trial finding 2 (KB-ENV-5, KB-ENV-6):
 // When both the folder probe and the engine's git calls on the project folder
 // time out (a real consent prompt or stalled volume), consent_prompt is raised
