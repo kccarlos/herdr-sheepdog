@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -44,6 +45,7 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "  report ready [--proof \"<outcome>=<cmd>\" ...] [--artifact \"<outcome>=<path>\" ...] [--touched \"<places>\"] [--skipped \"<what was left out>\"] [--reject \"<why>\"]  (worker only) run proofs and report HEAD ready, or reject findings")
 	fprintln(w, "  report ready --nothing-to-change --why \"<why>\"  (worker only) report that the task needs no change")
 	fprintln(w, "  report review <pass|changes> --code <code> --head <sha> --self-check-misses <n> --deletable \"<text>\" [--class \"<text>\"] [--not-run \"<text>\"] [--findings <path>]  (reviewer only) submit a review verdict")
+	fprintln(w, "  report retro <ship|fix|redesign> --code <code> --head <sha> --cause <cause> --worker-change \"<text>\" --worker-change-kind <check|brief> --coordinator-change \"<text>\" --coordinator-change-kind <check|brief> [--findings <path>]  (retro only) submit a retro verdict")
 	fprintln(w, "  report ask \"<question>\" --option \"<choice>\" --option \"<choice>\" --recommend \"<choice>\"  (worker/reviewer) ask the coordinator a decision question")
 	fprintln(w, "  ask --kind <kind> [--task <task>] \"<question>\" --option \"<choice>\" --option \"<choice>\" --recommend \"<choice>\"  (coordinator) open an ask (gated kinds go to the owner)")
 	fprintln(w, "  ask --kind override --task <task> [--task <task> ...]  (coordinator) open an engine-filled override card for the owner")
@@ -54,7 +56,7 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "           logged-in agent CLI (claude, codex or agy) plus a canary start")
 	fprintln(w, "           inside herdr-core, gh login and matching origin fetch and push URLs, and")
 	fprintln(w, "           codexbar. Exit 1 on FAIL.")
-	fprintln(w, "flags: --goal TEXT, --max-running N, --proof OUTCOME=CMD, --artifact OUTCOME=PATH, --touched TEXT, --skipped TEXT, --reject WHY, --nothing-to-change, --code CODE, --head SHA, --self-check-misses N, --deletable TEXT, --class TEXT, --not-run TEXT, --findings PATH, --why TEXT, --child JSON, --kind KIND, --task ID, --option TEXT, --recommend TEXT, --folder PATH, --config PATH, --hc-socket PATH, --no-canary")
+	fprintln(w, "flags: --goal TEXT, --max-running N, --proof OUTCOME=CMD, --artifact OUTCOME=PATH, --touched TEXT, --skipped TEXT, --reject WHY, --nothing-to-change, --code CODE, --head SHA, --self-check-misses N, --deletable TEXT, --class TEXT, --not-run TEXT, --cause CAUSE, --worker-change TEXT, --worker-change-kind KIND, --coordinator-change TEXT, --coordinator-change-kind KIND, --findings PATH, --why TEXT, --child JSON, --kind KIND, --task ID, --option TEXT, --recommend TEXT, --folder PATH, --config PATH, --hc-socket PATH, --no-canary")
 }
 
 // runFactory dispatches the `sheepdog factory` command group.
@@ -321,6 +323,9 @@ func runFactoryReport(ctx context.Context, args []string, stdout, stderr io.Writ
 	if len(args) >= 1 && args[0] == "review" {
 		return runFactoryReportReview(ctx, args[1:], stdout, stderr)
 	}
+	if len(args) >= 1 && args[0] == "retro" {
+		return runFactoryReportRetro(ctx, args[1:], stdout, stderr)
+	}
 	if len(args) < 1 || args[0] != "ready" {
 		printFactoryUsage(stderr)
 		return 2
@@ -474,6 +479,30 @@ func runProofs(ctx context.Context, git *world.Git, head string, proofs []flow.P
 	return nil
 }
 
+func readFindingsFlag(cmd, path string, stderr io.Writer) (string, int) {
+	fp := strings.TrimSpace(path)
+	if fp == "" || fp == "-" {
+		printFactoryUsage(stderr)
+		return "", 2
+	}
+	f, err := os.Open(fp)
+	if err != nil {
+		fprintf(stderr, "sheepdog %s: %v\n", cmd, err)
+		return "", 1
+	}
+	raw, rerr := io.ReadAll(io.LimitReader(f, int64(proofOutputLimit)+1))
+	cerr := f.Close()
+	if err := cmp.Or(rerr, cerr); err != nil {
+		fprintf(stderr, "sheepdog %s: %v\n", cmd, err)
+		return "", 1
+	}
+	if len(raw) > proofOutputLimit {
+		fprintf(stderr, "sheepdog %s: findings file %s is over %d bytes\n", cmd, fp, proofOutputLimit)
+		return "", 1
+	}
+	return string(raw), 0
+}
+
 func runFactoryReportReview(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 	fs := factoryFlags("factory report review", stderr)
 	code := fs.String("code", "", "round one-time code")
@@ -509,27 +538,10 @@ func runFactoryReportReview(ctx context.Context, args []string, stdout, stderr i
 	}
 	findings := ""
 	if seen["findings"] {
-		fp := strings.TrimSpace(*findingsPath)
-		if fp == "" || fp == "-" {
-			printFactoryUsage(stderr)
-			return 2
+		var exit int
+		if findings, exit = readFindingsFlag("factory report review", *findingsPath, stderr); exit != 0 {
+			return exit
 		}
-		f, err := os.Open(fp)
-		if err != nil {
-			fprintf(stderr, "sheepdog factory report review: %v\n", err)
-			return 1
-		}
-		raw, rerr := io.ReadAll(io.LimitReader(f, int64(proofOutputLimit)+1))
-		cerr := f.Close()
-		if err := cmp.Or(rerr, cerr); err != nil {
-			fprintf(stderr, "sheepdog factory report review: %v\n", err)
-			return 1
-		}
-		if len(raw) > proofOutputLimit {
-			fprintf(stderr, "sheepdog factory report review: findings file %s is over %d bytes\n", fp, proofOutputLimit)
-			return 1
-		}
-		findings = string(raw)
 	}
 	body := map[string]any{
 		"verdict":           verdict,
@@ -542,6 +554,60 @@ func runFactoryReportReview(ctx context.Context, args []string, stdout, stderr i
 		"findings":          findings,
 	}
 	return sendFactoryReport(ctx, "factory report review", "review", body, "review "+verdict, stdout, stderr)
+}
+
+func runFactoryReportRetro(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	fs := factoryFlags("factory report retro", stderr)
+	code := fs.String("code", "", "round one-time code")
+	head := fs.String("head", "", "reviewed commit SHA")
+	cause := fs.String("cause", "", "primary retro cause")
+	workerChange := fs.String("worker-change", "", "concrete worker-side change")
+	workerKind := fs.String("worker-change-kind", "", "worker change kind (check or brief)")
+	coordChange := fs.String("coordinator-change", "", "concrete coordinator-side change")
+	coordKind := fs.String("coordinator-change-kind", "", "coordinator change kind (check or brief)")
+	findingsPath := fs.String("findings", "", "path to findings file outside the worktree")
+	if err := fs.Parse(reorderFactoryArgs(fs, args)); err != nil {
+		return flagExit(err)
+	}
+	seen := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { seen[f.Name] = true })
+	if fs.NArg() != 1 {
+		printFactoryUsage(stderr)
+		return 2
+	}
+	verdict := strings.TrimSpace(fs.Arg(0))
+	if verdict != flow.VerdictShip && verdict != flow.VerdictFix && verdict != flow.VerdictRedesign {
+		printFactoryUsage(stderr)
+		return 2
+	}
+	c, wk, ck := strings.TrimSpace(*cause), strings.TrimSpace(*workerKind), strings.TrimSpace(*coordKind)
+	validKind := func(k string) bool { return k == flow.ChangeKindCheck || k == flow.ChangeKindBrief }
+	if !seen["code"] || strings.TrimSpace(*code) == "" || !seen["head"] || strings.TrimSpace(*head) == "" ||
+		!seen["cause"] || !slices.Contains(flow.RetroCauses, c) ||
+		!seen["worker-change"] || strings.TrimSpace(*workerChange) == "" || !seen["worker-change-kind"] || !validKind(wk) ||
+		!seen["coordinator-change"] || strings.TrimSpace(*coordChange) == "" || !seen["coordinator-change-kind"] || !validKind(ck) {
+		printFactoryUsage(stderr)
+		return 2
+	}
+	findings := ""
+	if seen["findings"] {
+		var exit int
+		if findings, exit = readFindingsFlag("factory report retro", *findingsPath, stderr); exit != 0 {
+			return exit
+		}
+	}
+	body := map[string]any{
+		"verdict":                 verdict,
+		"code":                    *code,
+		"head":                    *head,
+		"cause":                   c,
+		"worker_change":           *workerChange,
+		"worker_change_kind":      wk,
+		"coordinator_change":      *coordChange,
+		"coordinator_change_kind": ck,
+		"findings":                findings,
+	}
+	return sendFactoryReport(ctx, "factory report retro", "retro", body, "retro "+verdict, stdout, stderr)
 }
 
 func sendFactoryReport(ctx context.Context, cmd, verb string, body any, okMsg string, stdout, stderr io.Writer) int {

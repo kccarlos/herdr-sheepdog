@@ -663,7 +663,7 @@ func (e *Engine) runByTokenLocked(token string) (id string, state flow.State, ro
 					id, state, role, ti, runID = pid, s, flow.RoleWorker, i, a.RunID
 					return false
 				} else if a.Review != nil && same(a.Review.RunTokenHash) {
-					id, state, role, ti, runID = pid, s, flow.RoleReviewer, i, a.Review.RunID
+					id, state, role, ti, runID = pid, s, a.Review.Role(), i, a.Review.RunID
 					return false
 				}
 			}
@@ -1360,7 +1360,7 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 				}
 				stopWorkerRec(a, s.Settings, e.now(), false)
 			}
-			if !slices.Equal(oldReq[flow.RoleReviewer], t.Request[flow.RoleReviewer]) && a.Review != nil && a.Review.RunID != "" {
+			if a.Review != nil && a.Review.RunID != "" && !slices.Equal(oldReq[a.Review.Role()], t.Request[a.Review.Role()]) {
 				if err := world.StopRun(ctx, e.HC, a.Review.RunID); err != nil {
 					return err
 				}

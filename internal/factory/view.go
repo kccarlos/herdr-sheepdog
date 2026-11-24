@@ -127,7 +127,7 @@ func graphViewOf(s flow.State, lastRow map[string]LogLine) GraphView {
 		stage, why := taskStageWhy(t, s.Tasks, s.Asks, s.Settings, s.Project.Started)
 		l, model, term, rounds := lastRow[t.ID], "", "", 0
 		if n := len(t.Attempts); n > 0 {
-			rounds = len(slices.DeleteFunc(slices.Clone(flow.Counted(t.Attempts[n-1])), func(r flow.Round) bool { return r.Kind == flow.RoundSendBack }))
+			rounds = len(slices.DeleteFunc(slices.Clone(flow.Counted(t.Attempts[n-1])), func(r flow.Round) bool { return r.Kind == flow.RoundSendBack || r.Kind == flow.RoundRetro }))
 		}
 		if a := flow.OpenAttempt(t); revActive(a) {
 			model, term = a.Review.Reviewer.Model, cmp.Or(a.Review.RunID, a.RunID)
@@ -277,6 +277,9 @@ func taskWhy(t flow.Task, a *flow.Attempt, unmet []string, started bool, stage s
 	case r.ID == "N17":
 		return "Waiting for another merge in flight"
 	case stage == "working" && revActive(a):
+		if a.Review.Role() == flow.RoleRetro {
+			return "In retro"
+		}
 		return fmt.Sprintf("In review round %d", len(a.Rounds)+1)
 	case r.Why == flow.WhyCI:
 		return "Waiting on CI and merge"

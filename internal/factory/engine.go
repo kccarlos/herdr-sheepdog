@@ -39,7 +39,7 @@ var reviewerTemplate string
 //go:embed reviewer_cmd.md
 var reviewerCmdTemplate string
 
-// Stub for PR 12.2 TDD step 1 (replaced with //go:embed retro.md in step 2).
+//go:embed retro.md
 var retroTemplate string
 
 var lockGitTimeout = world.GitStageTimeout
@@ -268,7 +268,7 @@ func stopRec(recp **flow.RunRecord, role string, st flow.Settings, now time.Time
 
 func stopReviewRec(rev *flow.ReviewRun, st flow.Settings, now time.Time) {
 	if rev != nil {
-		stopRec(&rev.Run, flow.RoleReviewer, st, now)
+		stopRec(&rev.Run, rev.Role(), st, now)
 		rev.RunID, rev.RunTokenHash = "", ""
 	}
 }
@@ -798,6 +798,10 @@ func launchCapability(role string) func(flow.Candidate) flow.ResolveReason {
 			if c.CLI == "claude" || c.CLI == world.CodexCLI || c.CLI == world.AgyCLI {
 				return flow.ResolveReason{}
 			}
+		case flow.RoleRetro:
+			if c.CLI == "claude" || c.CLI == world.AgyCLI {
+				return flow.ResolveReason{}
+			}
 		}
 		return flow.ResolveReason{Why: fmt.Sprintf("the engine cannot launch %s as %s yet", c.CLI, role)}
 	}
@@ -838,7 +842,7 @@ func launchArgv(role string, c flow.Candidate, cwd, session string, resume bool)
 		}
 		return world.CodexWorkArgv(c.Model, c.Effort, cwd, session)
 	case world.AgyCLI:
-		if role == flow.RoleReviewer || !resume {
+		if role == flow.RoleReviewer || role == flow.RoleRetro || !resume {
 			session = ""
 		}
 		return world.AgyArgv(c.Model, session, "")
@@ -1269,6 +1273,9 @@ var taskExecutors = map[string]taskExec{
 	flow.AskStartReview:   (*Engine).execStartReviewer,
 	flow.AskNudgeReview:   (*Engine).execNudgeReviewer,
 	flow.AskStopReview:    (*Engine).execStopReviewer,
+	flow.AskStartRetro:    (*Engine).execStartReviewer,
+	flow.AskNudgeRetro:    (*Engine).execNudgeReviewer,
+	flow.AskStopRetro:     (*Engine).execStopReviewer,
 	flow.AskTellFindings:  (*Engine).execTellFindings,
 	flow.AskOpenRecap:     (*Engine).execOpenRecap,
 	flow.AskOwnerNoRecap:  (*Engine).execOpenRecap,
@@ -1314,7 +1321,7 @@ func actOutage(verb string, f flow.Facts, err error) bool {
 	switch verb {
 	case flow.AskNewAttempt, flow.AskPushPR, flow.AskRerunCI, flow.AskDispatchCI, flow.AskUpdateBranch, flow.AskMerge:
 		return f.GitHubUnavailable
-	case flow.AskStartWorker, flow.AskStartReview, flow.AskNudgeReview, flow.AskStopReview, flow.AskTellFindings, flow.AskTellStop, flow.AskTellDiverged, flow.AskTellConflict, flow.AskTellCI, flow.AskTellBaseRed, flow.AskStopRuns, flow.AskStopCoordinator, flow.AskOpenRecap, flow.AskOwnerNoRecap, flow.AskSizeRecap, flow.AskCIRecap, flow.AskTimeRecap:
+	case flow.AskStartWorker, flow.AskStartReview, flow.AskNudgeReview, flow.AskStopReview, flow.AskStartRetro, flow.AskNudgeRetro, flow.AskStopRetro, flow.AskTellFindings, flow.AskTellStop, flow.AskTellDiverged, flow.AskTellConflict, flow.AskTellCI, flow.AskTellBaseRed, flow.AskStopRuns, flow.AskStopCoordinator, flow.AskOpenRecap, flow.AskOwnerNoRecap, flow.AskSizeRecap, flow.AskCIRecap, flow.AskTimeRecap:
 		return f.HCUnavailable
 	case flow.AskCleanup:
 		return f.GitHubUnavailable || f.HCUnavailable
@@ -1748,9 +1755,39 @@ func (e *Engine) reviewerPromptWith(ctx context.Context, tmpl string, t flow.Tas
 		"{sheepdog}", bin, "{findings_path}", findingsPath), nil
 }
 
-// Stub for PR 12.2 TDD step 1 (implemented in step 2).
 func (e *Engine) retroPrompt(tmpl string, t flow.Task, a flow.Attempt, s flow.Settings, h, diff string, lines, round int, bin, findingsPath string) string {
-	return ""
+	mode := "initial retro"
+	if len(flow.AttemptRetros(a)) > 0 {
+		mode = "delta check (bounded fix)"
+	}
+	workerModel := "(unknown)"
+	if wm := storedWorkerModel(t); wm.Model != "" {
+		workerModel = wm.CLI + "/" + wm.Model
+	}
+	var rounds []string
+	for _, r := range a.Rounds {
+		who := cmp.Or(strings.Trim(r.Reviewer.CLI+"/"+r.Reviewer.Model, "/"), "coordinator")
+		line := fmt.Sprintf("- r%d (%s, %s): %s (%d major(s))", r.N, r.Kind, who, r.Verdict, r.Majors)
+		if r.ReportPath != "" {
+			line += " — " + r.ReportPath
+		}
+		rounds = append(rounds, line)
+	}
+	roundsText := "(none)"
+	if len(rounds) > 0 {
+		roundsText = strings.Join(rounds, "\n")
+	}
+	code := ""
+	if a.Review != nil {
+		code = a.Review.Code
+	}
+	caseFile := fmt.Sprintf("Worker model: %s\nSize: %d lines (estimate %d, cap %d)\nDiff: %s\nPrior rounds:\n%s",
+		workerModel, lines, t.EstimateLines, a.SizeCap, diff, roundsText)
+	return fill(tmpl, "{id}", t.ID, "{title}", t.Title, "{mode}", mode, "{round}", fmt.Sprint(round), "{head}", h,
+		"{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"),
+		"{not_doing}", cmp.Or(strings.TrimSpace(t.NotDoing), "(none)"),
+		"{outcomes}", bullets(t.Outcomes), "{case_file}", caseFile,
+		"{continue_lines}", fmt.Sprint(s.ContinueLines), "{code}", code, "{sheepdog}", bin, "{findings_path}", findingsPath)
 }
 
 func (e *Engine) reviewDraftPath(id, task string, round int, code string) string {
@@ -1786,27 +1823,29 @@ func storedWorkerModel(t flow.Task) flow.Candidate {
 }
 
 func reviewChoice(t flow.Task, s flow.Settings, a flow.Attempt, h string, facts flow.ResolveFacts, failed []string) (flow.Intent, string, string) {
-	in, repeatWhy, reason := reviewChoiceReason(t, s, a, h, facts, failed)
+	in, repeatWhy, reason := reviewChoiceReason(flow.RoleReviewer, t, s, a, h, facts, failed)
 	return in, repeatWhy, reason.Why
 }
 
-func reviewChoiceReason(t flow.Task, s flow.Settings, a flow.Attempt, h string, facts flow.ResolveFacts, failed []string) (flow.Intent, string, flow.ResolveReason) {
+func reviewChoiceReason(role string, t flow.Task, s flow.Settings, a flow.Attempt, h string, facts flow.ResolveFacts, failed []string) (flow.Intent, string, flow.ResolveReason) {
 	var used []flow.Candidate
-	for _, r := range flow.Counted(a) {
-		if r.Reviewer.Model != "" && flow.Covers(a, r.Head, h) {
-			c := flow.Candidate(r.Reviewer)
-			c.CLI = cmp.Or(c.CLI, "claude")
-			used = append(used, c)
+	if role == flow.RoleReviewer {
+		for _, r := range flow.Counted(a) {
+			if r.Reviewer.Model != "" && flow.Covers(a, r.Head, h) {
+				c := flow.Candidate(r.Reviewer)
+				c.CLI = cmp.Or(c.CLI, "claude")
+				used = append(used, c)
+			}
 		}
 	}
 	for _, name := range failed {
 		cli, model, qualified := strings.Cut(name, "/")
-		if qualified && launchCapability(flow.RoleReviewer)(flow.Candidate{CLI: cli}).Why == "" {
+		if qualified && launchCapability(role)(flow.Candidate{CLI: cli}).Why == "" {
 			used = append(used, flow.Candidate{CLI: cli, Model: model})
 			continue
 		}
 		// Stored failures from older daemons only identify the model name.
-		for _, c := range flow.Candidates(flow.RoleReviewer, t, s) {
+		for _, c := range flow.Candidates(role, t, s) {
 			if c.Model == name {
 				used = append(used, c)
 			}
@@ -1814,12 +1853,12 @@ func reviewChoiceReason(t flow.Task, s flow.Settings, a flow.Attempt, h string, 
 	}
 	unused := facts
 	unused.Avoid = used
-	in, reason := flow.ResolveWithReason(flow.RoleReviewer, t, s, unused)
+	in, reason := flow.ResolveWithReason(role, t, s, unused)
 	if reason.Why == "" || len(used) == 0 {
 		return in, "", reason
 	}
 	repeatWhy := reason.Why
-	in, reason = flow.ResolveWithReason(flow.RoleReviewer, t, s, facts)
+	in, reason = flow.ResolveWithReason(role, t, s, facts)
 	return in, repeatWhy, reason
 }
 
@@ -1830,13 +1869,19 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 	if a.Review == nil {
 		return false
 	}
+	role := a.Review.Role()
+	retroExhausted := func() bool {
+		return role == flow.RoleRetro && a.Review.Run != nil && a.Review.Run.State == flow.PhaseEnded &&
+			a.Review.Run.Result != flow.EndStopped && a.Review.Run.Result != flow.EndQuota &&
+			a.Review.Retries >= s.Settings.ReviewerRetries
+	}
 	voidRound := func(stopped bool) bool {
 		if err := e.stopRuns(ctx, []string{cmp.Or(a.Review.RunID, reviewerName(id, t.ID, len(t.Attempts), a.Review.Round))}); err != nil {
 			e.logError("factory.hc_error", id, err)
 			return true
 		}
 		if !stopped {
-			a.Review.RunID, a.Review.RunTokenHash, a.Review.Run = "", "", &flow.RunRecord{Role: flow.RoleReviewer, State: flow.PhaseEnded, Result: flow.EndError, EndedAt: e.now()}
+			a.Review.RunID, a.Review.RunTokenHash, a.Review.Run = "", "", &flow.RunRecord{Role: role, State: flow.PhaseEnded, Result: flow.EndError, EndedAt: e.now()}
 		} else {
 			stopReviewRec(a.Review, s.Settings, e.now())
 		}
@@ -1854,6 +1899,9 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 	if a.Review.RunID == "" {
 		if a.Review.Run != nil && a.Review.Run.State == flow.PhaseEnded {
 			facts.Reviewer = a.Review.Run.TaskRun()
+			if retroExhausted() {
+				facts.RetroUnavailable = true
+			}
 		}
 		return false
 	}
@@ -1867,11 +1915,14 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 			return true
 		}
 		facts.Reviewer = a.Review.Run.TaskRun()
+		if retroExhausted() {
+			facts.RetroUnavailable = true
+		}
 		return false
 	}
 	wasLive := a.Review.Run != nil && a.Review.Run.State != "" && a.Review.Run.State != flow.PhaseEnded
 	var err error
-	if facts.Reviewer, err = e.advanceRunLocked(ctx, id, t.ID, s, a.Review.RunID, flow.RoleReviewer, cmp.Or(a.Review.Reviewer.CLI, "claude"), &a.Review.Run); err != nil {
+	if facts.Reviewer, err = e.advanceRunLocked(ctx, id, t.ID, s, a.Review.RunID, role, cmp.Or(a.Review.Reviewer.CLI, "claude"), &a.Review.Run); err != nil {
 		e.logError("factory.hc_error", id, err)
 		return true
 	}
@@ -1891,9 +1942,12 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 	if save {
 		e.saveLocked(id, *s)
 	}
+	if retroExhausted() {
+		facts.RetroUnavailable = true
+	}
 	facts.Reviewer.AskPending = a.Review.RunID != "" && ((a.Review.Run != nil && len(a.Review.Run.Held) > 0) ||
 		slices.ContainsFunc(s.Asks, func(ask flow.Ask) bool {
-			return ask.Status == flow.AskStatusOpen && ask.AskedBy == flow.RoleReviewer && ask.RunID == a.Review.RunID
+			return ask.Status == flow.AskStatusOpen && ask.AskedBy == role && ask.RunID == a.Review.RunID
 		}))
 	if a.Review.Reviewer.CLI != world.CodexCLI || facts.Reviewer.State == flow.RunGone {
 		return false
@@ -1961,9 +2015,14 @@ func tipKeepsRound(a flow.Attempt, x string, f flow.Facts) bool {
 func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State, ti int, f flow.Facts) (string, bool, error) {
 	t, a := &s.Tasks[ti], &s.Tasks[ti].Attempts[len(s.Tasks[ti].Attempts)-1]
 	round, h, parts := len(a.Rounds)+1, flow.H(*a), strings.Split(f.Ask, "@")
+	isRetro := strings.HasPrefix(f.Ask, flow.AskStartRetro)
+	role := flow.RoleReviewer
+	if isRetro {
+		role = flow.RoleRetro
+	}
 	prev := a.Review
 	counted, retries, failed := len(parts) == 4 && parts[2] != flow.ContinueResume, 0, []string(nil)
-	if a.Review != nil && a.Review.Round == round && flow.Covers(*a, a.Review.Head, h) {
+	if a.Review != nil && a.Review.Round == round && flow.Covers(*a, a.Review.Head, h) && a.Review.Role() == role {
 		retries, failed = a.Review.Retries, slices.Clone(a.Review.FailedModels)
 		if counted && a.Review.Reviewer.Model != "" {
 			failed = append(failed, cmp.Or(a.Review.Reviewer.CLI, "claude")+"/"+a.Review.Reviewer.Model)
@@ -1975,13 +2034,13 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 	workerNote := ""
 	if worker.Model == "" {
 		workers = flow.Candidates(flow.RoleWorker, *t, s.Settings)
-		workerNote = ". Worker identity is unknown. Selected a reviewer distinct from every worker candidate"
+		workerNote = ". Worker identity is unknown. Selected a " + role + " distinct from every worker candidate"
 	}
 	check := func(c flow.Candidate) flow.ResolveReason {
 		if slices.ContainsFunc(workers, c.SameModel) {
 			return flow.ReviewerDiffers
 		}
-		return launchCapability(flow.RoleReviewer)(c)
+		return launchCapability(role)(c)
 	}
 	adopt := prev == nil || prev.Run == nil || prev.Run.State != flow.PhaseEnded
 	term, err := e.lookupLaunchTerminal(ctx, name, adopt)
@@ -1995,16 +2054,18 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 		choice = terminalChoice(term, flow.Candidate{})
 		if choice.CLI == "" || choice.Model == "" || check(choice).Why != "" {
 			term, adopt = hc.Terminal{}, false
+		} else if isRetro {
+			kind = flow.RoundRetro
 		} else {
 			kind = flow.RoundFull
 		}
 	}
 	if term.State != "live" {
 		var repeatWhy string
-		in, codexEnv, reason := e.resolveLaunch(ctx, id, flow.RoleReviewer, *t, *s, check, func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
+		in, codexEnv, reason := e.resolveLaunch(ctx, id, role, *t, *s, check, func(f flow.ResolveFacts) (flow.Intent, flow.ResolveReason) {
 			var in flow.Intent
 			var r flow.ResolveReason
-			in, repeatWhy, r = reviewChoiceReason(*t, s.Settings, *a, h, f, failed)
+			in, repeatWhy, r = reviewChoiceReason(role, *t, s.Settings, *a, h, f, failed)
 			return in, r
 		})
 		if reason.Why != "" {
@@ -2018,11 +2079,14 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 		}
 		choice, env = intentCandidate(in), codexEnv
 		if repeatWhy != "" {
-			repeat = ". Repeating a reviewer in a fresh session because " + repeatWhy
+			repeat = ". Repeating a " + role + " in a fresh session because " + repeatWhy
 		}
 	}
 	review := flow.ReviewRun{Round: round, Head: h, Code: strings.ToLower(rand.Text()[:10]), Retries: retries, FailedModels: failed}
-	if adopt && prev != nil && prev.Round == round && flow.Covers(*a, prev.Head, h) && prev.Code != "" {
+	if isRetro {
+		review.Kind = flow.RoundRetro
+	}
+	if adopt && prev != nil && prev.Round == round && flow.Covers(*a, prev.Head, h) && prev.Code != "" && prev.Role() == role {
 		review = *prev
 	}
 	review.Reviewer = flow.Reviewer(choice)
@@ -2031,17 +2095,20 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 		a.Review.Retries = retries + 1
 	}
 	prevQuota := prev != nil && prev.Run != nil && prev.Run.State == flow.PhaseEnded && prev.Run.Result == flow.EndQuota
-	if kind == "" {
+	if term.State != "live" {
 		gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
-		var err error
-		kind, diff, err = e.reviewDiffPrompt(gctx, *a, h)
+		var diffKind string
+		diffKind, diff, err = e.reviewDiffPrompt(gctx, *a, h)
 		cancel()
 		if err != nil {
-			a.Review.Run = &flow.RunRecord{Role: flow.RoleReviewer, State: flow.PhaseEnded, Result: flow.EndFailed, EndedAt: e.now()}
+			a.Review.Run = &flow.RunRecord{Role: role, State: flow.PhaseEnded, Result: flow.EndFailed, EndedAt: e.now()}
 			if prevQuota {
 				a.Review = prev
 			}
 			return "", false, err
+		}
+		if !isRetro {
+			kind = diffKind
 		}
 	}
 	a.Review.Kind = cmp.Or(a.Review.Kind, kind)
@@ -2053,35 +2120,44 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 	}
 	var argv []string
 	if choice.CLI == "claude" {
-		argv = world.ClaudeReviewerArgv(model, effort, bin, draftPath)
+		if isRetro {
+			argv = world.ClaudeRetroArgv(model, effort, bin, draftPath)
+		} else {
+			argv = world.ClaudeReviewerArgv(model, effort, bin, draftPath)
+		}
 	} else {
-		argv = launchArgv(flow.RoleReviewer, choice, a.Worktree, "", false)
+		argv = launchArgv(role, choice, a.Worktree, "", false)
 	}
-	tmpl := reviewerCmdTemplate
-	if choice.CLI == world.CodexCLI {
-		tmpl = reviewerTemplate
-	}
-	gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
-	defer cancel()
-	prompt, err := e.reviewerPromptWith(gctx, tmpl, *t, *a, h, kind, diff, e.rejectionPrompt(id, t.ID, *a, h), round, bin, draftPath)
-	if err != nil {
-		a.Review = prev
-		return "", true, err
+	var prompt string
+	if isRetro {
+		prompt = e.retroPrompt(retroTemplate, *t, *a, s.Settings, h, diff, f.Lines, round, bin, draftPath)
+	} else {
+		tmpl := reviewerCmdTemplate
+		if choice.CLI == world.CodexCLI {
+			tmpl = reviewerTemplate
+		}
+		gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
+		defer cancel()
+		prompt, err = e.reviewerPromptWith(gctx, tmpl, *t, *a, h, kind, diff, e.rejectionPrompt(id, t.ID, *a, h), round, bin, draftPath)
+		if err != nil {
+			a.Review = prev
+			return "", true, err
+		}
 	}
 	if choice.CLI == world.AgyCLI {
 		prompt = "Do not modify, create or delete any files; read and run tests only (except writing findings to " + draftPath + ").\n\n" + prompt
 	}
-	termID, _, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, &a.Review.Run, adopt, flow.RunRecord{Role: flow.RoleReviewer, CLI: choice.CLI}, world.RunSpec{
+	termID, _, abort, err := e.launchRunLocked(ctx, id, s, &a.Review.RunTokenHash, &a.Review.Run, adopt, flow.RunRecord{Role: role, CLI: choice.CLI}, world.RunSpec{
 		Name: name, Cwd: a.Worktree, ClaudeConfig: e.Paths.ClaudeConfig,
 		Argv: argv, Prompt: prompt, Env: env,
-		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": flow.RoleReviewer, "sheepdog.task": t.ID, "sheepdog.model": model, "sheepdog.effort": effort},
+		Labels: map[string]string{"sheepdog.project": id, "sheepdog.role": role, "sheepdog.task": t.ID, "sheepdog.model": model, "sheepdog.effort": effort},
 	}, term)
 	if err == nil {
 		a.Review.RunID = termID
 	} else if abort || prevQuota {
 		a.Review = prev
 	}
-	return fmt.Sprintf("started reviewer %s (round %d, %s, %s/%s)%s", termID, round, kind, choice.CLI, model, workerNote+repeat), abort, err
+	return fmt.Sprintf("started %s %s (round %d, %s, %s/%s)%s", role, termID, round, kind, choice.CLI, model, workerNote+repeat), abort, err
 }
 
 func (e *Engine) reviewDiffPrompt(ctx context.Context, a flow.Attempt, head string) (kind, diff string, err error) {
@@ -2246,15 +2322,19 @@ func (e *Engine) execTimeRecap(ctx context.Context, id string, s *flow.State, ti
 	return e.openRecapLocked(ctx, id, s, ti, flow.TriggerTime, flow.SizeRecapAllowed(s.Tasks[ti], s.Settings))
 }
 
-// execNudgeReviewer is N29: nudge an idle reviewer with no verdict once.
+// execNudgeReviewer is N28/N29: nudge an idle reviewer or retro run with no verdict once.
 func (e *Engine) execNudgeReviewer(ctx context.Context, id string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	t := s.Tasks[ti]
 	a := flow.OpenAttempt(t)
 	if a == nil || a.Review == nil || a.Review.Run == nil || a.Review.RunID == "" {
 		return "reviewer already gone", false, nil
 	}
+	role := a.Review.Role()
 	var msg string
-	if a.Review.Reviewer.CLI == world.CodexCLI {
+	if role == flow.RoleRetro {
+		bin, draft := cmp.Or(e.Bin, "sheepdog"), e.reviewDraftPath(id, t.ID, a.Review.Round, a.Review.Code)
+		msg = fmt.Sprintf("You went idle without submitting a retro verdict. Write findings to %s and run `%s factory report retro <ship|fix|redesign> --code %s --head %s --cause <cause> --worker-change \"<text>\" --worker-change-kind <check|brief> --coordinator-change \"<text>\" --coordinator-change-kind <check|brief> --findings %s`.", draft, bin, a.Review.Code, a.Review.Head, draft)
+	} else if a.Review.Reviewer.CLI == world.CodexCLI {
 		msg = fmt.Sprintf("You went idle with no report tag. End your reply with `<report>{\"code\":%q,\"round\":%d,\"head\":%q,\"verdict\":\"pass\"|\"changes\",\"majors\":N}</report>`.", a.Review.Code, a.Review.Round, a.Review.Head)
 	} else {
 		bin := cmp.Or(e.Bin, "sheepdog")
@@ -2264,28 +2344,28 @@ func (e *Engine) execNudgeReviewer(ctx context.Context, id string, s *flow.State
 	if _, _, err := e.deliverRunLocked(ctx, a.Review.Run, s.Settings, msg, false, e.now()); err != nil {
 		return "", false, err
 	}
-	return fmt.Sprintf("nudged reviewer %s for verdict (round %d)", a.Review.RunID, a.Review.Round), false, nil
+	return fmt.Sprintf("nudged %s %s for verdict (round %d)", role, a.Review.RunID, a.Review.Round), false, nil
 }
 
-// execStopReviewer is N29: stop a reviewer that stayed idle with no report
-// after its nudge, or ran past review_minutes; ending as stuck lets 4.8 retry.
+// execStopReviewer is N28/N29: stop a reviewer or retro run that stayed idle
+// with no report after its nudge, or ran past review_minutes; ending as stuck lets 4.8 retry.
 func (e *Engine) execStopReviewer(ctx context.Context, _ string, s *flow.State, ti int, _ flow.Facts) (string, bool, error) {
 	a := flow.OpenAttempt(s.Tasks[ti])
 	if a == nil || a.Review == nil {
 		return "reviewer already gone", false, nil
 	}
-	runID := a.Review.RunID
+	runID, role := a.Review.RunID, a.Review.Role()
 	if runID != "" {
 		if err := e.stopRuns(ctx, []string{runID}); err != nil {
 			return "", false, err
 		}
 	}
 	if a.Review.Run == nil {
-		a.Review.Run = &flow.RunRecord{Role: flow.RoleReviewer}
+		a.Review.Run = &flow.RunRecord{Role: role}
 	}
 	a.Review.Run.State, a.Review.Run.Result, a.Review.Run.EndedAt = flow.PhaseEnded, flow.EndStuck, e.now()
 	a.Review.RunID, a.Review.RunTokenHash = "", ""
-	return fmt.Sprintf("stopped reviewer %s (round %d)", runID, a.Review.Round), false, nil
+	return fmt.Sprintf("stopped %s %s (round %d)", role, runID, a.Review.Round), false, nil
 }
 
 func (e *Engine) openRecapLocked(ctx context.Context, id string, s *flow.State, ti int, trigger string, allowed []string) (string, bool, error) {
