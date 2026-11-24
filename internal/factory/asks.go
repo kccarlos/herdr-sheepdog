@@ -279,7 +279,7 @@ func (e *Engine) answerAskLocked(id string, s *flow.State, ai int, option, why, 
 		if err != nil {
 			return e.refuse(id, "out_of_range", err.Error())
 		}
-		s.Settings, decText = nextSettings, fmt.Sprintf("saved %s %s (was %s)", a.Set.Name, a.Set.Value, before[bi].Value)
+		s.Settings, decText = nextSettings, fmt.Sprintf("saved %s %s (was %s)", a.Set.Name, cmp.Or(a.Set.Value, "empty"), cmp.Or(before[bi].Value, "empty"))
 	}
 	next, row, dec := flow.StepAsk(a, flow.AskEvent{Kind: flow.EvAskAnswer, Answer: resolved, Why: why, By: by, ProofID: proof.ID, DeviceID: proof.DeviceID}, now)
 	msg := fmt.Sprintf("Answer to %s: %s", next.ID, next.Answer) + map[bool]string{true: " — " + next.Why}[next.Why != ""]

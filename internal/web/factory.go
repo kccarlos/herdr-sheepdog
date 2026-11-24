@@ -194,7 +194,9 @@ func (s *Server) handleFactorySettings(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true, "ask": ask})
 		return
 	}
-	if rows, err := fs.SettingRows(id); errors.Is(err, factory.ErrProjectNotFound) {
+	if r.PathValue("id") != "" && id == "" {
+		writeError(w, http.StatusNotFound, factory.ErrProjectNotFound.Error())
+	} else if rows, err := fs.SettingRows(id); errors.Is(err, factory.ErrProjectNotFound) {
 		writeError(w, http.StatusNotFound, err.Error())
 	} else if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())

@@ -28,7 +28,10 @@ func (e *Engine) SettingRows(project string) ([]flow.SettingRow, error) {
 		return flow.DefaultSettings().Rows(), nil
 	}
 	s, err := e.loadProjectState(project)
-	return s.Settings.Rows(), err
+	if err != nil {
+		return nil, err
+	}
+	return s.Settings.Rows(), nil
 }
 
 // ProposeSetting opens an engine-written rule ask with Set{Name, Value, Was} for a paired session (SE1–SE6, SE13).

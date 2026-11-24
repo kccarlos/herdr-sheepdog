@@ -161,7 +161,7 @@ func settingLabel(name string) string { return strings.ReplaceAll(name, "_", " "
 
 func (s *Settings) numSettings() []numSetting {
 	return []numSetting{
-		{"review_rounds", &s.ReviewRounds, ReviewRoundsMin, ReviewRoundsMax}, {"max_rounds", &s.MaxRounds, s.ReviewRounds, MaxRoundsMax},
+		{"review_rounds", &s.ReviewRounds, ReviewRoundsMin, ReviewRoundsMax}, {"max_rounds", &s.MaxRounds, min(MaxRoundsMax, max(ReviewRoundsMin, s.ReviewRounds)), MaxRoundsMax},
 		{"retro_after_rounds_with_majors", &s.RetroAfterRoundsWithMajors, RetroMajorsMin, RetroMajorsMax}, {"retro_from_round", &s.RetroFromRound, RetroFromMin, RetroFromMax},
 		{"retros_per_task", &s.RetrosPerTask, 0, RetrosPerTaskMax}, {"plan_review_rounds", &s.PlanReviewRounds, 0, PlanReviewRoundsMax},
 		{"checks_grace_minutes", &s.ChecksGraceMinutes, ChecksGraceMin, ChecksGraceMax}, {"ci_stalled_minutes", &s.CIStalledMinutes, CIStalledMin, CIStalledMax},
