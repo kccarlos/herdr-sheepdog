@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -47,6 +48,39 @@ func TestLaunchCapabilityAndWiringForRoleRetro(t *testing.T) {
 	agyArgv := launchArgv(flow.RoleRetro, flow.Candidate{CLI: world.AgyCLI, Model: agyReviewModel, Effort: "high"}, "/wt", agyHistoryConvID, true)
 	if slices.Contains(agyArgv, "--conversation") || slices.Contains(agyArgv, agyHistoryConvID) {
 		t.Errorf("launchArgv(retro, agy, resume=true) = %q, must stay fresh without --conversation", agyArgv)
+	}
+
+	// B1: launchArgv for RoleRetro on Codex must fail closed (return nil),
+	// never falling through to CodexWorkArgv (--dangerously-bypass-approvals-and-sandbox).
+	if got := launchArgv(flow.RoleRetro, flow.Candidate{CLI: world.CodexCLI, Model: "gpt-6.2-sol", Effort: "high"}, "/wt", "", false); got != nil {
+		t.Fatalf("launchArgv(retro, codex) = %q, want nil (must fail closed, never CodexWorkArgv)", got)
+	}
+	// RoleReviewer on Codex must stay read-only and never emit CodexWorkArgv.
+	if got := launchArgv(flow.RoleReviewer, flow.Candidate{CLI: world.CodexCLI, Model: "gpt-6.2-sol", Effort: "high"}, "/wt", "", false); len(got) == 0 || slices.Contains(got, "--dangerously-bypass-approvals-and-sandbox") || !slices.Contains(got, "read-only") {
+		t.Fatalf("launchArgv(reviewer, codex) = %q, want read-only CodexArgv without --dangerously-bypass-approvals-and-sandbox", got)
+	}
+	// Every other disallowed (CLI, role) pair must fail closed (return nil).
+	for _, tc := range []struct {
+		cli, role, session string
+		resume             bool
+	}{
+		{world.CodexCLI, flow.RoleRetro, "sess-1", true},
+		{world.CodexCLI, "", "", false},
+		{world.CodexCLI, "unknown", "", false},
+		{world.AgyCLI, "", "", false},
+		{world.AgyCLI, "unknown", "", false},
+		{"claude", flow.RoleRetro, "", false},
+		{"claude", flow.RoleReviewer, "", false},
+		{"claude", "", "", false},
+		{"claude", "unknown", "", false},
+		{"unknown", flow.RoleWorker, "", false},
+		{"unknown", flow.RoleRetro, "", false},
+		{"", flow.RoleRetro, "", false},
+	} {
+		got := launchArgv(tc.role, flow.Candidate{CLI: tc.cli, Model: "m", Effort: "high"}, "/wt", tc.session, tc.resume)
+		if got != nil {
+			t.Errorf("launchArgv(%q, %q, resume=%v) = %q, want nil (must fail closed)", tc.role, tc.cli, tc.resume, got)
+		}
 	}
 
 	// taskExecutors and actOutage wire AskStartRetro, AskNudgeRetro, AskStopRetro.
@@ -588,4 +622,114 @@ func TestRetroAmendRequestAndAnswerAsk(t *testing.T) {
 			t.Fatalf("RoleRetro ask answer sends to retro = %q, want 1 delivery", got)
 		}
 	})
+}
+
+// TestFactoryRetroScriptLaunchModeImplemented checks PR 12.2 B2 (plan.md 447, 485):
+// scripts/e2e/factory-retro.sh --mode launch must be implemented (no TODO(12.2)
+// stub exiting 2), configure models.retro with agy/gemini-4-carbon-high, and
+// assert the 12.2 launch -> "In retro" -> M4 N25/N6 path.
+func TestFactoryRetroScriptLaunchModeImplemented(t *testing.T) {
+	scriptPath := filepath.Join("..", "..", "scripts", "e2e", "factory-retro.sh")
+	raw, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("read %s: %v", scriptPath, err)
+	}
+	src := string(raw)
+	if strings.Contains(src, "TODO(12.2)") {
+		t.Errorf("%s still contains TODO(12.2) stub", scriptPath)
+	}
+	for _, want := range []string{"gemini-4-carbon-high", "start_retro", "In retro", "retro_unavailable"} {
+		if !strings.Contains(src, want) {
+			t.Errorf("%s missing %q required for --mode launch", scriptPath, want)
+		}
+	}
+	if zshPath, err := exec.LookPath("zsh"); err == nil {
+		cmd := exec.Command(zshPath, scriptPath, "--mode", "launch", t.TempDir())
+		out, runErr := cmd.CombinedOutput()
+		var exitErr *exec.ExitError
+		if !errors.As(runErr, &exitErr) {
+			t.Fatalf("factory-retro.sh --mode launch on empty dir: err=%v out=%s", runErr, out)
+		}
+		if exitErr.ExitCode() == 2 || strings.Contains(string(out), "TODO(12.2)") {
+			t.Fatalf("factory-retro.sh --mode launch hit TODO(12.2) stub (exit %d): %s", exitErr.ExitCode(), out)
+		}
+		if exitErr.ExitCode() != 1 || !strings.Contains(string(out), "missing executable") {
+			t.Fatalf("factory-retro.sh --mode launch on empty dir exited %d, want preflight exit 1 (missing executable): %s", exitErr.ExitCode(), out)
+		}
+	}
+}
+
+// TestRetroStartDoesNotAdoptLiveReviewerTerminal checks the defense-in-depth
+// cross-role terminal adoption guard flagged in both R1 reviews: when a live
+// terminal with the same round name carries sheepdog.role=reviewer, N28's
+// AskStartRetro must not adopt it as a RoundRetro run.
+func TestRetroStartDoesNotAdoptLiveReviewerTerminal(t *testing.T) {
+	r, _, _ := setupRetroRig(t, flow.Candidate{CLI: world.AgyCLI, Model: agyReviewModel, Effort: "high"})
+	staleRevAddr := "term-stale-reviewer-r4"
+	r.srv.Add(hc.Terminal{
+		Address: staleRevAddr,
+		Name:    reviewerName(r.id, "T1", 1, 4),
+		State:   "live",
+		Argv:    world.AgyArgv(agyReviewModel, "", ""),
+		Labels: map[string]string{
+			"sheepdog.project": r.id,
+			"sheepdog.role":    flow.RoleReviewer,
+			"sheepdog.task":    "T1",
+			"sheepdog.model":   agyReviewModel,
+			"sheepdog.effort":  "high",
+		},
+	})
+	runsBefore := len(*r.runs)
+	r.pass() // L11 -> N28 launches retro
+
+	st := r.state()
+	a := st.Tasks[0].Attempts[0]
+	if a.Review == nil || a.Review.RunID == "" {
+		t.Fatalf("expected active retro run, got Review=%+v", a.Review)
+	}
+	if a.Review.RunID == staleRevAddr {
+		t.Fatalf("AskStartRetro adopted live sheepdog.role=reviewer terminal %s instead of launching a fresh retro terminal", staleRevAddr)
+	}
+	if len(*r.runs) != runsBefore+1 {
+		t.Fatalf("runs = %d, want %d (fresh retro launch after rejecting opposite-role terminal)", len(*r.runs), runsBefore+1)
+	}
+}
+
+// TestObserveReviewLockedNeverReadsCodexReportForRoundRetro checks the
+// defense-in-depth Codex guard flagged in R1: a RoundRetro slot must never
+// enter ReadCodexReport -> acceptVerdictLocked even if Reviewer.CLI is codex.
+func TestObserveReviewLockedNeverReadsCodexReportForRoundRetro(t *testing.T) {
+	l := newLanding(t).withTokens()
+	ctx := context.Background()
+	codexAddr := "term-codex-retro-1"
+	l.srv.Add(hc.Terminal{
+		Address: codexAddr,
+		Name:    reviewerName(l.id, "T1", 1, 1),
+		State:   "live",
+	})
+	l.srv.SetScreen(codexAddr, "› Retro round 1\n\n• self-check misses: 0\n• deletable: none\n\n  <report>{\"code\":\"retcode123\",\"round\":1,\"head\":\""+l.c1+"\",\"verdict\":\"pass\",\"majors\":0}</report>\n")
+	l.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.Rounds = nil
+		a.Review = &flow.ReviewRun{
+			RunID:    codexAddr,
+			Round:    1,
+			Kind:     flow.RoundRetro,
+			Head:     l.c1,
+			Code:     "retcode123",
+			Reviewer: flow.Reviewer{CLI: world.CodexCLI, Model: "gpt-6.2-sol", Effort: "high"},
+			Run:      &flow.RunRecord{Address: codexAddr, Role: flow.RoleRetro, CLI: world.CodexCLI, State: flow.PhaseIdle},
+		}
+	})
+
+	st := l.state()
+	facts := flow.Facts{Tip: l.c1, TipRel: flow.RelSame}
+	l.eng.mu.Lock()
+	_ = l.eng.observeReviewLocked(ctx, l.id, &st, 0, &facts, 0)
+	l.eng.mu.Unlock()
+
+	a := st.Tasks[0].Attempts[0]
+	if len(a.Rounds) != 0 || a.Review == nil {
+		t.Fatalf("observeReviewLocked read Codex <report> for RoundRetro and recorded reviewer verdict: rounds=%+v review=%+v", a.Rounds, a.Review)
+	}
 }
