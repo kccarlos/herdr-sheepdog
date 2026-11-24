@@ -1269,11 +1269,10 @@ func TestPR5b8_MainRedDoesNotStopKeepsN38AndClearsOnlyOnGoodCompletedBase(t *tes
 			}}
 		})
 
-		baseHead1 := "deadbeef1234567890deadbeef1234567890dead"
 		writePRJSON(t, w.gh, "view.json", c1, greenRollup)
 		writeGHFile(t, w.gh, "compare.json", `{"behind_by":1}`)
-		writeGHFile(t, w.gh, "base-ref.json", fmt.Sprintf(`{"object":{"sha":%q}}`, baseHead1))
-		writeBaseRuns(t, w.gh, fmt.Sprintf(`{"workflow_runs":[{"id":101,"head_sha":%q,"status":"completed","conclusion":"failure"}]}`, baseHead1))
+		baseHead1 := commitBaseHead(t, w.repo, w.gh, "red1")
+		writeCountedBaseRun(t, w.gh, 101, baseHead1, "failure")
 
 		mainRedDur := time.Duration(w.state().Settings.MainRedMinutes) * time.Minute
 		w.pass() // first red observation; N38 holds T1, main_red not yet raised
@@ -1333,9 +1332,11 @@ func TestPR5b8_MainRedDoesNotStopKeepsN38AndClearsOnlyOnGoodCompletedBase(t *tes
 		_ = os.Remove(filepath.Join(w.gh, "fail"))
 
 		// 2) In-progress run on base head must NOT clear main_red.
-		baseHead2 := "cafebabe1234567890cafebabe1234567890cafe"
-		writeGHFile(t, w.gh, "base-ref.json", fmt.Sprintf(`{"object":{"sha":%q}}`, baseHead2))
-		writeBaseRuns(t, w.gh, fmt.Sprintf(`{"workflow_runs":[{"id":102,"head_sha":%q,"status":"completed","conclusion":"success"},{"id":103,"head_sha":%q,"status":"in_progress","conclusion":null}]}`, baseHead2, baseHead2))
+		baseHead2 := commitBaseHead(t, w.repo, w.gh, "green2")
+		writeBaseRuns(t, w.gh, fmt.Sprintf(
+			`{"workflow_runs":[{"id":102,"path":%q,"head_sha":%q,"status":"completed","conclusion":"success"},{"id":103,"path":%q,"head_sha":%q,"status":"in_progress","conclusion":null}]}`,
+			testCIWorkflowPath, baseHead2, testCIWorkflowPath, baseHead2,
+		))
 		w.advance(time.Minute)
 		w.pass()
 		if _, active := statusAlert(t, w.paths, w.repo, "main_red"); !active {
@@ -1351,7 +1352,7 @@ func TestPR5b8_MainRedDoesNotStopKeepsN38AndClearsOnlyOnGoodCompletedBase(t *tes
 		}
 
 		// 4) Positively known completed good base snapshot -> clears main_red!
-		writeBaseRuns(t, w.gh, fmt.Sprintf(`{"workflow_runs":[{"id":102,"head_sha":%q,"status":"completed","conclusion":"success"}]}`, baseHead2))
+		writeCountedBaseRun(t, w.gh, 102, baseHead2, "success")
 		w.advance(time.Minute)
 		w.pass()
 		if ts, active := statusAlert(t, w.paths, w.repo, "main_red"); active {

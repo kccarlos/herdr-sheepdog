@@ -2515,7 +2515,7 @@ func (e *Engine) observeBaseLocked(ctx context.Context, id string, s *flow.State
 		return
 	}
 	gctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
-	res, err := e.git.BaseStatus(gctx, s.Project.Folder)
+	res, err := e.git.BaseStatus(gctx, s.Project.Folder, func(src, base string) bool { ok, _ := parsePRWorkflow(src, base); return ok })
 	cancel()
 	var ge *world.GitError
 	if errors.As(err, &ge) && ge.RPC != nil && ctx.Err() == nil {
