@@ -553,6 +553,7 @@ func (g *Git) BaseStatus(ctx context.Context, repoDir string, counted func(workf
 }
 
 func (g *Git) runCancelledRed(ctx context.Context, dir, repo string, runID int64) (string, error) {
+	var cancelled []int64
 	why := ""
 	err := g.ghPages(ctx, dir, fmt.Sprintf("repos/%s/actions/runs/%d/jobs", repo, runID), 100, func(raw []byte) (int, error) {
 		var resp struct {
@@ -561,25 +562,33 @@ func (g *Git) runCancelledRed(ctx context.Context, dir, repo string, runID int64
 				Conclusion string
 			}
 		}
-		err := json.Unmarshal(raw, &resp)
+		if err := json.Unmarshal(raw, &resp); err != nil {
+			return 0, err
+		}
 		for _, j := range resp.Jobs {
-			if err != nil || why != "" {
-				break
-			}
 			switch strings.ToLower(j.Conclusion) {
 			case "failure", "timed_out":
 				why = "cancelled_failed"
+				return 0, nil
 			case "cancelled":
-				var stop string
-				stop, err = g.checkRunStop(ctx, dir, repo, j.ID)
-				if stop == "timeout" {
-					why = "cancelled_timeout"
-				}
+				cancelled = append(cancelled, j.ID)
 			}
 		}
-		return len(resp.Jobs), err
+		return len(resp.Jobs), nil
 	})
-	return why, err
+	if err != nil || why != "" {
+		return why, err
+	}
+	for _, id := range cancelled {
+		stop, err := g.checkRunStop(ctx, dir, repo, id)
+		if err != nil {
+			return "", err
+		}
+		if stop == "timeout" {
+			return "cancelled_timeout", nil
+		}
+	}
+	return "", nil
 }
 
 // MergePR asks GitHub to squash-merge PR number, pinned to head: GitHub
