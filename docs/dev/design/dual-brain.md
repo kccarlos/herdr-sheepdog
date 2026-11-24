@@ -1,7 +1,7 @@
 # Dual-brain voice layer (experiment, branch `feat/dual-brain`)
 
-Status: experiment on a draft PR (#122), compared with `main` before the
-User decides. Not merged. Results: [`docs/dev/eval/dual-brain-2026-10-04.md`](../eval/dual-brain-2026-10-04.md).
+Status: merged (#122), in production; kept as the design record. Results:
+[`docs/dev/eval/dual-brain-2026-10-04.md`](../eval/dual-brain-2026-10-04.md).
 
 **One line:** Gemini Live is the *voice* that owns the conversation;
 the existing orchestrator is the *orchestrator* that reasons, investigates and acts

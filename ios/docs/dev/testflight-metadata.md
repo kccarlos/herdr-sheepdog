@@ -67,8 +67,7 @@ https://github.com/kccarlos/herdr-sheepdog
 
 https://github.com/kccarlos/herdr-sheepdog/blob/main/docs/privacy.md
 
-This URL resolves once the daemon repository is public. The page names this
-app and says it collects nothing.
+The page names this app and says it collects nothing.
 
 ## Beta App Review information
 

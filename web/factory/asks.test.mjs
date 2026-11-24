@@ -543,10 +543,13 @@ function createFakeIndexedDB() {
   };
 }
 
-function fakeFactoryPageDaemon({ shortCode = 'ABCD-EFGH', daemonId = 'DAEMON_PAGE_1', requireSessionForReads = false, asks = fixture.asks } = {}) {
+function fakeFactoryPageDaemon({ shortCode = 'ABCD-EFGH', daemonId = 'DAEMON_PAGE_1', requireSessionForReads = false, asks = fixture.asks, tasks = null } = {}) {
   const calls = [];
   const answered = [];
   const openAsks = asks.map((a) => ({ ...a }));
+  const graphTasks = tasks || [{ ref: 'T1', title: 'feat: demo task', stage: 'working', layer: 1, after: [], dependents: [] }];
+  const projectCounts = {};
+  for (const t of graphTasks) projectCounts[t.stage] = (projectCounts[t.stage] || 0) + 1;
   const challenges = new Set();
   const tickets = new Set();
   const cookieJar = { session: '' };
@@ -650,14 +653,14 @@ function fakeFactoryPageDaemon({ shortCode = 'ABCD-EFGH', daemonId = 'DAEMON_PAG
         if (path === '/api/factory/projects') {
           return reply(200, {
             protocol: 1,
-            projects: [{ id: 'proj-demo', goal: 'demo goal', running: true, counts: { working: 1 } }],
+            projects: [{ id: 'proj-demo', goal: 'demo goal', running: true, counts: projectCounts }],
           });
         }
         if (path === '/api/factory/projects/proj-demo/graph') {
           return reply(200, {
             protocol: 1,
             project: 'proj-demo',
-            tasks: [{ ref: 'T1', title: 'feat: demo task', stage: 'working', layer: 1, after: [], dependents: [] }],
+            tasks: graphTasks,
           });
         }
         if (path.startsWith('/api/factory/projects/proj-demo/log')) {
@@ -1068,5 +1071,90 @@ test('override ask card renders its multi-line command with each PR, short H, ch
 
     const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
     assert.match(css, /\.ask-cmd\b[^}]*white-space:\s*pre-wrap/, 'style.css should preserve newlines on .ask-cmd');
+  });
+});
+
+test('KB-TSK-19: owner_gate and owner_answer stages have labels, dots, alert highlight and order at the top', async (t) => {
+  await t.test('board renders owner_gate and owner_answer above blocked with labels, blocked dots, alert classes and sidebar counts', async (t) => {
+    const daemon = fakeFactoryPageDaemon({
+      daemonId: 'DAEMON_STAGES_9_1',
+      asks: [],
+      tasks: [
+        { ref: 'T-q', title: 'feat: queued', stage: 'queued', why_waiting: 'Queued to start', layer: 2, after: [], dependents: [] },
+        { ref: 'T-w', title: 'feat: working', stage: 'working', why_waiting: 'Worker is working', layer: 1, after: [], dependents: [] },
+        { ref: 'T-b', title: 'feat: blocked', stage: 'blocked_or_failed', why_waiting: 'Parked, waiting on the coordinator', layer: 1, after: [], dependents: [] },
+        { ref: 'T-a', title: 'feat: release', stage: 'owner_answer', why_waiting: 'Ship release v1?', layer: 1, after: [], dependents: [] },
+        { ref: 'T-g', title: 'feat: gate', stage: 'owner_gate', why_waiting: 'Merge PR #7?', layer: 0, after: [], dependents: [] },
+      ],
+    });
+    const page = await bootFactoryPage(t, daemon);
+    const mainEl = page.doc.getElementById('main');
+    const projectsEl = page.doc.getElementById('projects');
+
+    const groups = mainEl.querySelectorAll('section.group');
+    const labels = groups.map((g) => g.getAttribute('aria-label'));
+    const byLabel = new Map(groups.map((g) => [g.getAttribute('aria-label'), g]));
+
+    assert.ok(!labels.includes('owner_gate'), `raw stage name owner_gate should not appear in group labels: ${labels.join(', ')}`);
+    assert.ok(!labels.includes('owner_answer'), `raw stage name owner_answer should not appear in group labels: ${labels.join(', ')}`);
+    for (const want of ['needs your approval', 'waiting on you', 'blocked', 'working', 'queued']) {
+      assert.ok(byLabel.has(want), `expected group ${JSON.stringify(want)}, got: ${labels.join(', ')}`);
+    }
+
+    const gateIdx = labels.indexOf('needs your approval');
+    const answerIdx = labels.indexOf('waiting on you');
+    const blockedIdx = labels.indexOf('blocked');
+    const workingIdx = labels.indexOf('working');
+    const queuedIdx = labels.indexOf('queued');
+    assert.ok(gateIdx < blockedIdx, `owner_gate ("needs your approval" @ ${gateIdx}) must appear above blocked (@ ${blockedIdx})`);
+    assert.ok(answerIdx < blockedIdx, `owner_answer ("waiting on you" @ ${answerIdx}) must appear above blocked (@ ${blockedIdx})`);
+    assert.ok(blockedIdx < workingIdx && workingIdx < queuedIdx, `expected blocked < working < queued, got: ${labels.join(', ')}`);
+
+    for (const alertLabel of ['needs your approval', 'waiting on you', 'blocked']) {
+      const g = byLabel.get(alertLabel);
+      assert.ok(g.querySelector('h2.alert'), `${alertLabel} heading must have class="alert"`);
+      assert.ok(g.querySelector('.rows.alert'), `${alertLabel} rows container must have class="alert"`);
+      assert.ok(g.querySelector('.row .dot.blocked'), `${alertLabel} task row must use .dot.blocked`);
+      assert.equal(g.querySelector('.row .dot.idle'), null, `${alertLabel} task row must not fall back to .dot.idle`);
+    }
+    for (const plainLabel of ['working', 'queued']) {
+      const g = byLabel.get(plainLabel);
+      assert.equal(g.querySelector('h2.alert'), null, `${plainLabel} heading must not have class="alert"`);
+      assert.equal(g.querySelector('.rows.alert'), null, `${plainLabel} rows container must not have class="alert"`);
+    }
+
+    assert.match(projectsEl.textContent, /1 needs your approval/);
+    assert.match(projectsEl.textContent, /1 waiting on you/);
+    assert.doesNotMatch(projectsEl.textContent, /\bowner_gate\b|\bowner_answer\b/);
+  });
+
+  await t.test('alert flag lives in STAGE and boardHTML does not repeat stage-name comparisons', () => {
+    const js = readFileSync(new URL('./app.js', import.meta.url), 'utf8');
+    const stageMatch = js.match(/const\s+STAGE\s*=\s*\{([\s\S]*?)\};/);
+    assert.ok(stageMatch, 'expected const STAGE = { ... }; in app.js');
+    const stageBody = stageMatch[1];
+    assert.match(
+      stageBody,
+      /owner_answer\s*:\s*\[\s*['"]waiting on you['"]\s*,\s*['"]blocked['"]\s*,\s*(?:true|1)\s*\]/,
+      'STAGE.owner_answer must carry label, blocked dot, and truthy alert flag',
+    );
+    assert.match(
+      stageBody,
+      /owner_gate\s*:\s*\[\s*['"]needs your approval['"]\s*,\s*['"]blocked['"]\s*,\s*(?:true|1)\s*\]/,
+      'STAGE.owner_gate must carry label, blocked dot, and truthy alert flag',
+    );
+    assert.match(
+      stageBody,
+      /blocked_or_failed\s*:\s*\[\s*['"]blocked['"]\s*,\s*['"]blocked['"]\s*,\s*(?:true|1)\s*\]/,
+      'STAGE.blocked_or_failed must carry label, blocked dot, and truthy alert flag',
+    );
+
+    const boardMatch = js.match(/function\s+boardHTML\s*\([^)]*\)\s*\{([\s\S]*?)\n\}/);
+    assert.ok(boardMatch, 'expected function boardHTML in app.js');
+    assert.doesNotMatch(
+      boardMatch[1],
+      /blocked_or_failed|owner_gate|owner_answer/,
+      'boardHTML must read the alert flag from STAGE instead of naming stages inline',
+    );
   });
 });

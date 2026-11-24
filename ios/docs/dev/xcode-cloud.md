@@ -14,21 +14,21 @@ of the workflows is in
 old `v*` tags are now `ios-v*`). Xcode
 Cloud minutes are included in the Apple Developer Program.
 
-The latest build in TestFlight is **0.1.5 (57)** (internal group **Me**),
-built from tag `ios-v0.1.5` (`b414dda`, #41).
+Current version: see `MARKETING_VERSION` in `ios/project.yml` (`0.2.12`) and
+`git tag -l 'ios-v*'`.
 
 | | |
 |---|---|
 | Team | the Account Holder, Team ID `GV776BZVA8`, Apple ID: the Account Holder's (`DEVELOPMENT_TEAM` in `project.yml`) |
 | App bundle ID | `com.github.kccarlos.herdr-sheepdog-ios` |
 | Framework bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.kit` (embedded, not registered separately) |
-| Widget extension bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.widgets` (`SheepdogWidgets`: the Live Activity and the Talk control). Registered on the team with `asc` on 2026-10-05 (resource `3TB5FGDCW7`). Needs App Groups with `group.com.github.kccarlos.herdr-sheepdog-ios` assigned (the Live Activity reads the push content key) before the next archive |
+| Widget extension bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.widgets` (`SheepdogWidgets`: the Live Activity and the Talk control). Registered on the team with `asc` on 2026-10-05 (resource `3TB5FGDCW7`), with App Groups capability and `group.com.github.kccarlos.herdr-sheepdog-ios` assigned so the Live Activity reads the push content key |
 | Notification Service Extension bundle ID | `com.github.kccarlos.herdr-sheepdog-ios.NotificationService` (`SheepdogNotificationService`: decrypts relay notifications). Resource `JTDHJGH486`, App Groups capability |
 | App Group | `group.com.github.kccarlos.herdr-sheepdog-ios` (`SHEEPDOG_APP_GROUP`), on the app, the Notification Service Extension and the widget extension: the push content key's keychain access group |
 | App Store Connect record | "Sheepdog for herdr" (the name "Sheepdog" was taken), App ID 6817155887, SKU `herdr-sheepdog-ios` |
 | Product and scheme | `Sheepdog` (shared; Test runs `SheepdogKitTests` and `SheepdogUITests`, Archive uses Release) |
-| Version | `MARKETING_VERSION` in `project.yml` (now `0.1.7`) |
-| Build number | Xcode Cloud's own, `CI_BUILD_NUMBER`. The latest in TestFlight is `0.1.5 (57)`, from tag `ios-v0.1.5` (`b414dda`) |
+| Version | `MARKETING_VERSION` in `ios/project.yml` (`0.2.12`) |
+| Build number | Xcode Cloud's own, `CI_BUILD_NUMBER` (tags: `git tag -l 'ios-v*'`) |
 | TestFlight internal group | **Me** (tester: the Account Holder). The Beta App Review contact is not saved; it only matters for external testing, which is not used |
 
 Bundle IDs may contain letters, digits, hyphens and periods (Apple's
@@ -106,12 +106,9 @@ make profiles. It has no entitlements: Live Activities need only
 in the app's process. Simulator builds do not sign, so the first tag archive after #37 (0.1.4 (48)) was the first real check of
 this, and it signed and exported with no change. Since the Live Activity's
 push updates (2026-10-22) it has one entitlement, the App Group, to read
-the push content key that opens a pushed update's sealed rows. **Before the
-next `ios-v*` archive:** `asc bundle-ids capabilities add --capability
-APP_GROUPS` on the widget's App ID, then assign
-`group.com.github.kccarlos.herdr-sheepdog-ios` to it (developer.apple.com ▸
-Identifiers ▸ the widget ▸ App Groups ▸ Configure, or a local `xcodebuild
-archive -allowProvisioningUpdates` as for the extension below).
+the push content key that opens a pushed update's sealed rows. App Groups
+(`group.com.github.kccarlos.herdr-sheepdog-ios`) was enabled on the widget's
+App ID and tags from `ios-v0.1.16` onward archive with it enabled.
 
 **The Notification Service Extension** (`SheepdogNotificationService`)
 decrypts relay notifications. Its App ID,
@@ -125,7 +122,7 @@ registered `group.com.github.kccarlos.herdr-sheepdog-ios` and assigned it to
 both App IDs, and an `app-store-connect` export of that archive signed. By
 hand the same is developer.apple.com ▸ Identifiers ▸ App Groups ▸ +, then
 App Groups ▸ Configure on both App IDs. On the daemon side, you need an APNs auth key
-(`.p8`) for team `GV776BZVA8` (herdr-sheepdog `docs/push.md`).
+(`.p8`) for team `GV776BZVA8` ([`docs/dev/push.md`](../../../docs/dev/push.md)).
 
 **Export compliance.** `ITSAppUsesNonExemptEncryption` is `NO` in the app's
 Info.plist: the app uses only the encryption built into iOS (HTTPS/WSS

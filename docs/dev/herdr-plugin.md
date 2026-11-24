@@ -20,20 +20,20 @@ opening a popup:
 
 | Action | Runs | Popup |
 |---|---|---|
-| Set up sheepdog (`setup`) | `sheepdog init` | 90×30. Asks for a key; at the end offers `sheepdog service install`. |
+| Set up sheepdog (`setup`) | `sheepdog setup` | 90×30. Opens the browser setup wizard (falls back to the terminal flow over SSH); at the end offers `sheepdog service install`. |
 | Pair your phone (`pair`) | `sheepdog pair --compact` | 72×42, sized for the QR code with three addresses. |
 | Check setup (`doctor`) | `sheepdog doctor` | 100×30 |
 | Logs (`logs`) | `sheepdog logs -f` | 90%×80%. Follows the log; Ctrl-C closes it. |
 
 A popup closes when its command exits, so
 [`scripts/plugin-pane.sh`](../../scripts/plugin-pane.sh) waits for Enter after
-`init`, `pair` and `doctor`. Bind the actions to keys with herdr's
+`setup`, `pair` and `doctor`. Bind the actions to keys with herdr's
 `[[keys.command]]` (`type = "plugin_action"`).
 
 ## First run
 
 1. Run **Set up sheepdog**, paste a Gemini key, and say yes to the login
-   service. Or from a shell: `sheepdog init`.
+   service. Or from a shell: `sheepdog setup`.
 2. **Check setup** should show no FAIL. Start herdr's agents as usual.
 3. Open <http://127.0.0.1:7777/voice>, or run **Pair your phone** for the
    iOS app.

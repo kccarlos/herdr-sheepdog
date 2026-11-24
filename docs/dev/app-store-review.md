@@ -31,8 +31,8 @@ Vision Pro availability; the CEO records a real-use video; the first App Store v
 `0.2.0`. Rows below say "decided" where one of these settles them.
 
 **Progress.** Done: privacy manifests (#416), purpose strings (#417), privacy policy and
-reviewer notes (#421), privacy and licence links in the app (#422). Left: the AI consent
-screen with a withdraw switch, the demo asking for the microphone on first use, the
+reviewer notes (#421), privacy and licence links in the app (#422), the AI consent screen with
+a withdraw switch (PR 5, #433), and the demo asking for the microphone on first use (PR 6, #434). Left:
 screenshots, entering the metadata, and the CEO's own steps (section 3, submission checklist).
 [ios/docs/app-review-notes.md](../../ios/docs/app-review-notes.md) now carries section 4 and the
 decided name.
@@ -43,7 +43,7 @@ decided name.
 |---|---|---|---|
 | 1 | The earlier name "Sheepdog — voice for Herdr agents" had **33 characters**; the limit is 30. | 2.3.7 | decided: `Sheepdog: Voice for AI Agents` (29) |
 | 2 | "Herdr" is another developer's product name (herdr, `github.com/herdrdev/herdr`). Putting it in the app name needs that developer's approval. Subtitles may not reference other apps. | 4.1(c), 5.2.1, 5.2.2, 2.3.7 | decided: not in the name or subtitle; the description may say it works with herdr |
-| 3 | The app has **no consent for third-party AI**. The voice audio, the transcript text, agent screens and attached photos go from the phone to the user's daemon, and the daemon passes them on to Google, OpenAI, Anthropic or DeepSeek. The microphone purpose string says the voice goes "only to the sheepdog daemon", which leaves the AI out. | 5.1.2(i), 5.1.1(ii) | done (consent screen, Settings ▸ Privacy switch); the purpose strings are done (#417) |
+| 3 | The app has **no consent for third-party AI**. The voice audio, the transcript text, agent screens and attached photos go from the phone to the user's daemon, and the daemon passes them on to Google, OpenAI, Anthropic or DeepSeek. The microphone purpose string says the voice goes "only to the sheepdog daemon", which leaves the AI out. | 5.1.2(i), 5.1.1(ii) | done (consent screen, Settings ▸ Privacy switch, #433); the purpose strings are done (#417) |
 | 4 | A reviewer cannot use the real product: it needs a self-hosted daemon. The demo covers the flow. A video of real use would remove the doubt. | 2.1(a), 4.2.3(i) | CEO records it (keep `<VIDEO LINK>`) + pass |
 | 5 | The app has **no privacy policy link**. The policy is also out of date: it says the connection is plain HTTP, and it does not mention photo attachments or AI consent. | 5.1.1(i) | done (#421, #422) |
 | 6 | No target has a **privacy manifest** (`PrivacyInfo.xcprivacy`), although the code calls required-reason APIs: `UserDefaults` and `ProcessInfo.systemUptime`. | Upcoming requirements, May 1 2024 | done (#416) |
@@ -53,7 +53,7 @@ decided name.
 | 10 | The phone shell runs commands on the user's computer. | 2.5.2, 4.2.7 | pass, with notes |
 | 11 | EU **trader status** (DSA) has to be declared, because the app ships to the EU. | DSA, Feb 2025 | decided: the CEO declares trader status in App Store Connect |
 | 12 | The app is available on Apple silicon Macs and Vision Pro by default, where nobody has tested it. | 2.1, 2.4 | decided: turn both off |
-| 13 | The demo asks for the microphone and speech recognition as soon as it starts, before the user asks for anything that needs them. | 5.1.1(iv), HIG | done (PR 6) |
+| 13 | The demo asks for the microphone and speech recognition as soon as it starts, before the user asks for anything that needs them. | 5.1.1(iv), HIG | done (PR 6, #434) |
 
 ## 2. Checklist
 
@@ -101,11 +101,11 @@ fix column says what to change. "PR n" refers to the PR list in section 3.
 |---|---|---|---|
 | 5.1.1(i): a privacy policy link in App Store Connect **and inside the app** | done (#422) | `AboutView` (`ios/Sources/Sheepdog/SettingsScreens.swift:401-452`) and the first-run screen have no privacy link. `SetupHelp` has no privacy URL (`ios/Sources/SheepdogKit/SetupHelp.swift:10-15`). | PR 2: add `SetupHelp.privacyURL` and a "Privacy policy" link to About, the first-run screen and the consent screen. |
 | 5.1.1(i): the policy says what is collected, how it is used, retention and deletion, how to withdraw consent, and that third parties give equal protection | done (#421) | [privacy.md](../privacy.md) has four problems. (1) Its iPhone section still says the connection is "plain HTTP … because the daemon has no TLS". (2) Its camera row leaves out the photo attachments. (3) Its notification row says permission is asked "after the first connection", but it is asked only when the daemon can send. (4) It does not say that the AI providers are the user's choice with the user's own keys, how to withdraw consent, or the third-party protection statement. It also names the app "Sheepdog for herdr". | PR 3: rewrite the app section of privacy.md with those facts, and add an "AI services" section that the consent screen links to. |
-| 5.1.1(ii): consent for data use; an easy way to withdraw it; accurate purpose strings | left: consent (PR 5); the purpose strings are done (#417) | The microphone string (`ios/project.yml:167-170`) says the voice goes only to the daemon, which leaves out the AI step after it. The app has no withdraw switch. | PR 4: purpose strings. PR 5: consent with a withdraw switch in Settings. |
+| 5.1.1(ii): consent for data use; an easy way to withdraw it; accurate purpose strings | done (PR 5 / #433, #417) | The microphone string (`ios/project.yml:245-249`) names the AI step (#417), and Settings ▸ Privacy ▸ "Send to AI services" provides consent and withdrawal (`AIConsentModel`, `PrivacyView`). | PR 4: purpose strings (done, #417). PR 5: consent with a withdraw switch in Settings (done, #433). |
 | 5.1.1(iii): data minimisation; prefer out-of-process pickers | pass | Photos come through `PhotosPicker` and files through `fileImporter` (`ios/Sources/Sheepdog/AttachButton.swift:16,68`), so there is no photo-library permission. The camera is used only for the QR code and for a photo the user takes. | None. |
-| 5.1.1(iv): respect permissions; ask in context | done (PR 6) | The demo asks for speech recognition (`ios/Sources/Sheepdog/DemoVoice.swift:61`) and the microphone when it starts ([launch-review.md](../../ios/docs/dev/launch-review.md) P2). The demo works when both are declined. | PR 6: ask on the first tap of the microphone in the demo. |
+| 5.1.1(iv): respect permissions; ask in context | done (PR 6, #434) | The demo asks for speech recognition (`ios/Sources/Sheepdog/DemoVoice.swift:61`) and the microphone on the first tap of the microphone ([launch-review.md](../../ios/docs/dev/launch-review.md) P2). The demo works when both are declined. | PR 6: ask on the first tap of the microphone in the demo (done, #434). |
 | 5.1.1(v): offer account deletion if the app creates accounts | pass | The app creates no accounts. A paired computer is removed in Settings, and its keys are deleted from the keychain and the Secure Enclave ([security.md](design/security.md#12-removing-a-computer)). | None. |
-| 5.1.2(i): **clearly disclose sharing with third-party AI and get explicit permission first** | left (PR 5, SVM) | No consent exists (grep for "consent" in `ios/Sources`: nothing). Data path: phone → user's daemon → voice provider (Gemini Live or GPT-Live), and → orchestrator provider (Gemini, DeepSeek, Anthropic, an OpenAI-compatible endpoint, or local Ollama) ([privacy.md](../privacy.md#what-goes-to-which-provider)). The CEO approved a first-launch consent screen with Agree and Learn more. | PR 5 (section 3). |
+| 5.1.2(i): **clearly disclose sharing with third-party AI and get explicit permission first** | done (PR 5, #433) | Consent screen (`AIConsentModel`, `SessionViewModel+Consent.swift`, `ConsentUITests`) discloses sharing with the user's configured AI services before the first real voice session or typed line, with Agree, Learn more, and Settings ▸ Privacy withdrawal. Data path: phone → user's daemon → voice provider (Gemini Live or GPT-Live), and → orchestrator provider (Gemini, DeepSeek, Anthropic, an OpenAI-compatible endpoint, or local Ollama) ([privacy.md](../privacy.md#what-goes-to-which-provider)). | PR 5 (section 3, done, #433). |
 | 5.1.2(i): App Tracking Transparency | pass | No tracking, no ads, no analytics SDK. | None. Set `NSPrivacyTracking` to false (PR 1). |
 | 5.1.2(i): system features (push and others) are not required to use the app | pass | Every permission is optional, and the demo works with all of them declined ([launch-review.md](../../ios/docs/dev/launch-review.md)). | None. |
 | 5.2.1, 5.2.2: third-party trademarks and services | pass | herdr is named in the description and in the app as the thing the app works with, not in the name. The app uses SwiftTerm (MIT, `ios/project.yml:23-26`). | The SwiftTerm licence notice is in About (#422). |
@@ -135,8 +135,8 @@ Fix PRs, in order of rejection risk. Status as of 2026-10-26.
 | 2 | `feat(ios): privacy policy and licences in About and Welcome` | done (#422) | 5 |
 | 3 | `docs: privacy policy and reviewer notes for the App Store` | done (#421) | 5, 7 |
 | 4 | `fix(ios): purpose strings name the AI step` | done (#417) | 3 (part) |
-| 5 | `feat(ios): ask before voice and screens go to AI services` | left | 3 |
-| 6 | `fix(ios): demo asks for the microphone on first use` | left | 13 |
+| 5 | `feat(ios): ask before voice and screens go to AI services` | done (#433) | 3 |
+| 6 | `fix(ios): demo asks for the microphone on first use` | done (#434) | 13 |
 | 7 | Screenshots (section 8) | left | 2.3.3 |
 | 8 | Enter the metadata (section 7) in App Store Connect | left (CEO) | 2.3.1 |
 
@@ -161,8 +161,8 @@ App Store Connect, not in this repository.
 
 Nothing here has been done. Each step is a change in App Store Connect that only the CEO makes.
 
-1. Wait until PR 5 (AI consent), PR 6 (demo microphone) and the screenshots have merged, and
-   the version is `0.2.0` (`MARKETING_VERSION` in `ios/project.yml`; it is 0.1.21 now).
+1. Wait until the screenshots have merged (PR 5 #433 AI consent and PR 6 #434 demo microphone are done;
+   `MARKETING_VERSION` in `ios/project.yml` is `0.2.12`).
 2. Business: declare EU trader status with your real name, address, phone and email, and
    verify them. They are shown on the product page and are never put in the repository.
 3. Apps, the app record: rename it to `Sheepdog: Voice for AI Agents`; subtitle `Manage coding
@@ -173,17 +173,17 @@ Nothing here has been done. Each step is a change in App Store Connect that only
    session, approve a prompt, open an agent window and a shell). Upload it as an unlisted
    video or a GitHub release asset, and put its link in the reviewer notes in place of
    `<VIDEO LINK>`.
-6. Install the exact TestFlight build of 0.2.0 on one iPhone and one iPad and walk the
+6. Install the exact TestFlight build (current `0.2.x`, `0.2.12` on `main`) on one iPhone and one iPad and walk the
    reviewer notes once.
 7. App Privacy: choose "Data Not Collected" (section 5). Privacy Policy URL from section 7.
 8. Age rating: answer the questions with section 6.3 (expected 4+).
 9. Export compliance: no non-exempt encryption (section 6.1). Content rights: "No" (section 6.2).
-10. Version 0.2.0 page: paste the promotional text, description, keywords, support URL and
+10. Version `0.2.x` page: paste the promotional text, description, keywords, support URL and
     marketing URL from section 7; upload the screenshots from section 8; copyright
     `2026 <your seller name>`.
 11. App Review Information: your contact name, phone and email; no sign-in needed; paste the
     notes from section 4 (limit 4,000 characters) with the video link filled in.
-12. Select the 0.2.0 build, then submit for review. Submission needs your OK.
+12. Select the `0.2.x` build, then submit for review. Submission needs your OK.
 
 ## 4. Reviewer notes (draft for App Review Information ▸ Notes)
 
@@ -321,7 +321,7 @@ of them are answered with the lowest value.
 | Availability | Every country or region except mainland China | China mainland would also need an ICP filing. EU trader status is declared (risk 11). |
 | Mac and Vision Pro | Off (decided) | Risk 12. |
 | Copyright | `2026 <seller name>` (CEO) | |
-| Version | `0.2.0` (decided) | `MARKETING_VERSION` is 0.1.21 now (`ios/project.yml:40`); a version bump PR sets 0.2.0 before the submission build. |
+| Version | `0.2.x` (decided first App Store version `0.2.0`) | `MARKETING_VERSION` is `0.2.12` on `main` (`ios/project.yml:40`). |
 | Review contact | CEO fills in App Store Connect | Not in the repository. |
 
 Description draft (about 1,500 characters):

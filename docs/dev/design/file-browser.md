@@ -1,6 +1,8 @@
 # Files on the phone
 
-Status: design, 2026-11-04.
+Status: **built and shipped** (`internal/files/`, `internal/web/files.go`,
+[docs/iphone-app.md](../../iphone-app.md)); kept as the design record (design,
+2026-11-04).
 
 Away from the desk, an agent says it wrote a report or an image. The app
 should show it. This adds a read-only file browser beside the existing

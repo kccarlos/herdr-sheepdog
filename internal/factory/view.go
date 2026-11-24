@@ -84,29 +84,27 @@ var taskRows = func() map[string]flow.Row[flow.In] {
 	return m
 }()
 
-func lastTaskRows(logs []LogLine) (lastLog, lastRow map[string]LogLine) {
-	lastLog, lastRow = map[string]LogLine{}, map[string]LogLine{}
+func lastTaskRows(logs []LogLine) map[string]LogLine {
+	lastRow := map[string]LogLine{}
 	for _, l := range logs {
 		if l.Task != "" {
-			lastLog[l.Task] = l
 			if _, ok := taskRows[l.Rule]; ok {
 				lastRow[l.Task] = l
 			}
 		}
 	}
-	return lastLog, lastRow
+	return lastRow
 }
 
 func GraphViewOf(s flow.State, logs []LogLine) GraphView {
-	lastLog, _ := lastTaskRows(logs)
-	return graphViewOf(s, lastLog)
+	return graphViewOf(s, lastTaskRows(logs))
 }
 
 func revActive(a *flow.Attempt) bool {
 	return a != nil && a.Review != nil && (a.Review.Run == nil || a.Review.Run.State != flow.PhaseEnded)
 }
 
-func graphViewOf(s flow.State, lastLog map[string]LogLine) GraphView {
+func graphViewOf(s flow.State, lastRow map[string]LogLine) GraphView {
 	idx, deps := make(map[string]int, len(s.Tasks)), map[string][]string{}
 	for i, t := range s.Tasks {
 		idx[t.ID] = i
@@ -127,7 +125,7 @@ func graphViewOf(s flow.State, lastLog map[string]LogLine) GraphView {
 	tasks := make([]TaskView, 0, len(s.Tasks))
 	for i, t := range s.Tasks {
 		stage, why := taskStageWhy(t, s.Tasks, s.Asks, s.Settings, s.Project.Started)
-		l, model, term, rounds := lastLog[t.ID], "", "", 0
+		l, model, term, rounds := lastRow[t.ID], "", "", 0
 		if n := len(t.Attempts); n > 0 {
 			rounds = len(slices.DeleteFunc(slices.Clone(flow.Counted(t.Attempts[n-1])), func(r flow.Round) bool { return r.Kind == flow.RoundSendBack }))
 		}
@@ -268,6 +266,8 @@ func taskWhy(t flow.Task, a *flow.Attempt, unmet []string, started bool, stage s
 		return "Worker failed, waiting on the coordinator"
 	case stage == "waiting_on_dep" && len(unmet) > 0:
 		return "Waiting on " + strings.Join(unmet, ", ")
+	case t.HoldWhy != "":
+		return t.HoldWhy
 	case r.ID == "N19b":
 		return "Not merged: checks got worse after the override card was made"
 	case r.ID == "N15" || r.ID == "N19":
@@ -276,8 +276,6 @@ func taskWhy(t flow.Task, a *flow.Attempt, unmet []string, started bool, stage s
 		return "PR conflicts with base; telling worker to merge base"
 	case r.ID == "N17":
 		return "Waiting for another merge in flight"
-	case t.HoldWhy != "":
-		return t.HoldWhy
 	case stage == "working" && revActive(a):
 		return fmt.Sprintf("In review round %d", len(a.Rounds)+1)
 	case r.Why == flow.WhyCI:

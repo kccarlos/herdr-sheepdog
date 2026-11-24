@@ -37,8 +37,7 @@ apns:             daemon --(JWT, full payload)----------------------------------
 With `push.mode` unset, a fully configured `[push.apns]` means `apns` (an
 existing self-built setup keeps working), otherwise `relay` at
 `push.relay.url` (default: the shared relay, the `DefaultRelayURL`
-constant in `internal/config`). Until the shared relay's URL is filled in,
-the relay path is disabled with that reason.
+constant in `internal/config`).
 
 ## Configuration
 
@@ -126,9 +125,10 @@ change follow from it (`approval` → `APPROVAL`, anything else → `AGENT`;
 `approval` and `blocked` are `time-sensitive`, others `active`), and
 `collapse_id` (the pending or event id, an opaque counter).
 
-Until the app ships the extension, relay notifications show the
-placeholder text, and Approve / Decline on them do nothing (the app
-finds no `sheepdog` dictionary); a tap still opens the app.
+`SheepdogNotificationService` (`ios/Sources/SheepdogNotificationService/`)
+decrypts the sealed payload before display; if decryption fails (for example
+when no content key is stored yet), the placeholder alert stays and a tap
+still opens the app.
 
 TestFlight and App Store builds register `production`; Xcode debug builds
 `sandbox` (the APNs environment the token was issued for). Tokens are
@@ -145,7 +145,19 @@ read):
   pending action's options) or a block with nothing answerable
   (`kind: blocked`);
 - a **kept promise** the user asked for ("tell me when auth
-  finishes"): `kind` is the promise's event (`done`, `idle`, …).
+  finishes"): `kind` is the promise's event (`done`, `idle`, …);
+- a **factory ask** (`fask-<ask_id>`, from `internal/supervisor/factory.go`
+  for every open gated factory ask, including gates and overrides): always
+  sent as `kind: blocked` (`NeedsYou: true`, `aps.category: "AGENT"`,
+  `aps.interruption-level: "time-sensitive"`, `pending_id: "fask-<ask_id>"`)
+  with **no quick-reply `options`** (O32 / AQ2 in
+  [`engine-v2/design.md`](engine-v2/design.md#71-asks)), so lock-screen
+  Approve / Decline is never offered and tapping opens the card to pick a
+  stored option;
+- a **factory override result** (the single summary line emitted for an
+  answered-Yes override card, `engine-v2/design.md` §4.3b): sent as
+  `kind: done` (`NeedsYou: false`, `aps.category: "AGENT"`,
+  `aps.interruption-level: "active"`, no card).
 
 Plain finishes, starts, status chatter and silent context are never
 sent. The notification goes out whether or not a voice client is
@@ -192,18 +204,21 @@ an event already notified is not sent again.
 - `aps.alert.title` is the agent's alias, or `Sheepdog` when it has none;
   `aps.alert.body` is the same spoken sentence the voice says.
 - `aps.thread-id` is the pane id, so the app groups an agent's alerts.
-- `aps.category` is `APPROVAL` when there is a pending answer-prompt
-  action (the app can answer it with
+- `aps.category` is `APPROVAL` when there is a pending worker answer-prompt
+  action with quick-reply options (the app can answer it with
   `POST /api/pending/answer {"id": pending_id, "option": index}`),
-  otherwise `AGENT`.
+  otherwise `AGENT`. Factory asks (`fask-<ask_id>`) always use `AGENT` with
+  no quick-reply options (O32 / AQ2).
 - `aps.interruption-level` is `time-sensitive` for needs-you events
-  (blocked, approval) and `active` for a kept promise. Time-sensitive
+  (blocked, approval, factory ask) and `active` for a kept promise or
+  factory override result. Time-sensitive
   alerts need the app's
   `com.apple.developer.usernotifications.time-sensitive` entitlement;
   without it iOS delivers them as `active`.
-- `sheepdog.pending_id` and `sheepdog.options` are present only for an
-  approval; `sheepdog.event_id` when the supervisor minted one (with the
-  orchestrator on).
+- `sheepdog.pending_id` is present for worker approvals and factory asks
+  (`fask-<ask_id>`); `sheepdog.options` is present only for worker approvals
+  (omitted on factory asks per O32 / AQ2); `sheepdog.event_id` when the
+  supervisor minted one (with the orchestrator on).
 - `sheepdog.computer` is this daemon's id (`tls/daemon_id`), so an app
   paired with several computers knows which one an alert is from, answers
   it there, and adds the computer's name to the title.

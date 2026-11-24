@@ -6,7 +6,7 @@
 
 **Sources.** What the owner actually typed to the factory of another project over a week (a private note, not in the repository: about 150 messages, read by a subagent). Four sentences of the coordinator template come from it. The rest of what it found is kept there as "seen, not built": the owner asked not to turn every finding into a mechanism. The old engine's four templates and their replay evidence (`factory/templates/`, `docs/dev/factory/template-replay.md`); Ponytail ("the smallest complete change"); the pstack principle skills; the talk "All Code Is Slop (Except Mine)" (the inverse pyramid); the owner's lessons (`wiki/lessons/agent-delivery.md`, `software-factory.md`).
 
-**Status.** A design. The template texts in section 5 are first drafts. None has been run against an agent; the repo's rule is that a prompt change needs replay evidence, and section 7 says which situations that is.
+**Status.** `coordinator.md`, `worker.md`, `reviewer_cmd.md` (Claude and `agy`), and `reviewer.md` (Codex transitional) are implemented under `internal/factory/` and live in version 1 (run across slices 3–9 and the v1 exit test, [plan.md](plan.md) §7). Only the plan reviewer (slice 11), retro (coming in slice 12), and verifier (later) remain drafts in section 5. The repo's rule that a prompt change needs replay evidence still applies (section 7).
 
 ## 1. The rule: as little prompt as possible
 
@@ -166,9 +166,9 @@ The full texts stay where they live (`reference_repo/ponytail`, the pstack skill
 
 Each is embedded Markdown. `{…}` is filled by the engine from records, never by another agent. The bracket at the end of a line is its source and is stripped before the agent sees it.
 
-The templates in use are `internal/factory/coordinator.md`, `worker.md`, `reviewer_cmd.md` (Claude and `agy`) and `reviewer.md` (Codex transitional, pending its S-REV-2 spike): these drafts, one rule per line, without the lines that name commands of later slices (`ask`, `answer`, `report ask`, `override`, `show`). Where the drafts and the code differ, the code wins:
+The templates in use are `internal/factory/coordinator.md`, `worker.md`, `reviewer_cmd.md` (Claude and `agy`) and `reviewer.md` (Codex transitional, pending its S-REV-2 spike): these texts, one rule per line, already include `ask`, `answer`, `report ask`, and `ask --kind override` (only `show` is not built yet). Where the drafts below and the code differ, the code wins:
 
-- A worker that needs a choice, or whose check already passes before it writes anything, reports `report ready --nothing-to-change --why` with the question or the passing output; the coordinator answers with `send-back` or `close` (until `report ask` exists).
+- A worker that needs a decision mid-task runs `report ask`; before its first commit, if the task needs no change, its check already passes, or it needs an owner choice, it reports `report ready --nothing-to-change --why` and the coordinator answers with `send-back` or `close`.
 - The reviewer runs in the task's worktree, not a scratch copy (design.md O10), one plain command per check, and a verdict from a changed worktree is thrown away. `minor:` lines are allowed beside `major:`.
 - Only the placeholders the engine fills are used: `{folder} {goal} {sheepdog}`; `{id} {title} {brief} {not_doing} {outcomes} {ready_cmd} {worktree} {branch}`; `{proofs} {rejections} {diff} {kind} {head} {round} {code} {findings_path}`. There is no `{facts}` yet: the coordinator's facts arrive with each wake.
 - The rule "a rejected finding comes back only with a run" and the empty-`skipped` major are written by the engine beside their facts, so the reviewer template does not repeat them. The design note and milestone fields of 3.3 do not exist yet; the coordinator quotes the owner in each brief.
@@ -374,13 +374,13 @@ One statement of where each thing lands, by the slices of [plan.md](plan.md):
 | The `ready` report with a proof per outcome run by the report client, `touched` and `skipped` | design.md 7.2 | 3 |
 | `--self-check-misses`, `--class`, `--deletable`, `--not-run` on `factory report review` (and the transitional reply lines for Codex); the first-look pass rate | design.md 7.2, 11.2 | 3 |
 | The templates of section 5 with replay evidence | this file | 3 (slice 1 runs on three short stand-ins) |
-| The engine running the proofs again in a clean checkout, and a per-outcome judgement in the verdict | design.md 11.6 | 10 |
+| The engine running the proofs again in a clean checkout, and a per-outcome judgement in the verdict | design.md 11.6 | 10 (parked 2026-11-23) |
 | The plan review run, its report and the coordinator's answers, `plan_review_rounds` | design.md 11.7, 7.2 | 11 |
 | The design note as part of a milestone's plan; the per-template numbers in the facts block | design.md 11.7, 11.2 | later, with milestones and the retro |
 
 ## 9. Limits, stated plainly
 
-- These templates are drafts that no agent has run. Wording that reads well can still fail a replay; the old templates failed 6 of 15 situations before they were fixed against them.
+- The v1 templates (`coordinator.md`, `worker.md`, `reviewer_cmd.md`, `reviewer.md`) are live on `main`; the plan reviewer (slice 11), retro (coming in slice 12), and verifier (later) remain drafts that no agent has run yet. Wording that reads well can still fail a replay; the old templates failed 6 of 15 situations before they were fixed against them.
 - Layer 3 is still layer 3. "Take the smallest complete change" is held by a model's attention, a size cap, and a reviewer asked which lines can go. None of those is proof that the smallest change was taken.
 - Five safety rules are held by a prompt sentence alone, with no code behind them yet (design.md section 13): the coordinator makes its own calls on a wake and does not ask the owner (KB-COO-41); the coordinator never writes code or commits to the base (KB-COO-55); what the coordinator may approve for a worker (KB-COO-61); a worker never prints or commits a secret (KB-WKT-24); a worker stays in its scope and never merges or rebases a PR branch (KB-ASK-24). Branch protection on the base is the backstop for the second and the last.
 - The plan reviewer can become a rubber stamp or a source of noise. Its findings are counted by outcome: if plans that passed it grow past their estimates as often as plans did before it, it is removed.

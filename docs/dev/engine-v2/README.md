@@ -1,12 +1,15 @@
-# Factory engine v2 (design)
+# Factory engine v2
 
-The design of the new factory engine, written in Go inside sheepdog. The
-old Python engine is used only as a knowledge base and is not in this
-repository's history from here on.
+The Go factory engine inside sheepdog (`internal/factory`). Version 1
+(slices 1–8), `agy`, O32 (no quick-reply on factory ask pushes), and slice 9
+(`/factory` web board) are built on `main`; slice 10 (engine-run evidence) is
+parked; slice 12 (the retro round) is next (not yet shipped). The old Python
+engine is used only as a historical knowledge base and is not in this
+repository's history on `main`.
 
 - [design.md](design.md): the engine. Records tied to commits, one ordered
   first-match rule table per task, transition matrices for runs and asks,
-  and the decisions D1 to D16 in section 0.
+  and the decisions D1 to D17 in section 0.
 - [plan.md](plan.md): how it is built, as thin vertical slices. Slice 1 is
   the walking skeleton.
 - [prompts.md](prompts.md): the coordinator, worker and reviewer prompts,

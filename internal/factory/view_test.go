@@ -224,7 +224,9 @@ func TestStageMappingAndWhyWaitingCases(t *testing.T) {
 			t.Errorf("%s: got (%q, %q), want (%q, %q)", ref, tv.Stage, tv.WhyWaiting, w.stage, w.why)
 		}
 	}
-	if byRef["ci"].LastRule != "pr_snapshot" || byRef["parked"].LastRule != "N3" || byRef["parked"].LastDecision != "stopped runs" {
+	// Non-row log lines (ready, pr_snapshot) do not populate LastRule/LastDecision
+	// when no task row has been logged (plan.md 9.1).
+	if byRef["ci"].LastRule != "" || byRef["ci"].LastDecision != "" || byRef["parked"].LastRule != "N3" || byRef["parked"].LastDecision != "stopped runs" {
 		t.Errorf("last_rule/last_decision unexpected: ci=%+v parked=%+v", byRef["ci"], byRef["parked"])
 	}
 }
@@ -519,5 +521,108 @@ func TestNoInReviewRoundAfterLastVerdict(t *testing.T) {
 	}
 	if got := s[0].Why; got != want {
 		t.Errorf("StatusViewOf Why = %q, want %q", got, want)
+	}
+}
+
+// TestTaskWhyHoldPrecedesOverrideRowIDs checks plan.md 9.1 (KB-TSK-19):
+// taskWhy returns t.HoldWhy before row-id cases, so an N15 hold (e.g. GitHub
+// unavailable) and an N16 launch wait (e.g. quota hold) show the recorded hold
+// instead of the fixed override prose.
+func TestTaskWhyHoldPrecedesOverrideRowIDs(t *testing.T) {
+	t0 := time.Date(2026, 11, 23, 13, 0, 0, 0, time.UTC)
+	n15Hold := "GitHub did not answer"
+	n16Wait := "waiting on claude quota until 3:00 PM"
+	st := flow.State{
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "p-hold", Started: true},
+		Tasks: []flow.Task{
+			{
+				ID:      "T-n15",
+				Title:   "feat: override push held",
+				LastRow: "N15",
+				HoldWhy: n15Hold,
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0",
+					Ready:      []flow.Ready{{Head: "c1"}},
+					Overrides:  []flow.Override{{Head: "c1", ChecksShown: flow.ChecksAbsent}},
+				}},
+			},
+			{
+				ID:      "T-n16",
+				Title:   "feat: override conflict launch wait",
+				LastRow: "N16",
+				HoldWhy: n16Wait,
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0",
+					Ready:      []flow.Ready{{Head: "c2"}},
+					Overrides:  []flow.Override{{Head: "c2", ChecksShown: flow.ChecksGreen}},
+				}},
+			},
+		},
+	}
+	logs := []LogLine{
+		{Seq: 1, At: t0, By: "engine", Task: "T-n15", Rule: "N15", Decision: "hold", Why: n15Hold},
+		{Seq: 2, At: t0, By: "engine", Task: "T-n16", Rule: "N16", Decision: "hold", Why: n16Wait},
+	}
+	g := GraphViewOf(st, logs)
+	s := StatusViewOf(st, logs)
+	want := []struct {
+		id, why string
+	}{
+		{"T-n15", n15Hold},
+		{"T-n16", n16Wait},
+	}
+	for i, w := range want {
+		if g.Tasks[i].Ref != w.id || g.Tasks[i].WhyWaiting != w.why {
+			t.Errorf("GraphViewOf[%s].WhyWaiting = %q, want %q", w.id, g.Tasks[i].WhyWaiting, w.why)
+		}
+		if s[i].ID != w.id || s[i].Why != w.why {
+			t.Errorf("StatusViewOf[%s].Why = %q, want %q", w.id, s[i].Why, w.why)
+		}
+	}
+}
+
+// TestTrailingPRSnapshotDoesNotBlankTaskDetail checks plan.md 9.1 (KB-TSK-19):
+// GraphViewOf and StatusViewOf use the last task-row log line (lastRow), so a
+// trailing pr_snapshot line does not overwrite LastRule/LastDecision on
+// #<project>/<task>, and a task with no logged task row stays empty with no
+// t.LastRow fallback.
+func TestTrailingPRSnapshotDoesNotBlankTaskDetail(t *testing.T) {
+	t0 := time.Date(2026, 11, 23, 13, 0, 0, 0, time.UTC)
+	passed := []flow.Attempt{{
+		BaseCommit: "000", PR: 1, Ready: []flow.Ready{{Head: "h1"}},
+		Rounds: []flow.Round{
+			{N: 1, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
+			{N: 2, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictPass},
+		},
+	}}
+	st := flow.State{
+		Settings: flow.DefaultSettings(),
+		Project:  flow.Project{ID: "p-snap", Started: true},
+		Tasks: []flow.Task{
+			{ID: "T1", Title: "feat: logged row then snapshot", LastRow: "N36", Attempts: passed},
+			{ID: "T2", Title: "feat: snapshot only, no logged row", LastRow: "N36", Attempts: passed},
+		},
+	}
+	logs := []LogLine{
+		{Seq: 1, At: t0, By: "engine", Task: "T1", Rule: "N36", Decision: "waiting on checks", Why: "checks are pending"},
+		{Seq: 2, At: t0.Add(time.Second), By: "engine", Task: "T1", Rule: "pr_snapshot", Decision: "", Why: "the PR snapshot changed"},
+		{Seq: 3, At: t0.Add(2 * time.Second), By: "engine", Task: "T2", Rule: "pr_snapshot", Decision: "", Why: "the PR snapshot changed"},
+	}
+
+	g := GraphViewOf(st, logs)
+	s := StatusViewOf(st, logs)
+
+	if g.Tasks[0].LastRule != "N36" || g.Tasks[0].LastDecision != "waiting on checks" {
+		t.Errorf("GraphViewOf[T1] = (rule=%q, decision=%q), want (N36, %q)", g.Tasks[0].LastRule, g.Tasks[0].LastDecision, "waiting on checks")
+	}
+	if s[0].Rule != "N36" || s[0].Stale {
+		t.Errorf("StatusViewOf[T1] = (rule=%q, stale=%v), want (N36, false)", s[0].Rule, s[0].Stale)
+	}
+	if g.Tasks[1].LastRule != "" || g.Tasks[1].LastDecision != "" {
+		t.Errorf("GraphViewOf[T2] = (rule=%q, decision=%q), want empty (no logged row, no t.LastRow fallback)", g.Tasks[1].LastRule, g.Tasks[1].LastDecision)
+	}
+	if s[1].Rule != "" || s[1].Why != "Waiting on CI and merge (no logged row)" {
+		t.Errorf("StatusViewOf[T2] = (rule=%q, why=%q), want empty rule and '(no logged row)'", s[1].Rule, s[1].Why)
 	}
 }

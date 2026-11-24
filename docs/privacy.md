@@ -25,6 +25,8 @@ service. The developer never sees them.
 | What you said (text), agent screens, session records, command output | The **orchestrator provider** you chose (Google Gemini, DeepSeek, Anthropic, or your OpenAI-compatible endpoint) | So it can answer and act |
 | The daemon's briefings to the voice (short summaries of agent events) | The voice provider | So the voice can tell you the news |
 | A phone notification: which agent needs you and what it asks | Encrypted, through sheepdog's push relay to Apple's push service (APNs); or straight to APNs with your own key (`push.mode = "apns"`) | The lock-screen notification |
+| Factory task briefs, repository code, and diffs (when you run the [factory](factory.md)) | Your installed coding CLIs (`claude`, `codex`, `agy`) and their AI providers, under your own accounts | To plan, implement, and review tasks |
+| Factory branches, pull requests, CI queries, and squash merges (when you run the [factory](factory.md)) | GitHub (`github.com`), through `git` and `gh` under your own account | To open, test, and merge pull requests |
 
 Each provider handles that data under its own terms; read them, especially for
 free-tier keys. A local Ollama orchestrator keeps screens and text on your
@@ -120,6 +122,15 @@ Everything is in two directories you own; `data_dir` moves the second.
 | `~/.local/share/sheepdog/env-file.json` | The path of the env file the last daemon loaded its keys from, and whether it had them. A path only, no value. | Until you delete it. |
 | `~/.local/share/sheepdog/sheepdog.pid` | The running daemon's pid, URL and version. | While it runs. |
 | `~/.local/share/sheepdog/update-check.json`, `update-notice.json`, `update-restart.json` | The last answer of the daily update check, when a command last printed the update notice, and the last automatic restart after an upgrade. No personal data. | Until you delete them. |
+| `~/.local/share/sheepdog/factory/projects/<id>/state.json`, `log.jsonl` | For each started [factory](factory.md) project: the project record, settings, tasks, commit sequence, SHA-256 hashes of per-run tokens (`state.json`, mode 0600), and the append-only engine step log (`log.jsonl`, mode 0600). Plain run tokens stay only in each run's environment. | Until `sheepdog data clear --all` or you delete it. |
+| `~/.local/share/sheepdog/factory/projects/<id>/worktrees/<task>-<attempt>/` | Git worktrees created from the fresh remote base for each factory task attempt, where workers edit and commit. | Until task cleanup removes a clean worktree, `sheepdog data clear --all`, or you delete it. |
+| `~/.local/share/sheepdog/factory/projects/<id>/briefs/<task>.md` | Task brief and outcomes markdown written for worker handoffs (mode 0600). | Until `sheepdog data clear --all` or you delete it. |
+| `~/.local/share/sheepdog/factory/projects/<id>/reports/<task>-r<n>.md` | Findings and notes from each accepted review round (mode 0600, in a mode 0700 directory; reviewer CLIs may also leave `*.draft.md` scratch files under your umask). | Until `sheepdog data clear --all` or you delete it. |
+| `~/.local/share/sheepdog/factory/proofs.json` | Verified owner proof records minted for paired-device taps and live voice answers to gated factory asks (`proof_id`, `ask_id`, `option`, `input_kind`, `device_id`, `answered_at`; mode 0600, never spoken words). | 24 hours (expired entries are ignored in memory and pruned on disk on the next proof mint), or until `sheepdog data clear --all`. |
+| `~/.local/share/sheepdog/factory/pool-cooldowns.json` | Per-candidate quota cooldown reset timestamps recorded when a factory run hits a provider usage limit (mode 0600). | Pruned on disk on the next quota-limit write after expiry, or until `sheepdog data clear --all`. |
+| `~/.local/share/sheepdog/factory/codex-home/` | Shared `CODEX_HOME` directory for factory Codex runs (symlink to your `~/.codex/auth.json` plus Codex's own session and log files). | Until you delete it or run `sheepdog data clear --all`. |
+| `<repo>/.git/config` (`sheepdog.projectId`) | The project id written to local git config by `sheepdog factory start` so moving or renaming the checkout keeps the same project. | Until you unset `sheepdog.projectId` in the repo. |
+| `<git-dir>/sheepdog-proofs/<head>-<n>.log` | Combined proof-command output logs written inside the worktree's git directory when a factory worker runs `sheepdog factory report ready` (mode 0600). | Until the worktree's git directory is pruned or deleted. |
 
 (Source of truth: [CONFIG.md](../CONFIG.md), "What sheepdog stores".)
 

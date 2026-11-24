@@ -1,7 +1,9 @@
 # Security: pairing keys, encryption and device access
 
-Status: **decided** (2026-10-21). Nothing here is built yet. Section 15
-lists the phases; section 16 records how each open question was closed.
+Status: **built and shipped** (`internal/pair`, `internal/web/tlsid.go`,
+`internal/web/auth.go`, `ios/Sources/SheepdogKit/DeviceKey.swift`,
+`PinnedTrust.swift`); kept as the design record (decided 2026-10-21). Section
+15 lists the phases; section 16 records how each open question was closed.
 
 **Goal.** Make the phone and browser connection to the daemon safe on any
 network, with **no extra steps for the user**. Pairing stays one QR scan.
