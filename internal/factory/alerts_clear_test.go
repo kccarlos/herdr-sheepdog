@@ -692,3 +692,374 @@ func TestProbe_ClearSaveFailureThenCauseReturnsMissesNewRaise(t *testing.T) {
 		t.Fatalf("expected [raise, clear, raise], got %d lines: %+v", len(logs), logs)
 	}
 }
+
+// Review round 2 blocking finding #1 (neonm #1, neonh #1; design.md section 6, "Alerts"):
+// After an alert clear appends "alert cleared: <kind>" and SaveState fails, if the
+// cause returns while AppendLog also fails, deleting memAlerts[ak] early must not
+// drop episode #2's raise once the store recovers.
+func TestProbe_ClearSaveFailThenReturningCauseLogFailDropsRaise(t *testing.T) {
+	w := newAlertWorld(t, "Clear save fail then returning cause log fail", false)
+	w.setPool("claude", &poolWin{2, 90 * time.Minute}, &poolWin{60, 72 * time.Hour})
+	w.pass() // Seq 2: raise #1 ("waiting")
+
+	failSave, failLog := true, false
+	w.eng.writeState = func(path string, s flow.State) error {
+		if failSave {
+			return errors.New("injected save failure")
+		}
+		return SaveState(path, s)
+	}
+	w.eng.writeLog = func(path string, l LogLine) error {
+		if failLog {
+			return errors.New("injected log failure")
+		}
+		return AppendLog(path, l)
+	}
+
+	// Pass 2: pool recovers -> Seq 3 ("alert cleared: no_pool") appended, SaveState fails.
+	w.advance(time.Minute)
+	w.setPool("claude", &poolWin{80, 4 * time.Hour}, &poolWin{60, 72 * time.Hour})
+	w.pass()
+
+	// Pass 3: pool drops again while store is still failing (log append also fails).
+	failLog = true
+	w.advance(time.Minute)
+	w.setPool("claude", &poolWin{2, 90 * time.Minute}, &poolWin{60, 72 * time.Hour})
+	w.pass()
+
+	// Pass 4: store recovers while pool is still down -> episode #2 must log its raise at Seq > 3.
+	failSave, failLog = false, false
+	w.advance(time.Minute)
+	w.pass()
+
+	logs := alertEpisodeLogs(t, w.paths, w.repo, flow.AlertNoPool)
+	if len(logs) != 3 || logs[1].Decision != "alert cleared: no_pool" || logs[2].Decision != "waiting" || logs[2].Seq <= logs[1].Seq {
+		t.Fatalf("expected [raise, clear, raise] with increasing Seq, got %+v", logs)
+	}
+}
+
+// Review round 2 blocking finding #1 (writeState-still-failing variant):
+// After an alert clear appends Seq 3 and SaveState fails, if the cause returns
+// while AppendLog succeeds (Seq 4) and SaveState still fails, a later recovery
+// and clear must not reuse Seq 3 after Seq 4.
+func TestProbe_ClearSaveFailThenReturningCauseSaveFailReusesSeq(t *testing.T) {
+	w := newAlertWorld(t, "Clear save fail then returning cause save fail", false)
+	w.setPool("claude", &poolWin{2, 90 * time.Minute}, &poolWin{60, 72 * time.Hour})
+	w.pass() // Seq 2: raise #1
+
+	failSave := true
+	w.eng.writeState = func(path string, s flow.State) error {
+		if failSave {
+			return errors.New("injected save failure")
+		}
+		return SaveState(path, s)
+	}
+
+	// Pass 2: pool recovers -> Seq 3 ("alert cleared: no_pool") appended, SaveState fails.
+	w.advance(time.Minute)
+	w.setPool("claude", &poolWin{80, 4 * time.Hour}, &poolWin{60, 72 * time.Hour})
+	w.pass()
+
+	// Pass 3: pool drops again while AppendLog succeeds (Seq 4 raise) and SaveState still fails.
+	w.advance(time.Minute)
+	w.setPool("claude", &poolWin{2, 90 * time.Minute}, &poolWin{60, 72 * time.Hour})
+	w.pass()
+
+	// Pass 4: store recovers and pool recovers -> clear #2 must be logged at Seq > 4.
+	failSave = false
+	w.advance(time.Minute)
+	w.setPool("claude", &poolWin{80, 4 * time.Hour}, &poolWin{60, 72 * time.Hour})
+	w.pass()
+
+	logs := alertEpisodeLogs(t, w.paths, w.repo, flow.AlertNoPool)
+	if len(logs) != 4 || logs[1].Decision != "alert cleared: no_pool" || logs[3].Decision != "alert cleared: no_pool" {
+		t.Fatalf("expected [raise, clear, raise, clear], got %+v", logs)
+	}
+	for i := 1; i < len(logs); i++ {
+		if logs[i].Seq <= logs[i-1].Seq {
+			t.Fatalf("reused or non-increasing Seq in episode logs: line %d seq=%d after line %d seq=%d (%+v)",
+				i, logs[i].Seq, i-1, logs[i-1].Seq, logs)
+		}
+	}
+}
+
+// Review round 2 blocking finding #1 (AlertDisk returning while AppendLog fails):
+// After a disk clear appends Seq 3 and SaveState fails, if disk returns to 95%
+// while AppendLog fails, recovery must not lose logSeq 3 and append raise #2 at
+// reused Seq 3.
+func TestProbe_ClearSaveFailThenReturningDiskLogFailReusesSeq(t *testing.T) {
+	w := newCDWorld(t, "Clear save fail then returning disk log fail")
+	w.setDisks(
+		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 95, Known: true},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.pass() // Seq 2: raise #1
+
+	failSave, failLog := true, false
+	w.eng.writeState = func(path string, s flow.State) error {
+		if failSave {
+			return errors.New("injected save failure")
+		}
+		return SaveState(path, s)
+	}
+	w.eng.writeLog = func(path string, l LogLine) error {
+		if failLog {
+			return errors.New("injected log failure")
+		}
+		return AppendLog(path, l)
+	}
+
+	// Pass 2: disk recovers -> Seq 3 ("alert cleared: disk") appended, SaveState fails.
+	w.setDisks(
+		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 60, Known: true},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.advanceMinute()
+	w.pass()
+
+	// Pass 3: disk hits 95% again while AppendLog also fails.
+	failLog = true
+	w.setDisks(
+		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 95, Known: true},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.advanceMinute()
+	w.pass()
+
+	// Pass 4: store recovers while disk is still 95% -> raise #2 must be at Seq > 3.
+	failSave, failLog = false, false
+	w.advanceMinute()
+	w.pass()
+
+	logs := alertEpisodeLogs(t, w.paths, w.repo, flow.AlertDisk)
+	if len(logs) != 3 || logs[1].Decision != "alert cleared: disk" || logs[2].Decision != "alert raised: disk" {
+		t.Fatalf("expected [raise, clear, raise], got %+v", logs)
+	}
+	if logs[2].Seq <= logs[1].Seq {
+		t.Fatalf("returning disk raise reused Seq: clear=%d raise=%d (%+v)", logs[1].Seq, logs[2].Seq, logs)
+	}
+}
+
+// Review round 2 blocking finding #2 (neonh #2; design.md section 6, "Alerts"):
+// After a clear appends Seq 3 and SaveState fails, persisting another alert
+// (persistAlertLocked) while df is transiently unknown must not write state.json
+// with Seq >= 3 and Alerts["disk"] still active, which causes a duplicate clear
+// after restart.
+func TestProbe_ClearSaveFailureThenOtherAlertAndRestartLogsTwice(t *testing.T) {
+	w := newCDWorld(t, "Clear save fail then other alert and restart")
+	w.setDisks(
+		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 95, Known: true},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.pass() // Seq 2: alert raised: disk
+
+	failSave := true
+	w.eng.writeState = func(path string, s flow.State) error {
+		if failSave {
+			return errors.New("injected save failure")
+		}
+		return SaveState(path, s)
+	}
+	w.setDisks(
+		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 60, Known: true},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.advanceMinute()
+	w.pass() // Seq 3: alert cleared: disk; SaveState fails -> memAlerts[disk]={logSeq:3, cleared:true}
+
+	// Store recovers, df is transiently unknown, and hc goes offline:
+	// persistAlertLocked(hc_unavailable) saves state.json at Seq 4.
+	failSave = false
+	w.setDisks(
+		DiskReading{Unknown: "df timed out"},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.hcOnline.Store(false)
+	w.advanceMinute()
+	w.pass()
+
+	// Restart keeps Seq 3 in log.jsonl (3 <= 4); next clear pass must not log a second clear.
+	w.hcOnline.Store(true)
+	w.setDisks(
+		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 60, Known: true},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.restart()
+	w.advanceMinute()
+	w.pass()
+
+	if clears := alertClearLogs(t, w.paths, w.repo, flow.AlertDisk); len(clears) != 1 {
+		t.Fatalf("expected 1 clear line, got %d: %+v", len(clears), clears)
+	}
+}
+
+// Review round 2 blocking finding #2 (neonm #2, saveLocked path):
+// After a clear appends Seq 3 and SaveState fails, a saveLocked call on a pass
+// where the alert observer does not clear (df transiently unknown) must not write
+// state.json with Seq >= 3 and Alerts["disk"] still active.
+func TestProbe_ClearSaveFailureThenSaveLockedAndRestartLogsTwice(t *testing.T) {
+	w := newCDWorld(t, "Clear save fail then saveLocked and restart")
+	w.setDisks(
+		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 95, Known: true},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.pass() // Seq 2: alert raised: disk
+
+	// Seed a non-empty WaitKey in state.json so passProjectRulesLocked (J3)
+	// clears it via e.saveLocked(id, *s) on a later pass without calling commitLocked.
+	st, err := LoadState(w.paths.State(w.id))
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	st.Project.WaitKey = "J7:prev"
+	if err := SaveState(w.paths.State(w.id), st); err != nil {
+		t.Fatalf("SaveState: %v", err)
+	}
+
+	failSave := true
+	w.eng.writeState = func(path string, s flow.State) error {
+		if failSave {
+			return errors.New("injected save failure")
+		}
+		return SaveState(path, s)
+	}
+	w.setDisks(
+		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 60, Known: true},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.advanceMinute()
+	w.pass() // Seq 3: alert cleared: disk; SaveState fails -> memAlerts[disk]={logSeq:3, cleared:true}
+
+	// Store recovers while df is transiently unknown; passProjectRulesLocked clears
+	// WaitKey via saveLocked without running observeDiskLocked's clear path.
+	failSave = false
+	w.setDisks(
+		DiskReading{Unknown: "df timed out"},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.advanceMinute()
+	w.pass()
+
+	// Restart and recover df: must not append a second "alert cleared: disk".
+	w.setDisks(
+		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 60, Known: true},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.restart()
+	w.advanceMinute()
+	w.pass()
+
+	if clears := alertClearLogs(t, w.paths, w.repo, flow.AlertDisk); len(clears) != 1 {
+		t.Fatalf("expected 1 clear line, got %d: %+v", len(clears), clears)
+	}
+}
+
+// Review round 2 blocking finding #3 (neonh #3):
+// Engine.Say must merge pending memAlerts (advancing s.Seq past p.logSeq) so it
+// does not reuse a clear line's sequence number in log.jsonl.
+func TestProbe_ClearSaveFailureThenSayReusesSeq(t *testing.T) {
+	w := newCDWorld(t, "Clear save fail then Say reuses seq")
+	w.setDisks(
+		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 95, Known: true},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.pass() // Seq 2: alert raised: disk
+
+	failSave := true
+	w.eng.writeState = func(path string, s flow.State) error {
+		if failSave {
+			return errors.New("injected save failure")
+		}
+		return SaveState(path, s)
+	}
+	w.setDisks(
+		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 60, Known: true},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.advanceMinute()
+	w.pass() // Seq 3: alert cleared: disk; SaveState fails -> memAlerts[disk]={logSeq:3, cleared:true}
+
+	failSave = false
+	if err := w.eng.Say(w.repo, "check status"); err != nil {
+		t.Fatal(err)
+	}
+
+	allLines, _, err := ProjectLog(context.Background(), w.paths, w.repo, 0)
+	if err != nil {
+		t.Fatalf("ProjectLog: %v", err)
+	}
+	for i := 1; i < len(allLines); i++ {
+		if allLines[i].Seq <= allLines[i-1].Seq {
+			t.Fatalf("reused sequence number in log.jsonl: line %d seq=%d after line %d seq=%d (%+v)",
+				i, allLines[i].Seq, i-1, allLines[i-1].Seq, allLines)
+		}
+	}
+}
+
+// Review round 2 blocking finding #3 (Engine.Answer path):
+// Engine.Answer must merge pending memAlerts (advancing s.Seq past p.logSeq) so
+// answering an ask after a clear save failure does not reuse a sequence number.
+func TestProbe_ClearSaveFailureThenAnswerReusesSeq(t *testing.T) {
+	w := newCDWorld(t, "Clear save fail then Answer reuses seq")
+	w.setDisks(
+		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 95, Known: true},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.pass() // Seq 2: alert raised: disk
+
+	// Seed an open gated ask in state.json to answer after the clear save failure.
+	st, err := LoadState(w.paths.State(w.id))
+	if err != nil {
+		t.Fatalf("LoadState: %v", err)
+	}
+	st.Asks = append(st.Asks, flow.Ask{
+		ID:        "ask-clear-seq-1",
+		Project:   w.id,
+		Folder:    w.repo,
+		Kind:      flow.KindGate,
+		Gated:     true,
+		Question:  "Proceed with release?",
+		Options:   []string{"Proceed", "Hold"},
+		Recommend: "Proceed",
+		AskedBy:   flow.RoleCoordinator,
+		Status:    flow.AskStatusOpen,
+		At:        w.now,
+	})
+	if err := SaveState(w.paths.State(w.id), st); err != nil {
+		t.Fatalf("SaveState: %v", err)
+	}
+
+	failSave := true
+	w.eng.writeState = func(path string, s flow.State) error {
+		if failSave {
+			return errors.New("injected save failure")
+		}
+		return SaveState(path, s)
+	}
+	w.setDisks(
+		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 60, Known: true},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.advanceMinute()
+	w.pass() // Seq 3: alert cleared: disk; SaveState fails -> memAlerts[disk]={logSeq:3, cleared:true}
+
+	failSave = false
+	proof, err := w.eng.MintProof("ask-clear-seq-1", "Proceed", ProofInputTap, "phone-1")
+	if err != nil {
+		t.Fatalf("MintProof: %v", err)
+	}
+	if err := w.eng.Answer("ask-clear-seq-1", "Proceed", proof); err != nil {
+		t.Fatalf("Answer: %v", err)
+	}
+
+	allLines, _, err := ProjectLog(context.Background(), w.paths, w.repo, 0)
+	if err != nil {
+		t.Fatalf("ProjectLog: %v", err)
+	}
+	for i := 1; i < len(allLines); i++ {
+		if allLines[i].Seq <= allLines[i-1].Seq {
+			t.Fatalf("reused sequence number in log.jsonl: line %d seq=%d after line %d seq=%d (%+v)",
+				i, allLines[i].Seq, i-1, allLines[i-1].Seq, allLines)
+		}
+	}
+}
