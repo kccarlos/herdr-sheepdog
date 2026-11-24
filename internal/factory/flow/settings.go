@@ -281,7 +281,7 @@ func (s Settings) With(name, value string) (Settings, error) {
 	}
 	for i, r := range after {
 		if r.Problem != "" && before[i].Problem == "" {
-			return Settings{}, fmt.Errorf("%s %s does not fit: %s is %s (allowed %d–%d). Raise %s first.", after[idx].Label, after[idx].Value, r.Label, r.Value, r.Min, r.Max, r.Label)
+			return Settings{}, fmt.Errorf("%s %s does not fit: %s is %s (allowed %d–%d). Raise %s first.", after[idx].Label, after[idx].Value, r.Label, r.Value, r.Min, r.Max, r.Label) //nolint:staticcheck // ST1005: an owner-facing sentence shown as written on the page (wording table, plan 14.0)
 		}
 	}
 	return s, nil
