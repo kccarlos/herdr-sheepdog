@@ -41,7 +41,9 @@ func TestPlanReviewLaunchChoiceQuotaAndWorkingCoord(t *testing.T) {
 	})
 	t.Run("launches read-only with labels, token, avoids coord model, blocks attempts", func(t *testing.T) {
 		w, runs := seedPlanReviewRunWorld(t, opus, sonnet)
-		w.edit(func(s *flow.State) { s.Tasks = append([]flow.Task{{ID: "T0", Title: "feat: accepted base", EstimateLines: 20}}, s.Tasks...) })
+		w.edit(func(s *flow.State) {
+			s.Tasks = append([]flow.Task{{ID: "T0", Title: "feat: accepted base", EstimateLines: 20}}, s.Tasks...)
+		})
 		w.eng.Bin = "/opt/bin/sheepdog"
 		w.pass()
 		st := w.state()
@@ -52,7 +54,7 @@ func TestPlanReviewLaunchChoiceQuotaAndWorkingCoord(t *testing.T) {
 		if pr.Reviewer.CLI != "claude" || pr.Reviewer.Model != "sonnet" || pr.Verdict != "" || !pr.Accepted.IsZero() || pr.Run == nil || pr.Run.Kind != flow.RoundPlan || pr.Run.RunID == "" || len(st.Tasks[1].Attempts) != 0 || !st.Tasks[1].Unreviewed {
 			t.Fatalf("PlanReviews[0]=%+v attempts=%d unreviewed=%v", pr, len(st.Tasks[1].Attempts), st.Tasks[1].Unreviewed)
 		}
-		if p.Cwd != w.repo || p.Labels["sheepdog.project"] != w.id || p.Labels["sheepdog.role"] != flow.RolePlanReviewer || p.Labels["sheepdog.model"] != "sonnet" || p.Labels["sheepdog.effort"] != "medium" || p.Labels["sheepdog.run"] == "" {
+		if p.Cwd != st.Project.Folder || p.Labels["sheepdog.project"] != w.id || p.Labels["sheepdog.role"] != flow.RolePlanReviewer || p.Labels["sheepdog.model"] != "sonnet" || p.Labels["sheepdog.effort"] != "medium" || p.Labels["sheepdog.run"] == "" {
 			t.Errorf("launch cwd/labels = (%q, %v)", p.Cwd, p.Labels)
 		}
 		if tok := p.Env["SHEEPDOG_RUN_TOKEN"]; tok == "" || tokenHash(tok) != pr.Run.RunTokenHash {
@@ -121,10 +123,15 @@ func TestPlanReviewJ15FailuresAndPrecedence(t *testing.T) {
 				w.pass()
 				w.advanceMinute()
 				if cause == "with_j3_alert" {
-					w.edit(func(s *flow.State) { s.Project.RunID, s.Project.Run, s.Project.Alerts = "", nil, map[string]flow.Alert{flow.AlertDisk: {Kind: flow.AlertDisk, Cause: "disk full"}} })
+					w.edit(func(s *flow.State) {
+						s.Project.RunID, s.Project.Run, s.Project.Alerts = "", nil, map[string]flow.Alert{flow.AlertDisk: {Kind: flow.AlertDisk, Cause: "disk full"}}
+					})
 				}
 			case "overdue":
-				w.edit(func(s *flow.State) { s.Settings.ReviewMinutes = 10; s.Project.PlanReviews[0].Run.Age = 10*time.Minute - 10*time.Second })
+				w.edit(func(s *flow.State) {
+					s.Settings.ReviewMinutes = 10
+					s.Project.PlanReviews[0].Run.Age = 10*time.Minute - 10*time.Second
+				})
 				w.advanceMinute()
 			case "all_dropped":
 				w.edit(func(s *flow.State) { s.Tasks[0].Dropped = &flow.Dropped{Why: "opt"} })
