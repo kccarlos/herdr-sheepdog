@@ -104,7 +104,8 @@ func TestSettingsSaveKeepLogsAndFailedWrite(t *testing.T) {
 		t.Fatal("Answer(Save) succeeded despite writeState failure")
 	}
 	r.restart()
-	if st, _ := assertLogInvariants(t, r.paths.State(r.id), r.paths.Log(r.id)); st.Seq != seqBefore || st.Settings.MaxRunning != 1 || st.Asks[0].Status != flow.AskStatusOpen {
+	// The failed commit's log line is trimmed on the restarted engine's next read (S4), so read state.json alone here.
+	if st := r.state(); st.Seq != seqBefore || st.Settings.MaxRunning != 1 || st.Asks[0].Status != flow.AskStatusOpen {
 		t.Fatalf("state mutated after failed writeState: seq=%d max=%d ask=%+v", st.Seq, st.Settings.MaxRunning, st.Asks[0])
 	}
 	coordBefore := len(sendsTo(t, r.srv.Requests(), r.coordAddr))

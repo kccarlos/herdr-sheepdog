@@ -1,10 +1,12 @@
 package flow
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -135,57 +137,61 @@ func DefaultSettings() Settings {
 	}
 }
 
-// Changed lists every setting that differs from its default as "name
-// value", sorted, for the coordinator's facts block (design.md 10). A new
-// setting adds its line here.
+// SettingRow is one setting in the settings view (design.md 10.1, plan.md 14.1).
+type SettingRow struct {
+	Name    string   `json:"name"`
+	Label   string   `json:"label"`
+	Value   string   `json:"value"`
+	Default string   `json:"default"`
+	Min     int      `json:"min"`
+	Max     int      `json:"max"`
+	Allowed []string `json:"allowed,omitempty"`
+	Problem string   `json:"problem,omitempty"`
+	Note    string   `json:"note,omitempty"`
+	Top     bool     `json:"top,omitempty"`
+}
+
+type numSetting struct {
+	name      string
+	field     *int
+	low, high int
+}
+
+func settingLabel(name string) string { return strings.ReplaceAll(name, "_", " ") }
+
+func (s *Settings) numSettings() []numSetting {
+	return []numSetting{
+		{"review_rounds", &s.ReviewRounds, ReviewRoundsMin, ReviewRoundsMax}, {"max_rounds", &s.MaxRounds, s.ReviewRounds, MaxRoundsMax},
+		{"retro_after_rounds_with_majors", &s.RetroAfterRoundsWithMajors, RetroMajorsMin, RetroMajorsMax}, {"retro_from_round", &s.RetroFromRound, RetroFromMin, RetroFromMax},
+		{"retros_per_task", &s.RetrosPerTask, 0, RetrosPerTaskMax}, {"plan_review_rounds", &s.PlanReviewRounds, 0, PlanReviewRoundsMax},
+		{"checks_grace_minutes", &s.ChecksGraceMinutes, ChecksGraceMin, ChecksGraceMax}, {"ci_stalled_minutes", &s.CIStalledMinutes, CIStalledMin, CIStalledMax},
+		{"main_red_minutes", &s.MainRedMinutes, MainRedMin, MainRedMax}, {"ci_fails_per_hour", &s.CIFailsPerHour, CIFailsPerHourMin, CIFailsPerHourMax},
+		{"build_hours", &s.BuildHours, BuildHoursMin, BuildHoursMax}, {"flake_reruns", &s.FlakeReruns, 0, FlakeRerunsMax},
+		{"start_minutes", &s.StartMinutes, StartMin, StartMax}, {"idle_grace_seconds", &s.IdleGraceSeconds, IdleGraceMin, IdleGraceMax},
+		{"quiet_minutes", &s.QuietMinutes, QuietMin, QuietMax}, {"interrupt_seconds", &s.InterruptSeconds, InterruptMin, InterruptMax},
+		{"review_minutes", &s.ReviewMinutes, ReviewMin, ReviewMax}, {"blocked_minutes", &s.BlockedMinutes, BlockedMin, BlockedMax},
+		{"worker_restarts", &s.WorkerRestarts, 0, WorkerRestartsMax}, {"reviewer_retries", &s.ReviewerRetries, 0, ReviewerRetriesMax},
+		{"ensure_failures", &s.EnsureFailures, EnsureFailuresMin, EnsureFailuresMax}, {"ensure_backoff_minutes", &s.EnsureBackoffMinutes, EnsureBackoffMin, EnsureBackoffMax},
+		{"coordinator_starts_per_hour", &s.CoordinatorStartsPerHour, CoordStartsMin, CoordStartsMax}, {"coordinator_gap_minutes", &s.CoordinatorGapMinutes, CoordGapMin, CoordGapMax},
+		{"coordinator_silent_minutes", &s.CoordinatorSilentMinutes, CoordSilentMin, CoordSilentMax}, {"handoff_minutes", &s.HandoffMinutes, HandoffMin, HandoffMax},
+		{"heartbeat_minutes", &s.HeartbeatMinutes, HeartbeatMin, HeartbeatMax}, {"continues_per_task", &s.ContinuesPerTask, 0, ContinuesMax},
+		{"continue_lines", &s.ContinueLines, 0, ContinueLinesMax}, {"task_size_limit", &s.TaskSizeLimit, SizeLimitMin, SizeLimitMax},
+		{"size_cap_factor", &s.SizeCapFactor, SizeFactorMin, SizeFactorMax}, {"max_running", &s.MaxRunning, MaxRunningMin, MaxRunningMax},
+		{"sweep_minutes", &s.SweepMinutes, SweepMin, SweepMax}, {"pool_floor_percent", &s.PoolFloorPercent, 0, PoolFloorMax},
+		{"pool_minutes", &s.PoolMinutes, PoolMin, PoolMax}, {"disk_full_percent", &s.DiskFullPercent, DiskFullMin, DiskFullMax},
+	}
+}
+
+// Changed lists every setting that differs from its default as "name value", sorted, for the coordinator's facts block (design.md 10).
 func (s Settings) Changed() []string {
 	d := DefaultSettings()
-	var out []string
-	for _, c := range []struct {
-		name     string
-		got, def int
-	}{
-		{"blocked_minutes", s.BlockedMinutes, d.BlockedMinutes},
-		{"build_hours", s.BuildHours, d.BuildHours},
-		{"checks_grace_minutes", s.ChecksGraceMinutes, d.ChecksGraceMinutes},
-		{"ci_fails_per_hour", s.CIFailsPerHour, d.CIFailsPerHour},
-		{"ci_stalled_minutes", s.CIStalledMinutes, d.CIStalledMinutes},
-		{"continue_lines", s.ContinueLines, d.ContinueLines},
-		{"continues_per_task", s.ContinuesPerTask, d.ContinuesPerTask},
-		{"coordinator_gap_minutes", s.CoordinatorGapMinutes, d.CoordinatorGapMinutes},
-		{"coordinator_silent_minutes", s.CoordinatorSilentMinutes, d.CoordinatorSilentMinutes},
-		{"coordinator_starts_per_hour", s.CoordinatorStartsPerHour, d.CoordinatorStartsPerHour},
-		{"disk_full_percent", s.DiskFullPercent, d.DiskFullPercent},
-		{"ensure_backoff_minutes", s.EnsureBackoffMinutes, d.EnsureBackoffMinutes},
-		{"ensure_failures", s.EnsureFailures, d.EnsureFailures},
-		{"flake_reruns", s.FlakeReruns, d.FlakeReruns},
-		{"handoff_minutes", s.HandoffMinutes, d.HandoffMinutes},
-		{"heartbeat_minutes", s.HeartbeatMinutes, d.HeartbeatMinutes},
-		{"idle_grace_seconds", s.IdleGraceSeconds, d.IdleGraceSeconds},
-		{"interrupt_seconds", s.InterruptSeconds, d.InterruptSeconds},
-		{"main_red_minutes", s.MainRedMinutes, d.MainRedMinutes},
-		{"max_rounds", s.MaxRounds, d.MaxRounds},
-		{"max_running", s.MaxRunning, d.MaxRunning},
-		{"plan_review_rounds", s.PlanReviewRounds, d.PlanReviewRounds},
-		{"pool_floor_percent", s.PoolFloorPercent, d.PoolFloorPercent},
-		{"pool_minutes", s.PoolMinutes, d.PoolMinutes},
-		{"quiet_minutes", s.QuietMinutes, d.QuietMinutes},
-		{"retro_after_rounds_with_majors", s.RetroAfterRoundsWithMajors, d.RetroAfterRoundsWithMajors},
-		{"retro_from_round", s.RetroFromRound, d.RetroFromRound},
-		{"retros_per_task", s.RetrosPerTask, d.RetrosPerTask},
-		{"review_minutes", s.ReviewMinutes, d.ReviewMinutes},
-		{"review_rounds", s.ReviewRounds, d.ReviewRounds},
-		{"reviewer_retries", s.ReviewerRetries, d.ReviewerRetries},
-		{"size_cap_factor", s.SizeCapFactor, d.SizeCapFactor},
-		{"start_minutes", s.StartMinutes, d.StartMinutes},
-		{"sweep_minutes", s.SweepMinutes, d.SweepMinutes},
-		{"task_size_limit", s.TaskSizeLimit, d.TaskSizeLimit},
-		{"worker_restarts", s.WorkerRestarts, d.WorkerRestarts},
-	} {
-		if c.got != c.def {
-			out = append(out, fmt.Sprintf("%s %d", c.name, c.got))
+	dn, out := d.numSettings(), []string(nil)
+	for i, c := range s.numSettings() {
+		if *c.field != *dn[i].field {
+			out = append(out, fmt.Sprintf("%s %d", c.name, *c.field))
 		}
 	}
+	slices.Sort(out)
 	if s.SecondReviewer != d.SecondReviewer {
 		out = append(out, "second_reviewer "+s.SecondReviewer)
 	}
@@ -203,49 +209,9 @@ func (s Settings) Changed() []string {
 
 // Validate refuses a value outside its range, naming the range.
 func (s Settings) Validate() error {
-	for _, r := range []struct {
-		name         string
-		v, low, high int
-	}{
-		{"review_rounds", s.ReviewRounds, ReviewRoundsMin, ReviewRoundsMax},
-		{"max_rounds", s.MaxRounds, s.ReviewRounds, MaxRoundsMax},
-		{"retro_after_rounds_with_majors", s.RetroAfterRoundsWithMajors, RetroMajorsMin, RetroMajorsMax},
-		{"retro_from_round", s.RetroFromRound, RetroFromMin, RetroFromMax},
-		{"retros_per_task", s.RetrosPerTask, 0, RetrosPerTaskMax},
-		{"plan_review_rounds", s.PlanReviewRounds, 0, PlanReviewRoundsMax},
-		{"checks_grace_minutes", s.ChecksGraceMinutes, ChecksGraceMin, ChecksGraceMax},
-		{"ci_stalled_minutes", s.CIStalledMinutes, CIStalledMin, CIStalledMax},
-		{"main_red_minutes", s.MainRedMinutes, MainRedMin, MainRedMax},
-		{"ci_fails_per_hour", s.CIFailsPerHour, CIFailsPerHourMin, CIFailsPerHourMax},
-		{"build_hours", s.BuildHours, BuildHoursMin, BuildHoursMax},
-		{"flake_reruns", s.FlakeReruns, 0, FlakeRerunsMax},
-		{"start_minutes", s.StartMinutes, StartMin, StartMax},
-		{"idle_grace_seconds", s.IdleGraceSeconds, IdleGraceMin, IdleGraceMax},
-		{"quiet_minutes", s.QuietMinutes, QuietMin, QuietMax},
-		{"interrupt_seconds", s.InterruptSeconds, InterruptMin, InterruptMax},
-		{"review_minutes", s.ReviewMinutes, ReviewMin, ReviewMax},
-		{"blocked_minutes", s.BlockedMinutes, BlockedMin, BlockedMax},
-		{"worker_restarts", s.WorkerRestarts, 0, WorkerRestartsMax},
-		{"reviewer_retries", s.ReviewerRetries, 0, ReviewerRetriesMax},
-		{"ensure_failures", s.EnsureFailures, EnsureFailuresMin, EnsureFailuresMax},
-		{"ensure_backoff_minutes", s.EnsureBackoffMinutes, EnsureBackoffMin, EnsureBackoffMax},
-		{"coordinator_starts_per_hour", s.CoordinatorStartsPerHour, CoordStartsMin, CoordStartsMax},
-		{"coordinator_gap_minutes", s.CoordinatorGapMinutes, CoordGapMin, CoordGapMax},
-		{"coordinator_silent_minutes", s.CoordinatorSilentMinutes, CoordSilentMin, CoordSilentMax},
-		{"handoff_minutes", s.HandoffMinutes, HandoffMin, HandoffMax},
-		{"heartbeat_minutes", s.HeartbeatMinutes, HeartbeatMin, HeartbeatMax},
-		{"continues_per_task", s.ContinuesPerTask, 0, ContinuesMax},
-		{"continue_lines", s.ContinueLines, 0, ContinueLinesMax},
-		{"task_size_limit", s.TaskSizeLimit, SizeLimitMin, SizeLimitMax},
-		{"size_cap_factor", s.SizeCapFactor, SizeFactorMin, SizeFactorMax},
-		{"max_running", s.MaxRunning, MaxRunningMin, MaxRunningMax},
-		{"sweep_minutes", s.SweepMinutes, SweepMin, SweepMax},
-		{"pool_floor_percent", s.PoolFloorPercent, 0, PoolFloorMax},
-		{"pool_minutes", s.PoolMinutes, PoolMin, PoolMax},
-		{"disk_full_percent", s.DiskFullPercent, DiskFullMin, DiskFullMax},
-	} {
-		if r.v < r.low || r.v > r.high {
-			return fmt.Errorf("%s %d: allowed %d–%d", r.name, r.v, r.low, r.high)
+	for _, r := range s.numSettings() {
+		if *r.field < r.low || *r.field > r.high {
+			return fmt.Errorf("%s %d: allowed %d–%d", r.name, *r.field, r.low, r.high)
 		}
 	}
 	if s.SecondReviewer != "opus" && s.SecondReviewer != "codex" {
@@ -258,4 +224,65 @@ func (s Settings) Validate() error {
 		return fmt.Errorf("design_gate %q: allowed owner, review, or empty", s.DesignGate)
 	}
 	return ValidateCandidates("models", s.Models)
+}
+
+// Rows returns every setting row in table order with its label, default, range and problem.
+func (s Settings) Rows() []SettingRow {
+	d := DefaultSettings()
+	dn, sn := d.numSettings(), s.numSettings()
+	rows := make([]SettingRow, len(sn), len(sn)+3)
+	for i, r := range sn {
+		lbl, prob := settingLabel(r.name), ""
+		if *r.field < r.low || *r.field > r.high {
+			prob = fmt.Sprintf("%s %d: allowed %d–%d", lbl, *r.field, r.low, r.high)
+		}
+		rows[i] = SettingRow{Name: r.name, Label: lbl, Value: strconv.Itoa(*r.field), Default: strconv.Itoa(*dn[i].field), Min: r.low, Max: r.high, Problem: prob, Top: r.name == "max_running"}
+	}
+	srProb := map[bool]string{true: fmt.Sprintf("second reviewer %q: allowed opus or codex", s.SecondReviewer)}[s.SecondReviewer != "opus" && s.SecondReviewer != "codex"]
+	srNote := map[bool]string{true: "not used while reviewer models are set"}[len(s.Models[RoleReviewer]) > 0]
+	dgProb := map[bool]string{true: fmt.Sprintf("design gate %q: allowed owner, review, or empty", s.DesignGate)}[s.DesignGate != "" && s.DesignGate != GateOwner && s.DesignGate != "review"]
+	dwProb := map[bool]string{true: fmt.Sprintf("dispatch workflow %q: a .yml or .yaml file name under .github/workflows (letters, digits, . _ -; no path)", s.DispatchWorkflow)}[s.DispatchWorkflow != "" && !WorkflowFile.MatchString(s.DispatchWorkflow)]
+	return append(rows,
+		SettingRow{Name: "second_reviewer", Label: "second reviewer", Value: s.SecondReviewer, Default: d.SecondReviewer, Allowed: []string{"opus", "codex"}, Problem: srProb, Note: srNote},
+		SettingRow{Name: "design_gate", Label: "design gate", Value: s.DesignGate, Default: d.DesignGate, Allowed: []string{"", GateOwner, "review"}, Problem: dgProb},
+		SettingRow{Name: "dispatch_workflow", Label: "dispatch workflow", Value: s.DispatchWorkflow, Default: d.DispatchWorkflow, Problem: dwProb},
+	)
+}
+
+// With returns s with one setting changed, checking row by row so unrelated bad rows do not block repair (SE4, SE6).
+func (s Settings) With(name, value string) (Settings, error) {
+	name, value = strings.TrimSpace(name), strings.TrimSpace(value)
+	before := s.Rows()
+	idx := slices.IndexFunc(before, func(r SettingRow) bool { return r.Name == name })
+	if idx < 0 {
+		return Settings{}, fmt.Errorf("unknown setting %q", name)
+	}
+	if value == "" {
+		value = before[idx].Default
+	}
+	s.Models = maps.Clone(s.Models)
+	switch name {
+	case "second_reviewer":
+		s.SecondReviewer = value
+	case "design_gate":
+		s.DesignGate = value
+	case "dispatch_workflow":
+		s.DispatchWorkflow = value
+	default:
+		n, err := strconv.Atoi(value)
+		if err != nil {
+			return Settings{}, fmt.Errorf("%s %q: allowed %d–%d", before[idx].Label, value, before[idx].Min, before[idx].Max)
+		}
+		*s.numSettings()[idx].field = n
+	}
+	after := s.Rows()
+	if after[idx].Problem != "" {
+		return Settings{}, errors.New(after[idx].Problem)
+	}
+	for i, r := range after {
+		if r.Problem != "" && before[i].Problem == "" {
+			return Settings{}, fmt.Errorf("%s %s does not fit: %s is %s (allowed %d–%d). Raise %s first.", after[idx].Label, after[idx].Value, r.Label, r.Value, r.Min, r.Max, r.Label)
+		}
+	}
+	return s, nil
 }
