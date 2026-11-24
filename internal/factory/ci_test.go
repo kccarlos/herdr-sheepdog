@@ -843,8 +843,8 @@ func TestCIRedBehindBaseRedHolds(t *testing.T) {
 	l := newLanding(t)
 	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("FAILURE", "45337206494", "100"))
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
-	writeGHFile(t, l.gh, "base-ref.json", `{"object":{"sha":"deadbeef1234567890"}}`)
-	writeBaseRuns(t, l.gh, `{"workflow_runs":[{"id":101,"head_sha":"deadbeef1234567890","status":"completed","conclusion":"failure"}]}`)
+	redHead := commitBaseHead(t, l.repo, l.gh, "red")
+	writeCountedBaseRun(t, l.gh, 101, redHead, "failure")
 	l.pass()
 	l.pass()
 	if reruns := ghCalls(t, l.gh, "run rerun"); len(reruns) != 0 {
@@ -876,8 +876,8 @@ func TestCIRedBehindUpdatedHeadBaseRedHolds(t *testing.T) {
 	})
 	writePRJSON(t, l.gh, "view.json", l.c1, checkRollup("FAILURE", "45337206494", "100"))
 	writeGHFile(t, l.gh, "compare.json", `{"behind_by":1}`)
-	writeGHFile(t, l.gh, "base-ref.json", `{"object":{"sha":"deadbeef1234567890"}}`)
-	writeBaseRuns(t, l.gh, `{"workflow_runs":[{"id":101,"head_sha":"deadbeef1234567890","status":"completed","conclusion":"failure"}]}`)
+	redHead := commitBaseHead(t, l.repo, l.gh, "red")
+	writeCountedBaseRun(t, l.gh, 101, redHead, "failure")
 	l.pass()
 	l.pass()
 	if reruns := ghCalls(t, l.gh, "run rerun"); len(reruns) != 0 {
