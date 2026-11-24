@@ -607,3 +607,88 @@ func TestTrial_ClearAcrossRestartLogsOnce(t *testing.T) {
 		t.Fatalf("restart while clear added extra clear line: got %d (%+v)", len(clears), clears)
 	}
 }
+
+// Review round 1 blocking finding 1a (design.md section 6, "Alerts"):
+// After an alert clear appends "alert cleared: <kind>" and SaveState fails,
+// any subsequent successful commit (Start/Stop/Report/rule) followed by a
+// daemon restart must not log a second "alert cleared: <kind>".
+func TestProbe_ClearSaveFailureThenCommitAndRestartLogsTwice(t *testing.T) {
+	w := newCDWorld(t, "Clear save fail then commit and restart")
+	w.setDisks(
+		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 95, Known: true},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.pass() // Seq 2: alert raised: disk
+
+	failSave := true
+	w.eng.writeState = func(path string, s flow.State) error {
+		if failSave {
+			return errors.New("injected save failure")
+		}
+		return SaveState(path, s)
+	}
+	w.setDisks(
+		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 60, Known: true},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.advanceMinute()
+	w.pass() // Seq 3: alert cleared: disk; SaveState fails -> memAlerts[disk]={logSeq:3, cleared:true}
+
+	// Store recovers; an unrelated commit (e.g. Start/Stop/Report) persists Seq 4
+	// while still carrying Alerts["disk"] because flushMemAlertsLocked skips p.cleared.
+	failSave = false
+	if err := w.eng.Start(w.repo, "Goal after clear save failure", 4); err != nil {
+		t.Fatal(err)
+	}
+
+	// Restart keeps Seq 3 in log.jsonl (Seq 4 saved) with Alerts["disk"] still in state.json.
+	w.restart()
+	w.advanceMinute()
+	w.pass() // appends a SECOND "alert cleared: disk" at Seq 5
+
+	if clears := alertClearLogs(t, w.paths, w.repo, flow.AlertDisk); len(clears) != 1 {
+		t.Fatalf("expected 1 clear line, got %d: %+v", len(clears), clears)
+	}
+}
+
+// Review round 1 blocking finding 1b (design.md section 6, "Alerts"):
+// After an alert clear appends "alert cleared: <kind>" and SaveState fails,
+// if the cause returns before the clear save is retried, the returning episode
+// must log a new "alert raised: <kind>" after the clear line.
+func TestProbe_ClearSaveFailureThenCauseReturnsMissesNewRaise(t *testing.T) {
+	w := newCDWorld(t, "Clear save fail then cause returns")
+	w.setDisks(
+		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 95, Known: true},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.pass() // Seq 2: raise #1
+
+	failSave := true
+	w.eng.writeState = func(path string, s flow.State) error {
+		if failSave {
+			return errors.New("injected save failure")
+		}
+		return SaveState(path, s)
+	}
+	w.setDisks(
+		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 60, Known: true},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.advanceMinute()
+	w.pass() // Seq 3: clear #1 appended, save fails
+
+	// Store recovers and disk hits 95% again before clear save is retried.
+	failSave = false
+	w.setDisks(
+		DiskReading{Volume: "/Volumes/ProjectVol", UsedPercent: 95, Known: true},
+		DiskReading{Volume: "/Volumes/DataVol", UsedPercent: 40, Known: true},
+	)
+	w.advanceMinute()
+	w.pass()
+
+	// log.jsonl already logged clear #1 at Seq 3, so episode #2 must have a raise line after it.
+	logs := alertEpisodeLogs(t, w.paths, w.repo, flow.AlertDisk)
+	if len(logs) != 3 || logs[2].Decision != "alert raised: disk" {
+		t.Fatalf("expected [raise, clear, raise], got %d lines: %+v", len(logs), logs)
+	}
+}
