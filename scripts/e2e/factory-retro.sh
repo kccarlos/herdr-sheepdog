@@ -36,7 +36,10 @@ DNAME="e2-retro12-daemon"; J=""; L=""; PID=""; TID=""
 fail()         { echo "== FAIL: $1"; exit 1; }
 forcing_fail() { echo "== forcing failed: $1, run again"; exit 2; }
 step()         { echo "== STEP $1 at $(date +%T)"; }
-stopd()        { hc kill "$DNAME" >/dev/null 2>&1; hc rm "$DNAME" >/dev/null 2>&1; sleep 3; }
+# Only stop a daemon this run started: tests run the script on an empty dir, and a
+# fixed terminal name must never take down a live run started elsewhere.
+STARTED=0
+stopd()        { [ "$STARTED" = 1 ] || return 0; hc kill "$DNAME" >/dev/null 2>&1; hc rm "$DNAME" >/dev/null 2>&1; sleep 3; }
 
 cleanup_trap() {
   [ -n "$J" ] && "$D/sheepdog" factory stop "$R" --config "$C" >/dev/null 2>&1 || true
@@ -52,12 +55,12 @@ trap cleanup_trap EXIT
 daemon() {
   if [ -n "$ENV_FILE" ] && [ -f "$ENV_FILE" ]; then
     if [ -n "$OP_TOKEN_FILE" ] && [ -f "$OP_TOKEN_FILE" ]; then
-      hc run --bg --json --name "$DNAME" --cwd "$D" -- zsh -c "OP_SERVICE_ACCOUNT_TOKEN=\"\$(<\"$OP_TOKEN_FILE\")\" exec op run --env-file=\"$ENV_FILE\" -- env -u OP_SERVICE_ACCOUNT_TOKEN \"$D/sheepdog\" serve --config \"$C\" --voice=off --brain=off --cli=off" >/dev/null || fail "hc run daemon"
+      hc run --bg --json --name "$DNAME" --cwd "$D" -- zsh -c "OP_SERVICE_ACCOUNT_TOKEN=\"\$(<\"$OP_TOKEN_FILE\")\" exec op run --env-file=\"$ENV_FILE\" -- env -u OP_SERVICE_ACCOUNT_TOKEN \"$D/sheepdog\" serve --config \"$C\" --voice=off --brain=off --cli=off" >/dev/null || fail "hc run daemon"; STARTED=1
     else
-      hc run --bg --json --name "$DNAME" --cwd "$D" -- op run --env-file="$ENV_FILE" -- "$D/sheepdog" serve --config "$C" --voice=off --brain=off --cli=off >/dev/null || fail "hc run daemon"
+      hc run --bg --json --name "$DNAME" --cwd "$D" -- op run --env-file="$ENV_FILE" -- "$D/sheepdog" serve --config "$C" --voice=off --brain=off --cli=off >/dev/null || fail "hc run daemon"; STARTED=1
     fi
   else
-    hc run --bg --json --name "$DNAME" --cwd "$D" -- "$D/sheepdog" serve --config "$C" --voice=off --brain=off --cli=off >/dev/null || fail "hc run daemon"
+    hc run --bg --json --name "$DNAME" --cwd "$D" -- "$D/sheepdog" serve --config "$C" --voice=off --brain=off --cli=off >/dev/null || fail "hc run daemon"; STARTED=1
   fi
   for _ in $(seq 1 20); do curl -sf --max-time 2 "$U/api/state" >/dev/null && return 0; sleep 1; done
   fail "daemon did not answer on $U within 20s"
