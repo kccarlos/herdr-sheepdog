@@ -256,7 +256,7 @@ func noAttempt(in In) bool   { return in.attempt() == nil }
 func hasAttempt(in In) bool  { return in.attempt() != nil }
 func depsNotDone(in In) bool { return len(in.Facts.DepsNotDone) > 0 }
 func depsDropped(in In) bool { return len(in.Facts.DepsDropped) > 0 }
-func noSlot(in In) bool      { return in.Facts.NoSlot }
+func noSlot(in In) bool      { return in.Facts.NoSlot && !in.probe }
 func noReady(in In) bool     { return len(in.attempt().Ready) == 0 }
 func tipAhead(in In) bool    { return in.Facts.TipRel == RelAhead } // merge_only is caught by N20 above
 func noPR(in In) bool        { return in.Facts.PR.State == PRNone }

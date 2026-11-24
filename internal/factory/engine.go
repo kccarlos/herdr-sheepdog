@@ -483,31 +483,24 @@ func (e *Engine) passProject(ctx context.Context, id string, _ ...bool) {
 	}
 	if ctx.Err() == nil {
 		now := e.now()
-		wantSlot := map[string]bool{}
-		var candidates, poolHeld []string
+		var candidates []string
 		for i, t := range s.Tasks {
-			if obs[i] == nil {
+			if a := flow.OpenAttempt(t); obs[i] == nil || a != nil && cmp.Or(workerState[t.ID], a.Run.TaskRun().State) != flow.RunGone {
 				continue
 			}
-			if a := flow.OpenAttempt(t); a != nil && cmp.Or(workerState[t.ID], a.Run.TaskRun().State) != flow.RunGone {
-				continue
-			}
+			obs[i].NoSlot = true
 			if _, asks := e.matchTaskStartLocked(id, s, t, *obs[i], now); asks {
-				wantSlot[t.ID] = true
 				if _, r := resolveWorkerReason(t, s.Settings, flow.ResolveFacts{Pool: e.passPoolCheck}); r.Why != "" {
-					poolHeld = append(poolHeld, t.ID)
+					obs[i].NoSlot = false
 				} else {
 					candidates = append(candidates, t.ID)
 				}
 			}
 		}
 		granted := flow.GrantSlots(candidates, s.Tasks, flow.RunningTasks(s.Tasks, workerState), s.Settings.MaxRunning, s.Asks...)
-		for _, tid := range poolHeld {
-			granted[tid] = true
-		}
 		for i, t := range s.Tasks {
-			if obs[i] != nil && wantSlot[t.ID] && !granted[t.ID] {
-				obs[i].NoSlot = true
+			if obs[i] != nil && granted[t.ID] {
+				obs[i].NoSlot = false
 			}
 		}
 		e.observeNoPoolLocked(ctx, id, &s, obs, now)
