@@ -1002,6 +1002,152 @@ func TestBaseStatusSkippedAloneIsUnknown(t *testing.T) {
 	}
 }
 
+// TestBaseStatusCancelledFailedJobAfterCancelledJobSkipsAnnotations verifies
+// that runCancelledRed checks already-fetched failed/timed-out jobs before
+// querying check-run annotations for earlier cancelled jobs.
+func TestBaseStatusCancelledFailedJobAfterCancelledJobSkipsAnnotations(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	head := commitFile(t, repo, ".github/workflows/ci.yml", "name: CI\non: [push, pull_request]\n")
+	runGit(t, repo, "push", "origin", "main")
+	writeGH(t, gh, "base-ref.json", `{"object":{"sha":"`+head+`"}}`)
+	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[`+
+		`{"id":45336002997,"path":".github/workflows/ci.yml","head_sha":"`+head+`","status":"completed","conclusion":"cancelled"}]}`)
+	// Cancelled job listed before failed job; annotations fail (e.g. missing checks:read).
+	writeGH(t, gh, "run-jobs.json", `{"jobs":[{"id":702,"name":"Test","conclusion":"cancelled"},{"id":701,"name":"Lint","conclusion":"failure"}]}`)
+	writeGH(t, gh, "annotations_fail", "")
+
+	got, err := fixtureGit(t).BaseStatus(ctx, repo, stubPRWorkflow)
+	if err != nil || !got.Red || !got.Known || got.ID != 45336002997 {
+		t.Fatalf("cancelled job before failed job with annotations_fail = %+v, %v; want red known id=45336002997", got, err)
+	}
+	if calls := ghCalls(t, gh, "api repos/acme/demo/check-runs/"); len(calls) != 0 {
+		t.Fatalf("annotations called %d times when a failed job was already in run-jobs.json: %q", len(calls), calls)
+	}
+}
+
+// TestBaseStatusFetchesRemoteHeadOnce verifies that when the base head commit
+// is not yet present locally, BaseStatus calls FetchRemote once, then reads
+// and counts workflows at that commit; and when the commit is still missing
+// after fetching once, BaseStatus returns unknown without retrying FetchRemote.
+func TestBaseStatusFetchesRemoteHeadOnce(t *testing.T) {
+	ctx := context.Background()
+	repo, bare := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+
+	// Push a new base head from a second clone so repo does not have it locally.
+	other := filepath.Join(t.TempDir(), "other")
+	if out, err := exec.Command("git", "clone", bare, other).CombinedOutput(); err != nil {
+		t.Fatalf("git clone: %v: %s", err, out)
+	}
+	commitFile(t, other, ".github/workflows/ci.yml", "name: CI\non: [push, pull_request]\n")
+	head := commitFile(t, other, ".github/workflows/release.yml", "name: Release\non: push\n")
+	runGit(t, other, "push", "origin", "main")
+
+	srv := hctest.New(t)
+	fetches := 0
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if len(p.Argv) >= 2 && p.Argv[0] == "git" && p.Argv[1] == "fetch" {
+			fetches++
+		}
+		return hctest.GitExec(p)
+	}
+	g := NewGit(hc.NewClient(srv.Path), nil, nil)
+
+	writeGH(t, gh, "base-ref.json", `{"object":{"sha":"`+head+`"}}`)
+	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[`+
+		`{"id":45340000001,"path":".github/workflows/release.yml","head_sha":"`+head+`","status":"completed","conclusion":"failure"},`+
+		`{"id":45340000002,"path":".github/workflows/ci.yml","head_sha":"`+head+`","status":"completed","conclusion":"success"}]}`)
+
+	got, err := g.BaseStatus(ctx, repo, stubPRWorkflow)
+	if err != nil || got.Red || !got.Known || got.ID != 45340000002 || got.HeadSHA != head {
+		t.Fatalf("non-local head = %+v, %v; want green known id=45340000002 head=%s", got, err, head)
+	}
+	if fetches != 1 {
+		t.Fatalf("git fetch calls = %d, want 1", fetches)
+	}
+
+	// Unknown commit still missing after one fetch -> unknown (not green or red),
+	// and FetchRemote is called at most once across multiple workflow paths.
+	fetches = 0
+	const missing = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	writeGH(t, gh, "base-ref.json", `{"object":{"sha":"`+missing+`"}}`)
+	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[`+
+		`{"id":45340000003,"path":".github/workflows/ci.yml","head_sha":"`+missing+`","status":"completed","conclusion":"success"},`+
+		`{"id":45340000004,"path":".github/workflows/lint.yml","head_sha":"`+missing+`","status":"completed","conclusion":"failure"}]}`)
+
+	got, err = g.BaseStatus(ctx, repo, stubPRWorkflow)
+	if err != nil || got.Known || got.Red || got.HeadSHA != missing {
+		t.Fatalf("missing remote head = %+v, %v; want unknown (Known=false, Red=false) head=%s", got, err, missing)
+	}
+	if fetches != 1 {
+		t.Fatalf("git fetch calls for missing head = %d, want 1", fetches)
+	}
+}
+
+// TestBaseStatusFailedWorkflowReadIsUnknown verifies that a git show error
+// while reading a workflow file at base head leaves the verdict unknown rather
+// than turning green from another passing run.
+func TestBaseStatusFailedWorkflowReadIsUnknown(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	commitFile(t, repo, ".github/workflows/ci.yml", "name: CI\non: [push, pull_request]\n")
+	head := commitFile(t, repo, ".github/workflows/lint.yml", "name: Lint\non: [push, pull_request]\n")
+	runGit(t, repo, "push", "origin", "main")
+	writeGH(t, gh, "base-ref.json", `{"object":{"sha":"`+head+`"}}`)
+	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[`+
+		`{"id":45341000001,"path":".github/workflows/ci.yml","head_sha":"`+head+`","status":"completed","conclusion":"success"},`+
+		`{"id":45341000002,"path":".github/workflows/lint.yml","head_sha":"`+head+`","status":"completed","conclusion":"failure"}]}`)
+
+	srv := hctest.New(t)
+	srv.OnExec = func(p hc.ExecParams) (hc.ExecResult, error) {
+		if len(p.Argv) >= 3 && p.Argv[0] == "git" && p.Argv[1] == "show" && strings.HasSuffix(p.Argv[2], "lint.yml") {
+			return hc.ExecResult{}, errors.New("git show failed")
+		}
+		return hctest.GitExec(p)
+	}
+	g := NewGit(hc.NewClient(srv.Path), nil, nil)
+
+	got, err := g.BaseStatus(ctx, repo, stubPRWorkflow)
+	if err != nil || got.Known || got.Red || got.HeadSHA != head {
+		t.Fatalf("failed workflow-file read = %+v, %v; want unknown (Known=false, Red=false) head=%s", got, err, head)
+	}
+}
+
+// TestBaseStatusNeutralAndSkippedWithSuccess verifies PR A rule 3: neutral
+// alone yields unknown, and skipped/neutral alongside a counted success yields
+// green naming the success run.
+func TestBaseStatusNeutralAndSkippedWithSuccess(t *testing.T) {
+	ctx := context.Background()
+	repo, _ := repoWithGitHubOrigin(t)
+	gh := installFakeGH(t)
+	commitFile(t, repo, ".github/workflows/ci.yml", "name: CI\non: [push, pull_request]\n")
+	commitFile(t, repo, ".github/workflows/lint.yml", "name: Lint\non: [push, pull_request]\n")
+	head := commitFile(t, repo, ".github/workflows/docs.yml", "name: Docs\non: [push, pull_request]\n")
+	runGit(t, repo, "push", "origin", "main")
+	writeGH(t, gh, "base-ref.json", `{"object":{"sha":"`+head+`"}}`)
+
+	// Neutral alone -> unknown.
+	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[`+
+		`{"id":45339000002,"path":".github/workflows/ci.yml","head_sha":"`+head+`","status":"completed","conclusion":"neutral"}]}`)
+	got, err := fixtureGit(t).BaseStatus(ctx, repo, stubPRWorkflow)
+	if err != nil || got.Red || got.Known {
+		t.Fatalf("neutral alone = %+v, %v; want unknown (Known=false, Red=false)", got, err)
+	}
+
+	// Skipped and neutral listed before a counted success -> green naming the success run.
+	writeGH(t, gh, "base-runs.json", `{"workflow_runs":[`+
+		`{"id":45339000003,"path":".github/workflows/lint.yml","head_sha":"`+head+`","status":"completed","conclusion":"skipped"},`+
+		`{"id":45339000004,"path":".github/workflows/docs.yml","head_sha":"`+head+`","status":"completed","conclusion":"neutral"},`+
+		`{"id":45339000005,"path":".github/workflows/ci.yml","head_sha":"`+head+`","status":"completed","conclusion":"success"}]}`)
+	got, err = fixtureGit(t).BaseStatus(ctx, repo, stubPRWorkflow)
+	if err != nil || got.Red || !got.Known || got.ID != 45339000005 || got.Conclusion != "success" {
+		t.Fatalf("skipped/neutral + success = %+v, %v; want green known id=45339000005", got, err)
+	}
+}
+
 // TestPushAndOpenPRTitleCap verifies that PR titles longer than GitHub's 256
 // rune limit are cut on a rune boundary.
 func TestPushAndOpenPRTitleCap(t *testing.T) {
