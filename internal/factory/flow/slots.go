@@ -43,11 +43,12 @@ func RunningTasks(tasks []Task, workerState map[string]RunState) int {
 	return n
 }
 
-// GrantSlots decides which tasks that reached N10 this pass get a slot
-// (design.md 4.10, KB-TSK-12): owner-answered first, then urgent, then longest
-// remaining critical path of estimate_lines through after, then oldest (index
-// in tasks). Gives up to maxRunning - running slots, plus one extra slot at the
-// cap (running == maxRunning) for an owner-answered or urgent task.
+// GrantSlots decides which tasks whose matching row asks for a start this pass
+// get a slot (design.md 4.10, KB-TSK-12): owner-answered first, then urgent,
+// then a task with an open attempt, then longest remaining critical path of
+// estimate_lines through after, then oldest (index in tasks). Gives up to
+// maxRunning - running slots, plus one extra slot at the cap
+// (running == maxRunning) for an owner-answered or urgent task.
 func GrantSlots(candidates []string, tasks []Task, running, maxRunning int, asks ...Ask) map[string]bool {
 	byID, age := make(map[string]Task, len(tasks)), make(map[string]int, len(tasks))
 	for i, t := range tasks {
@@ -69,6 +70,9 @@ func GrantSlots(candidates []string, tasks []Task, running, maxRunning int, asks
 		}
 		if ua, ub := byID[a].Priority == PriorityUrgent, byID[b].Priority == PriorityUrgent; ua != ub {
 			return map[bool]int{true: -1, false: 1}[ua]
+		}
+		if ha, hb := OpenAttempt(byID[a]) != nil, OpenAttempt(byID[b]) != nil; ha != hb {
+			return map[bool]int{true: -1, false: 1}[ha]
 		}
 		if c := cmp.Compare(crit[b], crit[a]); c != 0 {
 			return c

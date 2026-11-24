@@ -216,24 +216,6 @@ func workerStartAsk(last *RunRecord, n int) string {
 	return key(AskStartWorker, mode, n)
 }
 
-// WantsWorkerSlot reports whether an open attempt's ended worker run is ready
-// to ask for a start if granted a free slot (design.md 4.8, N10).
-func WantsWorkerSlot(t Task, s Settings, now time.Time) bool {
-	a := OpenAttempt(t)
-	if Ended(t) || t.Parked || OpenRecap(t) != nil || a == nil || a.NothingToChange != "" ||
-		a.Run == nil || a.Run.State != PhaseEnded || a.Review != nil && a.Review.RunID != "" {
-		return false
-	}
-	asks := EnsureRun(In{Task: t, Settings: s, Facts: Facts{Worker: Run{State: RunGone}}, Now: now}, RoleWorker)
-	return len(asks) > 0 && strings.HasPrefix(asks[0], AskStartWorker)
-}
-
-// WantsNewAttempt reports whether a task with no open attempt is ready to ask
-// for AskNewAttempt if granted a free slot (design.md 4.2, 8).
-func WantsNewAttempt(t Task, s Settings, now time.Time) bool {
-	return len(ensure(In{Task: t, Settings: s, Now: now}, AskNewAttempt)) > 0
-}
-
 // Clause is one named part of a row's condition (design.md 4: "each clause
 // is named").
 type Clause = func(In) bool
@@ -274,7 +256,7 @@ func noAttempt(in In) bool   { return in.attempt() == nil }
 func hasAttempt(in In) bool  { return in.attempt() != nil }
 func depsNotDone(in In) bool { return len(in.Facts.DepsNotDone) > 0 }
 func depsDropped(in In) bool { return len(in.Facts.DepsDropped) > 0 }
-func noSlot(in In) bool      { return in.Facts.NoSlot }
+func noSlot(in In) bool      { return in.Facts.NoSlot && !in.probe }
 func noReady(in In) bool     { return len(in.attempt().Ready) == 0 }
 func tipAhead(in In) bool    { return in.Facts.TipRel == RelAhead } // merge_only is caught by N20 above
 func noPR(in In) bool        { return in.Facts.PR.State == PRNone }

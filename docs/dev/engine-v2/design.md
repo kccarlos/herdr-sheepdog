@@ -367,8 +367,7 @@ Starting or restarting a worker needs a free slot, like a first start (N10); wit
 
 A start first delivers the messages held for that run (findings a dead worker never received).
 
-Runs a task's matching row does not want are stopped: a reviewer whose round is over (its verdict was accepted) or void (the round is void as soon as the tip moves off the round's commit), and every run of a task at N1 to N3. **The worker run is wanted by every other row** while the attempt is open, also while a recap is open or the engine has the turn: it writes the recap and makes the fixes. A split or a new attempt stops it as part of that decision. A task uses a slot only while its worker run is `starting` or `working`.
-In slice 4, an open attempt holds its slot through `idle` too (freeing it only when its worker run is gone or the task stops), because `max_running` caps concurrent tasks rather than only active worker turns.
+Runs a task's matching row does not want are stopped: a reviewer whose round is over (its verdict was accepted) or void (the round is void as soon as the tip moves off the round's commit), and every run of a task at N1 to N3. The worker run is kept alive by every other row while the attempt is open; it is started again only by a row that waits on the worker. A split or a new attempt stops it as part of that decision. A task holds its slot from its worker's start until that run is gone or the task stops, also while the worker is idle: `max_running` caps tasks, not worker turns.
 
 ### 4.9 What the coordinator and the owner can do to a task
 
@@ -390,7 +389,7 @@ Each is a record, accepted by the table in section 7.2. The rules above then lan
 
 ### 4.10 Scheduling
 
-There is no queue. N10's "a slot is free" is decided by one pure function over all tasks that have reached N10, in this order: a task the owner just answered (a gated owner ask answered after the task's last slot grant, or before its first slot), then `priority: urgent`, then the critical path, then oldest. One slot beyond `max_running` may be used by a task the owner just answered or an urgent one. A milestone is open when every earlier milestone is done and its gate task (section 11.4) is done.
+There is no queue. N10's "a slot is free" is decided by one pure function over all tasks whose matching row asks for a start (a new attempt, or a worker start or restart), in this order: a task the owner just answered (a gated owner ask answered after the task's last slot grant, or before its first slot), then `priority: urgent`, then a task with an open attempt, then the critical path, then oldest. One slot beyond `max_running` may be used by a task the owner just answered or an urgent one. A milestone is open when every earlier milestone is done and its gate task (section 11.4) is done.
 
 ### 4.11 What the owner sees
 
@@ -406,6 +405,7 @@ There is no queue. N10's "a slot is free" is decided by one pure function over a
 | N19b | `ci` | "Not merged: checks got worse after the override card was made" |
 | N9, N17 | `waiting_on_dep` | "After SDF-53" |
 | N10, N11 | `queued` | the first failing reason |
+| any row that asks for a start, with no slot free | the row's stage | "no slot is free" |
 | N23 with the worker idle | `idle` | — |
 | N16, N20–N23, N26–N29, N32, N39 | `working` | "Working · model · round 1 of 2", "Checking 3 outcomes" |
 
@@ -466,7 +466,7 @@ Runs are driven by events, so this is a transition table. Every cell is written;
 | R33 | `starting`, `working`, `idle`, `blocked` | `exit`, `lost` | — | `ended(exited / lost)` | remove a leftover terminal; note whether it is resumable and whether the owner quit it; held messages go back to the task or project |
 | R34 | `starting`, `working`, `idle`, `blocked` | `stop` | — | `ended(stopped)` | end the terminal's whole process group and check nothing is left |
 | R35 | `working` | `launched`, `launch_failed`, `screen` | — | same | — |
-| R36 | `ended` | `deliver` | — | same | refuse `run_ended` (the message goes back to the task or project, whose rules restart the run) |
+| R36 | `ended` | `deliver` | — | same | refuse `run_ended` (the message goes back to the task or project, whose rules restart the run; the log says held, not told) |
 | R37 | `ended` | every other event | — | same | — |
 
 **R31, the floor handoff.** Each worker or designer on the affected pool gets one urgent "write your handoff and stop" per attempt. A replacement run in the same attempt on a different pool gets its own handoff when that pool reaches its floor; the same pool never gets one twice in one attempt. Remember delivery and the deadline across a restart: save the handoff marker and deadline before the send so a crash or a lost reply after the send never sends it again while the deadline still stops the run, and only a send that herdr-core refused before accepting it clears the marker. Deliver at once to a working run or to an idle run, which starts its handoff turn. Hold it for a starting run until it is ready. For a blocked run, only the deadline applies. On a pass where the floor is seen, set the handoff deadline before timeouts are judged; while a handoff deadline is pending, R29 (blocked too long), starting and quiet timeouts do not end the run, which ends with `quota` at the deadline or on the next idle. Stop with `quota` when the run next goes idle after delivery or when `handoff_minutes` have passed since the floor was seen, whichever comes first.
@@ -1285,6 +1285,7 @@ The first check produced 181 gaps. Absorbing them all would rebuild the old engi
 | O35 | **Decided (design review, 2026-11-23, section 16 K1–K5):** C2 is `make test` plus the exit run's record, not an id count; named tests are required only for PITFALL rows whose class is not a rule table, as a follow-up after 8.4 and before C6; `KB-STA-20` is `LATER` |
 | O36 | Where the old `factory/` history is kept now that `main` has no commit that ever held `factory/` and the owner deleted the remote copy of `pre-reset-4df3a038` on 2026-11-22 keeping only a local tag. **Decided (owner, 2026-11-23):** the local tag `pre-reset-4df3a038` is enough, 8.4 deletion is authorised, and [knowledge-base.md](knowledge-base.md)'s citations of old files remain historical references under that tag |
 | O37 | The size measure trusts the repository's local `.git`: the remote-tracking base ref, and `info/attributes`, which git reads before any `.gitattributes` and cannot be told to skip. A worker that edits `.git` (not its commits) can lower its own count either way. Close both together if a trial shows it happening: compare the base ref with the remote, and refuse a non-empty `info/attributes` at start |
+| O38 | A task waiting only on CI keeps its slot while its worker is idle (trial: 28 minutes with one slot). Owner: scheduling |
 
 ### 17.5 The audit by simulation, and what it means
 
