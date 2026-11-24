@@ -42,7 +42,7 @@ var verbRoles = map[string]string{
 	"start": owner, "stop": owner,
 	"plan apply": flow.RoleCoordinator, "recap decide": flow.RoleCoordinator,
 	"plan amend": flow.RoleCoordinator, "task": flow.RoleCoordinator,
-	"ready": flow.RoleWorker, "review": flow.RoleReviewer, "ask": "", "answer": flow.RoleCoordinator,
+	"ready": flow.RoleWorker, "review": flow.RoleReviewer, "retro": flow.RoleRetro, "ask": "", "answer": flow.RoleCoordinator,
 }
 
 // Report is the acceptance step for everything a run's terminal sends: the
@@ -61,7 +61,9 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 	if id == "" {
 		return e.refuse("", "invalid_token", "The token matches no run the factory started.")
 	}
-	e.mergeMemAlertsLocked(id, &s)
+	if err := e.freshLocked(id, s); err != nil {
+		return err
+	}
 	if want != "" && role != want {
 		return e.refuse(id, "kind_not_allowed", fmt.Sprintf("A %s may not send %s; only the %s may.", role, verb, want))
 	}
@@ -73,6 +75,8 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 		return e.acceptReadyLocked(id, &s, role, ti, args)
 	case "review":
 		return e.acceptReviewLocked(id, &s, role, ti, args)
+	case "retro":
+		return e.acceptRetroLocked(id, &s, role, ti, args)
 	case "ask":
 		return e.acceptAskLocked(id, &s, role, ti, runID, args)
 	case "answer":
@@ -373,34 +377,8 @@ func (e *Engine) acceptReviewLocked(id string, s *flow.State, role string, ti in
 	if utf8.RuneCountInString(notRun) > maxRejectWhyRunes {
 		return e.refuse(id, "invalid_report", fmt.Sprintf("not_run is longer than %d characters.", maxRejectWhyRunes))
 	}
-	h := flow.H(*a)
-	ctx, cancel := context.WithTimeout(world.GitRepository(context.Background(), s.Project.Folder), lockGitTimeout)
-	defer cancel()
-	tip, rel, clean, err := e.git.InspectWorktree(ctx, a.Worktree, h)
-	if err != nil {
+	if err := e.checkReviewWorktreeLocked(id, s, t.ID, a, rev); err != nil {
 		return err
-	}
-	if !flow.Covers(*a, rev.Head, h) || (rel != flow.RelSame && (rel != flow.RelBehind || !flow.Covers(*a, tip, h))) {
-		return e.refuse(id, "head_moved", "The worktree head moved off the reviewed commit; stop and wait for the engine.")
-	}
-	if !clean {
-		if rev.Run == nil {
-			rev.Run = &flow.RunRecord{Role: flow.RoleReviewer}
-		}
-		rev.Run.State, rev.Run.Result, rev.Run.EndedAt = flow.PhaseEnded, flow.EndError, e.now()
-		rev.RunTokenHash = ""
-		if sErr := e.saveStateLocked(id, *s); sErr != nil {
-			e.logError("factory.commit_error", id, sErr)
-		}
-		e.logEvent("factory.review_void", map[string]string{
-			"project": id, "task": t.ID, "round": fmt.Sprint(rev.Round),
-			"why": "the reviewer left the worktree dirty",
-		})
-		select {
-		case e.wake <- struct{}{}:
-		default:
-		}
-		return e.refuse(id, "dirty_tree", "The worktree has uncommitted or untracked changes; this review round is void.")
 	}
 	path := e.Paths.Report(id, t.ID, rev.Round)
 	if err := e.noteStoreENOSPC(id, writeAtomic(path, []byte(req.Findings))); err != nil {
@@ -422,6 +400,131 @@ func (e *Engine) acceptReviewLocked(id string, s *flow.State, role string, ti in
 		},
 		Rule: "verdict", Decision: rnd.Verdict,
 		Why: fmt.Sprintf("round %d (%s, %s) at %s: %s (%d major(s), %d self-check miss(es))", rnd.N, rnd.Kind, rnd.Reviewer.Model, rnd.Head, rnd.Verdict, rnd.Majors, misses),
+	})
+}
+
+func (e *Engine) checkReviewWorktreeLocked(id string, s *flow.State, taskID string, a *flow.Attempt, rev *flow.ReviewRun) error {
+	h := flow.H(*a)
+	ctx, cancel := context.WithTimeout(world.GitRepository(context.Background(), s.Project.Folder), lockGitTimeout)
+	defer cancel()
+	tip, rel, clean, err := e.git.InspectWorktree(ctx, a.Worktree, h)
+	if err != nil {
+		return err
+	}
+	if !flow.Covers(*a, rev.Head, h) || (rel != flow.RelSame && (rel != flow.RelBehind || !flow.Covers(*a, tip, h))) {
+		return e.refuse(id, "head_moved", "The worktree head moved off the reviewed commit; stop and wait for the engine.")
+	}
+	if !clean {
+		if rev.Run == nil {
+			rev.Run = &flow.RunRecord{Role: rev.Role()}
+		}
+		rev.Run.State, rev.Run.Result, rev.Run.EndedAt = flow.PhaseEnded, flow.EndError, e.now()
+		rev.RunTokenHash = ""
+		if sErr := e.saveStateLocked(id, *s); sErr != nil {
+			e.logError("factory.commit_error", id, sErr)
+		}
+		e.logEvent("factory.review_void", map[string]string{
+			"project": id, "task": taskID, "round": fmt.Sprint(rev.Round),
+			"why": "the reviewer left the worktree dirty",
+		})
+		select {
+		case e.wake <- struct{}{}:
+		default:
+		}
+		return e.refuse(id, "dirty_tree", "The worktree has uncommitted or untracked changes; this review round is void.")
+	}
+	return nil
+}
+
+// acceptRetroLocked enforces RV2–RV8 for `sheepdog factory report retro`
+// (design.md 7.2). It never stops a terminal and never calls GitHub.
+func (e *Engine) acceptRetroLocked(id string, s *flow.State, role string, ti int, args json.RawMessage) error {
+	t := &s.Tasks[ti]
+	a := flow.OpenAttempt(*t)
+	if a == nil || flow.OpenRecap(*t) != nil || a.Review == nil || a.Review.Role() != flow.RoleRetro || a.Review.Round != len(a.Rounds)+1 {
+		return e.refuse(id, "already_closed", "No open retro round accepts a verdict for this task.")
+	}
+	rev := a.Review
+	var req struct {
+		Verdict               string `json:"verdict"`
+		Code                  string `json:"code"`
+		Head                  string `json:"head"`
+		Cause                 string `json:"cause"`
+		WorkerChange          string `json:"worker_change"`
+		WorkerChangeKind      string `json:"worker_change_kind"`
+		CoordinatorChange     string `json:"coordinator_change"`
+		CoordinatorChangeKind string `json:"coordinator_change_kind"`
+		Findings              string `json:"findings"`
+	}
+	if len(bytes.TrimSpace(args)) == 0 {
+		return e.refuse(id, "invalid_report", "Retro report body is empty.")
+	}
+	if err := decodeStrict(args, &req); err != nil {
+		return e.refuse(id, "invalid_report", fmt.Sprintf("Retro report JSON is invalid: %s.", strings.TrimPrefix(err.Error(), "json: ")))
+	}
+	verdict, cause := strings.TrimSpace(req.Verdict), strings.TrimSpace(req.Cause)
+	if verdict != flow.VerdictShip && verdict != flow.VerdictFix && verdict != flow.VerdictRedesign {
+		return e.refuse(id, "invalid_report", fmt.Sprintf("Invalid verdict %q; must be %q, %q, or %q.", verdict, flow.VerdictShip, flow.VerdictFix, flow.VerdictRedesign))
+	}
+	if strings.TrimSpace(req.Code) != rev.Code {
+		return e.refuse(id, "invalid_report", "Wrong code: does not match this retro round's one-time code.")
+	}
+	if strings.TrimSpace(req.Head) != rev.Head {
+		return e.refuse(id, "invalid_report", "Wrong head: does not match this retro round's commit.")
+	}
+	if !slices.Contains(flow.RetroCauses, cause) {
+		return e.refuse(id, "invalid_report", fmt.Sprintf("Invalid cause %q; must be one of %s.", cause, strings.Join(flow.RetroCauses, ", ")))
+	}
+	if len(req.Findings) > maxReviewFindingsBytes {
+		return e.refuse(id, "invalid_report", fmt.Sprintf("findings is longer than %d bytes.", maxReviewFindingsBytes))
+	}
+	majors := countExactMajors(req.Findings)
+	if verdict == flow.VerdictShip && majors != 0 {
+		return e.refuse(id, "invalid_report", fmt.Sprintf("verdict ship requires 0 exact major: lines in findings, found %d.", majors))
+	}
+	if verdict == flow.VerdictFix && majors < 1 {
+		return e.refuse(id, "invalid_report", "verdict fix requires at least 1 exact major: line in findings, found 0.")
+	}
+	workerChange, coordChange := flow.CleanText(req.WorkerChange), flow.CleanText(req.CoordinatorChange)
+	workerKind, coordKind := strings.TrimSpace(req.WorkerChangeKind), strings.TrimSpace(req.CoordinatorChangeKind)
+	for _, c := range []struct{ name, text, kindName, kind string }{
+		{"worker_change", workerChange, "worker_change_kind", workerKind},
+		{"coordinator_change", coordChange, "coordinator_change_kind", coordKind},
+	} {
+		if c.text == "" || utf8.RuneCountInString(c.text) > maxRejectWhyRunes {
+			return e.refuse(id, "invalid_report", fmt.Sprintf("%s must be non-empty and at most %d characters.", c.name, maxRejectWhyRunes))
+		}
+		if c.kind != flow.ChangeKindCheck && c.kind != flow.ChangeKindBrief {
+			return e.refuse(id, "invalid_report", fmt.Sprintf("Invalid %s %q; must be %q or %q.", c.kindName, c.kind, flow.ChangeKindCheck, flow.ChangeKindBrief))
+		}
+	}
+	if err := e.checkReviewWorktreeLocked(id, s, t.ID, a, rev); err != nil {
+		return err
+	}
+	path := e.Paths.Report(id, t.ID, rev.Round)
+	if err := e.noteStoreENOSPC(id, writeAtomic(path, []byte(req.Findings))); err != nil {
+		return err
+	}
+	rnd := flow.Round{
+		N: rev.Round, Kind: flow.RoundRetro, Head: rev.Head, Reviewer: rev.Reviewer,
+		Verdict: verdict, Majors: majors, ReportPath: path,
+	}
+	a.Rounds = append(a.Rounds, rnd)
+	t.Retros = append(t.Retros, flow.Retro{
+		Attempt: len(t.Attempts), Round: rev.Round, Cause: cause,
+		WorkerChange: workerChange, WorkerChangeKind: workerKind,
+		CoordinatorChange: coordChange, CoordinatorChangeKind: coordKind,
+		At: e.now(),
+	})
+	return e.commitLocked(id, s, LogLine{
+		By: role, Task: t.ID,
+		Input: map[string]any{
+			"verb": "retro", "round": rnd.N, "kind": rnd.Kind, "model": rnd.Reviewer.Model,
+			"head": rnd.Head, "verdict": rnd.Verdict, "majors": rnd.Majors, "cause": cause,
+			"worker_change_kind": workerKind, "coordinator_change_kind": coordKind,
+		},
+		Rule: "retro", Decision: rnd.Verdict,
+		Why: fmt.Sprintf("round %d (retro, %s) at %s: %s (%d major(s), cause %s)", rnd.N, rnd.Reviewer.Model, rnd.Head, rnd.Verdict, rnd.Majors, cause),
 	})
 }
 
@@ -974,7 +1077,7 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 		if a.RunID != "" || a.Run != nil && a.Run.State == flow.PhaseEnded {
 			sctx, scancel := context.WithTimeout(context.Background(), lockGitTimeout)
 			defer scancel()
-			if err := e.deliverWorkerLocked(sctx, id, t.ID, s, a, msg, false); err != nil {
+			if _, err := e.deliverWorkerLocked(sctx, id, t.ID, s, a, msg, false, ""); err != nil {
 				e.logError("factory.exec_error", id, err)
 				return err
 			}
@@ -1144,14 +1247,18 @@ func (e *Engine) acceptTaskLocked(id string, s *flow.State, role string, args js
 		if a == nil {
 			return e.refuse(id, "no_worker", fmt.Sprintf("Task %q has no open attempt to message.", t.ID))
 		}
+		if st := taskRows[t.LastRow].Stage; a.Run != nil && a.Run.State == flow.PhaseEnded && (st == "ci" || st == "owner_gate") && t.HoldWhy == "" {
+			return e.refuse(id, "no_worker", fmt.Sprintf("Task %s's worker is stopped and nothing will start it; use send-back.", t.ID))
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
 		defer cancel()
-		if err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, "Message from the coordinator: "+why, false); errors.Is(err, errNoWorkerRun) {
+		dec, err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, "Message from the coordinator: "+why, false, "the coordinator's message")
+		if errors.Is(err, errNoWorkerRun) {
 			return e.refuse(id, "no_worker", fmt.Sprintf("Task %q has no worker run to message.", t.ID))
 		} else if err != nil {
 			return err
 		}
-		line.Decision = "said to worker"
+		line.Decision = dec
 	default:
 		return e.refuse(id, "invalid_report", fmt.Sprintf("%q is not a task command; use park, unpark, drop, close, send-back, retry or say.", req.Action))
 	}
@@ -1379,7 +1486,7 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 			rc := readyCmd(cmp.Or(e.Bin, "sheepdog"), t.Outcomes)
 			msg := fmt.Sprintf("The plan changed for task %s (%s): %s\nTitle: %s\nBrief:\n%s\nOutcomes:\n%s\nEarlier review rounds no longer count. If your work must change, commit and run %s again; otherwise wait.",
 				t.ID, strings.Join(workerWhat, ", "), why, t.Title, cmp.Or(strings.TrimSpace(t.Brief), "(none)"), bullets(t.Outcomes), rc)
-			if err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false); err != nil { // a restarted worker reads the new plan anyway
+			if _, err := e.deliverWorkerLocked(ctx, id, t.ID, s, a, msg, false, ""); err != nil { // a restarted worker reads the new plan anyway
 				e.logError("factory.exec_error", id, err)
 			}
 		}

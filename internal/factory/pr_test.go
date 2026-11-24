@@ -231,7 +231,7 @@ func TestBaseStatusPermissionDeniedDoesNotSetGitHubUnavailable(t *testing.T) {
 			if eng.ghUnavail["project"] {
 				t.Fatal("base status HTTP 403 set github_unavailable")
 			}
-			_, err := eng.git.BaseStatus(context.Background(), repo)
+			_, err := eng.git.BaseStatus(context.Background(), repo, nil)
 			if world.FailureClass(err) != flow.ClassSettled || world.GitHubUnavailable(err) {
 				t.Fatalf("base status HTTP 403 = %v, want settled permission failure", err)
 			}

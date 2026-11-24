@@ -320,40 +320,30 @@ func clipNote(text string) string {
 // ErrTerminalTyping prevents a prompt from being appended to desktop input.
 var ErrTerminalTyping = errors.New("terminal has unsent input")
 
+// checkTypedInput checks an ANSIReader backend's visible screen for unsent
+// desktop input so a prompt is not appended to what the user is typing. When
+// the backend is not an ANSIReader or ReadANSI returns ErrANSIUnavailable, it
+// returns nil without reading the screen: the person is speaking, and
+// herdr-core's hc send waits for typing to pause rather than guessing from
+// unstyled text that cannot distinguish dim prompt suggestions from typed text.
 func (s *Supervisor) checkTypedInput(ctx context.Context, paneID string) error {
-	var (
-		read  herdr.ReadResult
-		err   error
-		plain bool
-	)
-	if r, ok := s.herdr.(ANSIReader); ok {
-		read, err = r.ReadANSI(ctx, paneID, herdr.SourceVisible, 0)
-		if errors.Is(err, ErrANSIUnavailable) {
-			plain = true
-		} else if err != nil {
-			s.log.Log(logSource, "supervisor.typing_check_unavailable", paneID, map[string]any{"reason": "read_failed", "error": err.Error()})
-			return nil
-		}
-	} else {
-		plain = true
+	r, ok := s.herdr.(ANSIReader)
+	if !ok {
+		return nil
 	}
-	if plain {
-		read, err = s.herdr.Read(ctx, paneID, herdr.SourceVisible, 0)
-		if err != nil {
-			s.log.Log(logSource, "supervisor.typing_check_unavailable", paneID, map[string]any{"reason": "read_failed", "error": err.Error()})
-			return nil
-		}
+	read, err := r.ReadANSI(ctx, paneID, herdr.SourceVisible, 0)
+	if errors.Is(err, ErrANSIUnavailable) {
+		return nil
+	}
+	if err != nil {
+		s.log.Log(logSource, "supervisor.typing_check_unavailable", paneID, map[string]any{"reason": "read_failed", "error": err.Error()})
+		return nil
 	}
 	clean := reANSI.ReplaceAllString(read.Text, "")
 	if _, menu := herdr.ParsePrompt(clean); menu {
 		return nil
 	}
-	var typed, known bool
-	if plain {
-		typed, known = herdr.TypedInputPlain(clean)
-	} else {
-		typed, known = herdr.TypedInput(read.Text)
-	}
+	typed, known := herdr.TypedInput(read.Text)
 	if !known || read.Truncated {
 		s.log.Log(logSource, "supervisor.typing_check_unavailable", paneID, map[string]any{"reason": "unclear_screen"})
 		return nil

@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +12,9 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 )
 
 func fixtureViewState() (flow.State, []LogLine) {
@@ -182,6 +186,11 @@ func TestStageMappingAndWhyWaitingCases(t *testing.T) {
 				BaseCommit: "0", Ready: []flow.Ready{{Head: "h1"}},
 				Rounds: []flow.Round{{N: 1, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictChanges, Majors: 1}},
 			}}},
+			{ID: "fix_no_slot", LastRow: "N22", HoldWhy: "no slot is free", Attempts: []flow.Attempt{{
+				BaseCommit: "0", Ready: []flow.Ready{{Head: "h1"}},
+				Run:    &flow.RunRecord{Role: flow.RoleWorker, State: flow.PhaseEnded, Result: flow.EndExited},
+				Rounds: []flow.Round{{N: 1, Kind: flow.RoundFull, Head: "h1", Verdict: flow.VerdictChanges, Majors: 1}},
+			}}},
 			{ID: "ci", Attempts: []flow.Attempt{{
 				BaseCommit: "0", Ready: []flow.Ready{{Head: "h1"}},
 				Rounds: []flow.Round{
@@ -206,17 +215,18 @@ func TestStageMappingAndWhyWaitingCases(t *testing.T) {
 		byRef[tv.Ref] = tv
 	}
 	want := map[string]struct{ stage, why string }{
-		"done":    {"done", ""},
-		"closed":  {"done", ""},
-		"dropped": {"done", ""},
-		"split":   {"done", ""},
-		"parked":  {"blocked_or_failed", "Parked, waiting on the coordinator"},
-		"ntc":     {"blocked_or_failed", "Worker reported nothing to change, waiting on the coordinator"},
-		"working": {"working", "Worker is working"},
-		"fix":     {"working", "Waiting on the worker"},
-		"ci":      {"ci", "Waiting on CI and merge"},
-		"cycA":    {"waiting_on_dep", "Waiting on cycB"},
-		"cycB":    {"waiting_on_dep", "Waiting on cycA"},
+		"done":        {"done", ""},
+		"closed":      {"done", ""},
+		"dropped":     {"done", ""},
+		"split":       {"done", ""},
+		"parked":      {"blocked_or_failed", "Parked, waiting on the coordinator"},
+		"ntc":         {"blocked_or_failed", "Worker reported nothing to change, waiting on the coordinator"},
+		"working":     {"working", "Worker is working"},
+		"fix":         {"working", "Waiting on the worker"},
+		"fix_no_slot": {"working", "no slot is free"},
+		"ci":          {"ci", "Waiting on CI and merge"},
+		"cycA":        {"waiting_on_dep", "Waiting on cycB"},
+		"cycB":        {"waiting_on_dep", "Waiting on cycA"},
 	}
 	for ref, w := range want {
 		tv := byRef[ref]
@@ -229,6 +239,100 @@ func TestStageMappingAndWhyWaitingCases(t *testing.T) {
 	if byRef["ci"].LastRule != "" || byRef["ci"].LastDecision != "" || byRef["parked"].LastRule != "N3" || byRef["parked"].LastDecision != "stopped runs" {
 		t.Errorf("last_rule/last_decision unexpected: ci=%+v parked=%+v", byRef["ci"], byRef["parked"])
 	}
+
+	// Finding 7 (trial seq 65, design.md 4.11): N22 with worker gone and no slot
+	// free records HoldWhy "no slot is free" so the why line shows it instead of
+	// "Waiting on the worker".
+	t.Run("n22_worker_gone_no_slot", func(t *testing.T) {
+		ctx := context.Background()
+		srv := hctest.New(t)
+		client := hc.NewClient(srv.Path)
+		paths := testPaths(t)
+		repo, base := initGitRepoWithRemote(t)
+		githubOrigin(t, repo)
+		gh := bindRepoFakeGH(t, repo)
+
+		now := time.Date(2026, 11, 22, 20, 34, 0, 0, time.UTC)
+		endedAt := now.Add(-5 * time.Minute)
+		eng := newTestEngine(t, paths, client)
+		eng.Now = func() time.Time { return now }
+		if err := eng.Start(repo, "Finding 7 no slot why", 1); err != nil {
+			t.Fatal(err)
+		}
+		id := eng.projectDirs()[0].Name()
+		srv.Add(hc.Terminal{
+			Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+			Labels: testCoordLabels(id, "run-elsewhere"),
+			Status: &hc.Status{App: "claude-code", State: "working"},
+		})
+
+		wt1, br1, _ := makeSlotWorktree(t, ctx, paths, repo, id, "T1", "t1.go")
+		wt5, br5, c5 := makeSlotWorktree(t, ctx, paths, repo, id, "T5", "t5.go")
+		writeOpenPRView(t, gh, 5, c5, "[]")
+
+		w1, err := startRun(ctx, client, world.RunSpec{Name: "worker-t1-live", Cwd: wt1, Argv: []string{"sh"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		setTerminalStatusAt(t, srv, client, w1, "working", now)
+
+		st, err := LoadState(paths.State(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Project.RunID = "coord-elsewhere"
+		st.Tasks = []flow.Task{
+			{
+				ID: "T1", Title: "feat: T1 holding the slot", EstimateLines: 100,
+				Attempts: []flow.Attempt{{
+					SizeCap: 200, BaseCommit: base, Branch: br1, Worktree: wt1, RunID: w1,
+					Run: &flow.RunRecord{
+						Role: flow.RoleWorker, CLI: "claude", Address: w1,
+						State: flow.PhaseWorking, Status: "working", StatusSince: now, StatusReported: true,
+					},
+					Ready: []flow.Ready{}, Rounds: []flow.Round{}, Accepts: []flow.Accept{},
+					Acts: []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now.Add(-time.Minute)}},
+				}},
+			},
+			{
+				ID: "T5", Title: "feat: T5 at N22 with no slot", EstimateLines: 200,
+				Attempts: []flow.Attempt{{
+					SizeCap: 400, BaseCommit: base, Branch: br5, Worktree: wt5, PR: 5,
+					Run: &flow.RunRecord{
+						Role: flow.RoleWorker, CLI: "claude", Address: "worker-t5-gone",
+						SessionID: "sess-t5", Resumable: true,
+						State: flow.PhaseEnded, Result: flow.EndExited, EndedAt: endedAt,
+					},
+					Ready:   []flow.Ready{{Head: c5}},
+					Rounds:  []flow.Round{{N: 1, Kind: flow.RoundFull, Head: c5, Verdict: flow.VerdictChanges, Majors: 1, ReportPath: "/r/t5-r1.md"}},
+					Accepts: []flow.Accept{},
+					Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: endedAt.Add(-time.Minute)}},
+				}},
+			},
+		}
+		if err := SaveState(paths.State(id), st); err != nil {
+			t.Fatal(err)
+		}
+
+		// Pass 1 holds round 1 findings on T5; Pass 2 waits at N22 with no slot free.
+		eng.passProject(ctx, id, false)
+		eng.passProject(ctx, id, false)
+
+		g, err := eng.Graph(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if tv := g.Tasks[1]; tv.Ref != "T5" || tv.Stage != "working" || tv.WhyWaiting != "no slot is free" {
+			t.Errorf("GraphViewOf[T5] = (ref=%q, stage=%q, why=%q), want (T5, working, %q)", tv.Ref, tv.Stage, tv.WhyWaiting, "no slot is free")
+		}
+		s, logs, err := eng.loadProjectCopy(id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if sv := StatusViewOf(s, logs); sv[1].ID != "T5" || sv[1].Why != "no slot is free" {
+			t.Errorf("StatusViewOf[T5] = (id=%q, why=%q), want (T5, %q)", sv[1].ID, sv[1].Why, "no slot is free")
+		}
+	})
 }
 
 func TestRoundsUsesFlowCounted(t *testing.T) {

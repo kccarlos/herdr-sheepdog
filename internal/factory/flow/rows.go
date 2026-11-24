@@ -216,24 +216,6 @@ func workerStartAsk(last *RunRecord, n int) string {
 	return key(AskStartWorker, mode, n)
 }
 
-// WantsWorkerSlot reports whether an open attempt's ended worker run is ready
-// to ask for a start if granted a free slot (design.md 4.8, N10).
-func WantsWorkerSlot(t Task, s Settings, now time.Time) bool {
-	a := OpenAttempt(t)
-	if Ended(t) || t.Parked || OpenRecap(t) != nil || a == nil || a.NothingToChange != "" ||
-		a.Run == nil || a.Run.State != PhaseEnded || a.Review != nil && a.Review.RunID != "" {
-		return false
-	}
-	asks := EnsureRun(In{Task: t, Settings: s, Facts: Facts{Worker: Run{State: RunGone}}, Now: now}, RoleWorker)
-	return len(asks) > 0 && strings.HasPrefix(asks[0], AskStartWorker)
-}
-
-// WantsNewAttempt reports whether a task with no open attempt is ready to ask
-// for AskNewAttempt if granted a free slot (design.md 4.2, 8).
-func WantsNewAttempt(t Task, s Settings, now time.Time) bool {
-	return len(ensure(In{Task: t, Settings: s, Now: now}, AskNewAttempt)) > 0
-}
-
 // Clause is one named part of a row's condition (design.md 4: "each clause
 // is named").
 type Clause = func(In) bool
@@ -274,7 +256,7 @@ func noAttempt(in In) bool   { return in.attempt() == nil }
 func hasAttempt(in In) bool  { return in.attempt() != nil }
 func depsNotDone(in In) bool { return len(in.Facts.DepsNotDone) > 0 }
 func depsDropped(in In) bool { return len(in.Facts.DepsDropped) > 0 }
-func noSlot(in In) bool      { return in.Facts.NoSlot }
+func noSlot(in In) bool      { return in.Facts.NoSlot && !in.probe }
 func noReady(in In) bool     { return len(in.attempt().Ready) == 0 }
 func tipAhead(in In) bool    { return in.Facts.TipRel == RelAhead } // merge_only is caught by N20 above
 func noPR(in In) bool        { return in.Facts.PR.State == PRNone }
@@ -302,14 +284,17 @@ func prHeadIsH(in In) bool { return in.Facts.PR.Head == headH(in) }
 func prHeadAheadMergeOnly(in In) bool {
 	return prOpen(in) && answered(in) && in.Facts.PR.HeadRel == RelAhead && in.Facts.PR.HeadMergeOnly
 }
-func answered(in In) bool             { return in.Facts.PR.Answered }
-func unanswered(in In) bool           { return !answered(in) }
-func githubUnavail(in In) bool        { return in.Facts.GitHubUnavailable }
-func githubAvail(in In) bool          { return !githubUnavail(in) }
-func prBehindBase(in In) bool         { return in.Facts.PR.Behind && !in.Facts.PR.BehindUnknown }
-func prBehindUnknown(in In) bool      { return in.Facts.PR.BehindUnknown }
-func notBehind(in In) bool            { return !in.Facts.PR.Behind && !in.Facts.PR.BehindUnknown }
-func baseRed(in In) bool              { return in.Facts.BaseRed }
+func answered(in In) bool        { return in.Facts.PR.Answered }
+func unanswered(in In) bool      { return !answered(in) }
+func githubUnavail(in In) bool   { return in.Facts.GitHubUnavailable }
+func githubAvail(in In) bool     { return !githubUnavail(in) }
+func prBehindBase(in In) bool    { return in.Facts.PR.Behind && !in.Facts.PR.BehindUnknown }
+func prBehindUnknown(in In) bool { return in.Facts.PR.BehindUnknown }
+func notBehind(in In) bool       { return !in.Facts.PR.Behind && !in.Facts.PR.BehindUnknown }
+func baseRed(in In) bool         { return in.Facts.BaseRed }
+func notBehindOrUpdated(in In) bool {
+	return !prBehindBase(in) || Done(in.acts(), key(AskMergeOnly, headH(in))) && !baseRed(in)
+}
 func checksGreen(in In) bool          { return in.Facts.PR.Checks == ChecksGreen }
 func checksRed(in In) bool            { return in.Facts.PR.Checks == ChecksRed }
 func checksStoppedExt(in In) bool     { return in.Facts.PR.Checks == ChecksStoppedExternal }
@@ -631,7 +616,7 @@ var TaskRows = []Row[In]{
 		return say("PR conflicts with the base: tell the worker once to merge the base (never rebase)",
 			EnsureRun(in, RoleWorker), ensure(in, key(AskTellConflict, headH(in))))(in)
 	}},
-	{ID: "N33", WaitsOn: "CI; then the worker", Stage: "ci", When: ciReady(checksRed), Then: func(in In) Decision {
+	{ID: "N33", WaitsOn: "CI; then the worker", Stage: "ci", When: ciReady(all(checksRed, notBehindOrUpdated)), Then: func(in In) Decision {
 		h := headH(in)
 		if asks, wait := rerunOrWait(in, h); len(asks) > 0 || wait {
 			return say("checks red: re-run failed jobs, or wait for the re-run or for checks still running", asks)(in)
@@ -642,7 +627,7 @@ var TaskRows = []Row[In]{
 		}
 		return say("checks red at H: tell the worker once per failing run", EnsureRun(in, RoleWorker), tells)(in)
 	}},
-	{ID: "N34", WaitsOn: "CI; then the coordinator", Stage: "ci", When: ciReady(anyOf(checksStoppedExt, checksStoppedTimeout, checksStoppedUnknown)), Then: func(in In) Decision {
+	{ID: "N34", WaitsOn: "CI; then the coordinator", Stage: "ci", When: ciReady(all(anyOf(checksStoppedExt, checksStoppedTimeout, checksStoppedUnknown), notBehindOrUpdated)), Then: func(in In) Decision {
 		h := headH(in)
 		if !checksStoppedExt(in) { // a time limit, or a cancel with no evidence of who: one wake for both, never a re-run
 			return say("a CI job was stopped by its own time limit or for an unread reason ("+string(in.Facts.PR.Checks)+")",
@@ -866,9 +851,9 @@ func ciRuns(in In) []string {
 
 // rerunOrWait waits while a check runs (a re-run of an unfinished run is
 // refused). Else it asks one re-run per failing run with flake_reruns left
-// for that run at H (a failed request counts), keyed by the run's red jobs,
-// and waits while a done re-run still reads those jobs red, at most
-// checks_grace_minutes from the request.
+// for that run at H (a failed request counts), never on a behind PR, keyed by
+// the run's red jobs, and waits while a done re-run still reads those jobs red,
+// at most checks_grace_minutes from the request.
 func rerunOrWait(in In, h string) (asks []string, wait bool) {
 	if in.Facts.PR.Running || in.Facts.PR.ChecksUnread && in.Now.Sub(in.Facts.PR.HeadSince) < checksGrace(in) {
 		return nil, true // H's runs unread: never a re-run; tell or wake after the grace
@@ -889,7 +874,7 @@ func rerunOrWait(in In, h string) (asks []string, wait bool) {
 		}
 		if a := LastAct(in.acts(), k); a != nil {
 			wait = wait || a.Result == "done" && in.Now.Sub(a.At) < checksGrace(in)
-		} else if run != "none" && spent < in.Settings.FlakeReruns {
+		} else if !prBehindBase(in) && run != "none" && spent < in.Settings.FlakeReruns {
 			asks = append(asks, k)
 		}
 	}

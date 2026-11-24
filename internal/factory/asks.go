@@ -78,7 +78,9 @@ func (e *Engine) Answer(askID, option string, proof AnswerProof) error {
 	err := e.refuse("", "not_found", fmt.Sprintf("No ask %q exists.", askID))
 	e.eachStateLocked(func(id string, s flow.State) bool {
 		if ai := slices.IndexFunc(s.Asks, func(a flow.Ask) bool { return a.ID == askID }); ai >= 0 {
-			err = e.answerAskLocked(id, &s, ai, option, "", owner, proof)
+			if err = e.freshLocked(id, s); err == nil {
+				err = e.answerAskLocked(id, &s, ai, option, "", owner, proof)
+			}
 			return false
 		}
 		return true
@@ -96,6 +98,12 @@ func (e *Engine) Say(project, text string) error {
 	id, s, err := e.findProjectLocked(ctx, project)
 	if project == "" || err != nil {
 		return fmt.Errorf("%w: %s", ErrProjectNotFound, project)
+	}
+	if err := e.freshLocked(id, s); err != nil {
+		return err
+	}
+	if s.Project.Finished {
+		return e.refuse(id, flow.RefuseClosed, "the project is finished; start it with a different goal")
 	}
 	if msg == "" {
 		return e.refuse(id, "why_missing", "Say requires non-empty text.")
@@ -270,7 +278,7 @@ func (e *Engine) answerAskLocked(id string, s *flow.State, ai int, option, why, 
 		} else if att != nil {
 			if att.Run != nil && att.Run.State == flow.PhaseEnded {
 				att.Held = appendHeld(att.Held, msg)
-			} else if err := e.deliverWorkerLocked(ctx, id, next.Task, s, att, msg, false); err != nil {
+			} else if _, err := e.deliverWorkerLocked(ctx, id, next.Task, s, att, msg, false, ""); err != nil {
 				if !errors.Is(err, errNoWorkerRun) {
 					e.logError("factory.exec_error", id, err)
 				}

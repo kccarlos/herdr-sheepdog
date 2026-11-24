@@ -460,9 +460,6 @@ func TestPassProjectLogsErrorsAndSkipsDeadRunState(t *testing.T) {
 	if len(srv.Requests()) != reqsAfterFirst {
 		t.Fatalf("expected no hc RPC once coordinator run ended, got %+v", srv.Requests()[reqsAfterFirst:])
 	}
-	if !strings.Contains(logBuf.String(), "factory.trim_error") {
-		t.Fatalf("expected factory.trim_error in engine log, got %q", logBuf.String())
-	}
 
 	// Force commitLocked failure by replacing log.jsonl with a directory while RunID is empty.
 	st.Project.RunID, st.Project.Acts = "", nil
@@ -475,9 +472,15 @@ func TestPassProjectLogsErrorsAndSkipsDeadRunState(t *testing.T) {
 	if err := os.MkdirAll(paths.Log(projID), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	logBuf.Reset()
 	eng.passProject(ctx, projID, false)
 	if !strings.Contains(logBuf.String(), "factory.commit_error") {
 		t.Fatalf("expected factory.commit_error in engine log, got %q", logBuf.String())
+	}
+	// Next pass on the dirty store (or with trim) hits the directory I/O error in TrimLog.
+	eng.passProject(ctx, projID, true)
+	if !strings.Contains(logBuf.String(), "factory.trim_error") {
+		t.Fatalf("expected factory.trim_error in engine log, got %q", logBuf.String())
 	}
 }
 
@@ -2056,5 +2059,66 @@ func TestProoflessTaskPromptAndTouchedOnlyReady(t *testing.T) {
 	}
 	if !strings.Contains(got, "Skipped: (nothing skipped)") {
 		t.Errorf("explicit empty skipped proofPrompt missing (nothing skipped):\n%s", got)
+	}
+}
+
+// TestTellEndedWorkerLogsHeldAndDeliversToNextWorker checks finding 7 (trial seq 64-65, 181):
+// telling an ended worker logs "held for the next worker: findings from round 1"
+// (keeping the R36 line), and the held findings text becomes the next worker's prompt.
+func TestTellEndedWorkerLogsHeldAndDeliversToNextWorker(t *testing.T) {
+	l := newLanding(t)
+	now := time.Date(2026, 11, 22, 20, 34, 0, 0, time.UTC)
+	l.eng.Now = func() time.Time { return now }
+
+	var launched []hc.RunParams
+	l.srv.OnRun = func(_ hc.Terminal, p hc.RunParams) {
+		if p.Labels["sheepdog.role"] == flow.RoleWorker {
+			launched = append(launched, p)
+		}
+	}
+
+	l.srv.Finish(l.worker, "exited")
+	l.edit(func(s *flow.State) {
+		a := &s.Tasks[0].Attempts[0]
+		a.RunID = ""
+		a.Run = &flow.RunRecord{
+			Role: flow.RoleWorker, CLI: "claude", Address: l.worker,
+			SessionID: "11111111-2222-4333-8444-555555555555", Resumable: true,
+			State: flow.PhaseEnded, Result: flow.EndExited, EndedAt: now,
+		}
+		a.Rounds = []flow.Round{{
+			N: 1, Kind: flow.RoundFull, Head: l.c1,
+			Verdict: flow.VerdictChanges, Majors: 1, ReportPath: "/r/findings-r1.md",
+		}}
+		a.Acts = []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now.Add(-time.Minute)}}
+	})
+
+	// Pass 1 (inside restart back-off): N22 tells the ended worker -> R36 holds on task.
+	l.pass()
+
+	if r36 := logRules(t, l.paths.Log(l.id), "R36"); len(r36) != 1 || r36[0].Decision != flow.RefuseRunEnded {
+		t.Errorf("R36 log = %+v, want 1 %q line", r36, flow.RefuseRunEnded)
+	}
+	n22 := logRules(t, l.paths.Log(l.id), "N22")
+	const wantDecision = "held for the next worker: findings from round 1"
+	if len(n22) != 1 || n22[0].Decision != wantDecision {
+		t.Errorf("N22 log = %+v, want 1 line with Decision %q", n22, wantDecision)
+	}
+	if held := l.state().Tasks[0].Attempts[0].Held; len(held) != 1 || !strings.Contains(held[0], "/r/findings-r1.md") {
+		t.Fatalf("Attempt.Held after R36 = %q, want round 1 findings held on task", held)
+	}
+
+	// Pass 2 (past back-off): worker resumes and receives the held findings text as its prompt.
+	now = now.Add(time.Minute)
+	l.pass()
+	if len(launched) != 1 {
+		t.Fatalf("launched worker count = %d, want 1", len(launched))
+	}
+	prompt := launched[0].Argv[len(launched[0].Argv)-1]
+	if !strings.Contains(prompt, "Review round 1 found 1 major(s) in /r/findings-r1.md") {
+		t.Errorf("next worker prompt missing held findings:\n%s", prompt)
+	}
+	if held := l.state().Tasks[0].Attempts[0].Held; len(held) != 0 {
+		t.Errorf("Attempt.Held not cleared on worker start: %q", held)
 	}
 }

@@ -3,7 +3,6 @@ package factory
 import (
 	"context"
 	"errors"
-	"io"
 	"os"
 	"slices"
 	"strings"
@@ -14,7 +13,6 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
-	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 )
 
 func TestVerify1CoordinatorIdentity(t *testing.T) {
@@ -329,14 +327,52 @@ func TestTaskAbortRecordsFailureAndBacksOff(t *testing.T) {
 			if err := SaveState(l.paths.State(l.id), s); err != nil {
 				t.Fatal(err)
 			}
-			var failGet atomic.Bool
 			if name == "worker state save" {
-				wantErr = "rename"
-				installLaunchSaveFailure(t, l)
-			} else {
-				failGet.Store(true)
-				l.eng.HC = hc.NewClient(methodFailProxy(t, l.srv.Path, "terminal.get", &failGet))
+				path := l.paths.State(l.id)
+				if err := os.Rename(path, path+".original"); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Mkdir(path, 0o700); err != nil {
+					t.Fatal(err)
+				}
+				logsBefore := len(l.logLines())
+				runCalls := countRPC(l.srv, "terminal.run")
+				pass := func() {
+					baseTried := false
+					if evaluated := l.eng.passTaskLocked(context.Background(), l.id, &s, 0, true, worker, nil, &baseTried, 0); !evaluated {
+						t.Error("task evaluated a row but was reported as skipped for I1")
+					}
+				}
+				pass()
+				if got := countRPC(l.srv, "terminal.run"); got != runCalls {
+					t.Errorf("failed pre-launch save launched a terminal")
+				}
+				if got := l.log.String(); !strings.Contains(got, "factory.commit_error") || !strings.Contains(got, "rename") {
+					t.Errorf("missing factory.commit_error for %s: %q", name, got)
+				}
+				// S2: after the pre-launch state save failed, no further log or state write happens in that pass.
+				if got := len(l.logLines()); got != logsBefore {
+					t.Errorf("log.jsonl grew after failed pre-launch save (%d -> %d); S2 forbids writes while dirty", logsBefore, got)
+				}
+				if err := os.Remove(path); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Rename(path+".original", path); err != nil {
+					t.Fatal(err)
+				}
+				if act := flow.LastAct(l.state().Tasks[0].Attempts[0].Acts, key); act != nil {
+					t.Errorf("state.json recorded act %+v after failed pre-launch save, want none", act)
+				}
+				// Next pass recovers the dirty store and launches the worker cleanly.
+				l.pass()
+				if got := countRPC(l.srv, "terminal.run"); got != runCalls+1 {
+					t.Errorf("terminal runs after recovery pass = %d, want %d", got, runCalls+1)
+				}
+				return
 			}
+			var failGet atomic.Bool
+			failGet.Store(true)
+			l.eng.HC = hc.NewClient(methodFailProxy(t, l.srv.Path, "terminal.get", &failGet))
 
 			runCalls := countRPC(l.srv, "terminal.run")
 			pass := func() {
@@ -374,39 +410,6 @@ func TestTaskAbortRecordsFailureAndBacksOff(t *testing.T) {
 			}
 		})
 	}
-}
-
-type launchSaveFailureWriter struct {
-	io.Writer
-	t    *testing.T
-	path string
-}
-
-func (w *launchSaveFailureWriter) Write(p []byte) (int, error) {
-	if w.path != "" && strings.Contains(string(p), "factory.commit_error") {
-		// Clear the obstruction after the pre-launch save fails, so the
-		// subsequent commit of the act can write the state.
-		if err := os.Remove(w.path); err != nil {
-			w.t.Fatal(err)
-		}
-		if err := os.Rename(w.path+".original", w.path); err != nil {
-			w.t.Fatal(err)
-		}
-		w.path = ""
-	}
-	return w.Writer.Write(p)
-}
-
-func installLaunchSaveFailure(t *testing.T, l *landing) {
-	t.Helper()
-	path := l.paths.State(l.id)
-	if err := os.Rename(path, path+".original"); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Mkdir(path, 0o700); err != nil {
-		t.Fatal(err)
-	}
-	l.eng.Log = logging.NewJSONLLogger(&launchSaveFailureWriter{Writer: l.log, t: t, path: path})
 }
 
 func TestTaskAbortCommitsEarlierAsk(t *testing.T) {

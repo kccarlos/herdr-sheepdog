@@ -43,11 +43,12 @@ func RunningTasks(tasks []Task, workerState map[string]RunState) int {
 	return n
 }
 
-// GrantSlots decides which tasks that reached N10 this pass get a slot
-// (design.md 4.10, KB-TSK-12): owner-answered first, then urgent, then longest
-// remaining critical path of estimate_lines through after, then oldest (index
-// in tasks). Gives up to maxRunning - running slots, plus one extra slot at the
-// cap (running == maxRunning) for an owner-answered or urgent task.
+// GrantSlots decides which tasks whose matching row asks for a start this pass
+// get a slot (design.md 4.10, KB-TSK-12): owner-answered first, then urgent,
+// then a task with an open attempt, then longest remaining critical path of
+// estimate_lines through after, then oldest (index in tasks). Gives up to
+// maxRunning - running slots, plus one extra slot at the cap
+// (running == maxRunning) for an owner-answered or urgent task.
 func GrantSlots(candidates []string, tasks []Task, running, maxRunning int, asks ...Ask) map[string]bool {
 	byID, age := make(map[string]Task, len(tasks)), make(map[string]int, len(tasks))
 	for i, t := range tasks {
@@ -70,6 +71,9 @@ func GrantSlots(candidates []string, tasks []Task, running, maxRunning int, asks
 		if ua, ub := byID[a].Priority == PriorityUrgent, byID[b].Priority == PriorityUrgent; ua != ub {
 			return map[bool]int{true: -1, false: 1}[ua]
 		}
+		if ha, hb := OpenAttempt(byID[a]) != nil, OpenAttempt(byID[b]) != nil; ha != hb {
+			return map[bool]int{true: -1, false: 1}[ha]
+		}
 		if c := cmp.Compare(crit[b], crit[a]); c != 0 {
 			return c
 		}
@@ -87,6 +91,40 @@ func GrantSlots(candidates []string, tasks []Task, running, maxRunning int, asks
 		}
 	}
 	return granted
+}
+
+// YieldSlots picks idle workers (oldest first) whose tasks, matched as stopped,
+// sit at a ci or owner_gate row asking nothing with no open worker ask (4.10).
+func YieldSlots(refused, running, granted, maxRunning int, tasks []Task, facts map[string]Facts, workerState map[string]RunState, asks []Ask, settings Settings, now time.Time) []string {
+	used := running + granted
+	need := used - maxRunning + refused
+	if refused <= 0 || need <= 0 {
+		return nil
+	}
+	var eligible []string
+	for _, t := range tasks {
+		f, ok := facts[t.ID]
+		a := OpenAttempt(t)
+		if !ok || Ended(t) || t.Parked || a == nil || cmp.Or(workerState[t.ID], a.Run.TaskRun().State) != RunIdle ||
+			slices.ContainsFunc(asks, func(x Ask) bool { return x.Task == t.ID && x.Status == AskStatusOpen && x.AskedBy == RoleWorker }) {
+			continue
+		}
+		tc, run := t, RunRecord{}
+		tc.Attempts = slices.Clone(t.Attempts)
+		ac := OpenAttempt(tc)
+		if ac.Run != nil {
+			run = *ac.Run
+		}
+		run.Role, run.State, run.Result, run.EndedAt = RoleWorker, PhaseEnded, EndStopped, now
+		ac.RunID, ac.Run, f.Worker, f.NoSlot = "", &run, Run{State: RunGone}, false
+		if r, d := FirstMatch(TaskRows, In{Task: tc, Settings: settings, Facts: f, Asks: asks, Now: now}); (r.Stage == "ci" || r.Stage == "owner_gate") && len(d.Asked) == 0 {
+			eligible = append(eligible, t.ID)
+		}
+	}
+	if len(eligible) == 0 || len(eligible) < used-maxRunning+1 {
+		return nil
+	}
+	return eligible[:min(len(eligible), need)]
 }
 
 func lastSlotAt(t Task) time.Time {

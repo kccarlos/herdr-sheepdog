@@ -731,10 +731,12 @@ func TestReportReadyRejectRefusedWhenLadderSaysRecap(t *testing.T) {
 	}
 	for name, rounds := range cases {
 		t.Run(name, func(t *testing.T) {
+			settings := flow.DefaultSettings()
+			settings.RetrosPerTask = 0 // disable retro so a 3-round streak hits L12 recap
 			st := flow.State{
 				Seq:      1,
 				Project:  flow.Project{ID: projID, Folder: repo, Started: true},
-				Settings: flow.DefaultSettings(),
+				Settings: settings,
 				Tasks: []flow.Task{{
 					ID: "T1", Title: "feat: x",
 					Attempts: []flow.Attempt{{SizeCap: 100,
@@ -1746,4 +1748,259 @@ func TestReviewerPromptSelfCheckMissesWording(t *testing.T) {
 	if !strings.Contains(reviewerTemplate, "self-check misses: <a number only>") {
 		t.Fatalf("reviewer.md missing 'self-check misses: <a number only>':\n%s", reviewerTemplate)
 	}
+}
+
+// TestSayAfterYieldReachesWorker checks O38 hole 1 (design.md 4.9) and round-2
+// correction 2: task say decides from stored state (no GitHub observation):
+// refuse no_worker naming send-back (appending nothing to Held) when the worker
+// run has ended, LastRow's stage is ci or owner_gate, and HoldWhy is empty;
+// send-back then restarts via N22. Otherwise deliver and log deliverWorkerLocked's
+// text ("held for the next worker: …" or "told worker …"), never "said to worker".
+func TestSayAfterYieldReachesWorker(t *testing.T) {
+	t.Run("n35_after_wake_yields_then_say_refused_and_send_back_restarts", func(t *testing.T) {
+		ctx := context.Background()
+		srv := hctest.New(t)
+		client := hc.NewClient(srv.Path)
+		paths := testPaths(t)
+		repo, base := initGitRepoWithRemote(t)
+		githubOrigin(t, repo)
+		gh := bindRepoFakeGH(t, repo)
+
+		now := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+		eng := newTestEngine(t, paths, client)
+		eng.Now = func() time.Time { return now }
+		if err := eng.Start(repo, "Say after N35 yield", 1); err != nil {
+			t.Fatal(err)
+		}
+		id := eng.projectDirs()[0].Name()
+		srv.Add(hc.Terminal{
+			Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+			Labels: testCoordLabels(id, "run-elsewhere"),
+			Status: &hc.Status{App: "claude-code", State: "working"},
+		})
+
+		wt1, br1, c1 := makeSlotWorktree(t, ctx, paths, repo, id, "T1", "t1.go")
+		writeOpenPRView(t, gh, 1, c1, "[]")
+		w1, err := startRun(ctx, client, world.RunSpec{Name: "worker-t1-n35", Cwd: wt1, Argv: []string{"sh"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		setTerminalStatusAt(t, srv, client, w1, "idle", now.Add(-time.Minute))
+
+		st, err := LoadState(paths.State(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Project.RunID = "coord-elsewhere"
+		st.Project.RunTokenHash = tokenHash("tok-coord")
+		st.Tasks = []flow.Task{{
+			ID: "T1", Title: "feat: T1 no checks", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 100, BaseCommit: base, Branch: br1, Worktree: wt1, PR: 1, RunID: w1,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: w1,
+					SessionID: "11111111-2222-4333-8444-555555555555", Resumable: true,
+					State: flow.PhaseIdle, Status: "idle", StatusSince: now.Add(-time.Minute), StatusReported: true,
+				},
+				Ready: []flow.Ready{{Head: c1}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+				},
+				Accepts: []flow.Accept{},
+				Acts: []flow.Act{
+					{Key: flow.AskStartWorker, Result: "done", At: now.Add(-20 * time.Minute)},
+					{Key: flow.AskDispatchCI + "@" + c1, Result: "skipped", At: now.Add(-15 * time.Minute)},
+					{Key: flow.AskWake + "@no_checks@" + c1, Result: "done", At: now.Add(-10 * time.Minute)},
+				},
+			}},
+		}}
+		if err := SaveState(paths.State(id), st); err != nil {
+			t.Fatal(err)
+		}
+
+		// First pass records HeadSince at now (within checks_grace_minutes).
+		eng.passProject(ctx, id, false)
+
+		// Advance past checks_grace_minutes and add queued T2: T1 hits N35 after its wake and yields.
+		now = now.Add(10 * time.Minute)
+		st, err = LoadState(paths.State(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Tasks = append(st.Tasks, flow.Task{ID: "T2", Title: "feat: T2 queued", EstimateLines: 50})
+		if err := SaveState(paths.State(id), st); err != nil {
+			t.Fatal(err)
+		}
+
+		eng.passProject(ctx, id, false) // T1 at N35 yields w1; T2 waits N10
+		eng.passProject(ctx, id, false) // T2 opens attempt 1 (N11)
+
+		st, err = LoadState(paths.State(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		a1 := st.Tasks[0].Attempts[0]
+		if st.Tasks[0].LastRow != "N35" || st.Tasks[0].HoldWhy != "" || a1.RunID != "" || a1.Run == nil || a1.Run.State != flow.PhaseEnded || a1.Run.Result != flow.EndStopped {
+			t.Fatalf("T1 after N35 yield = row:%q hold:%q run_id:%q run:%+v, want N35 hold=\"\" ended(stopped)", st.Tasks[0].LastRow, st.Tasks[0].HoldWhy, a1.RunID, a1.Run)
+		}
+		if flow.OpenAttempt(st.Tasks[1]) == nil {
+			t.Fatalf("T2 did not take yielded slot: row=%q", st.Tasks[1].LastRow)
+		}
+
+		// task say T1 must be refused no_worker naming send-back, leaving Held empty.
+		err = eng.Report("tok-coord", "task", json.RawMessage(`{"action":"say","task":"T1","why":"push a change that triggers CI"}`))
+		if refusalCode(err) != "no_worker" || !strings.Contains(err.Error(), "send-back") {
+			t.Fatalf("task say after N35 yield = %v, want no_worker naming send-back", err)
+		}
+		st, err = LoadState(paths.State(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(st.Tasks[0].Attempts[0].Held) != 0 {
+			t.Errorf("refused task say appended to Held: %q", st.Tasks[0].Attempts[0].Held)
+		}
+		if lines := logRules(t, paths.Log(id), "task say"); len(lines) != 0 {
+			t.Errorf("refused task say logged lines: %+v", lines)
+		}
+
+		// send-back moves T1 to N22 and starts a worker once a slot is free.
+		if err := eng.Report("tok-coord", "task", json.RawMessage(`{"action":"send-back","task":"T1","why":"push a change that triggers CI"}`)); err != nil {
+			t.Fatalf("task send-back: %v", err)
+		}
+		st, err = LoadState(paths.State(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		st.Tasks[1].Done = &flow.Merged{MergedCommit: "m2"}
+		if err := SaveState(paths.State(id), st); err != nil {
+			t.Fatal(err)
+		}
+
+		now = now.Add(flow.PassInterval)
+		eng.passProject(ctx, id, false)
+
+		st, err = LoadState(paths.State(id))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if st.Tasks[0].LastRow != "N22" || st.Tasks[0].Attempts[0].RunID == "" || !flow.Done(st.Tasks[0].Attempts[0].Acts, flow.AskStartWorker+"@"+flow.ContinueResume) {
+			t.Fatalf("T1 after send-back = row:%q run_id:%q acts:%+v, want N22 with resumed worker", st.Tasks[0].LastRow, st.Tasks[0].Attempts[0].RunID, st.Tasks[0].Attempts[0].Acts)
+		}
+	})
+
+	t.Run("stored_state_refusal_and_held_decision", func(t *testing.T) {
+		seed := func(t *testing.T, client *hc.Client, lastRow, holdWhy string, runID string, run *flow.RunRecord) (*Engine, Paths, string) {
+			t.Helper()
+			paths := testPaths(t)
+			eng := newGitTestEngine(t, paths, client)
+			const id = "proj-say-state"
+			st := flow.State{
+				Seq:      1,
+				Project:  flow.Project{ID: id, Started: true, RunTokenHash: tokenHash("tok-coord")},
+				Settings: flow.DefaultSettings(),
+				Tasks: []flow.Task{{
+					ID: "T1", Title: "feat: say check", EstimateLines: 50,
+					LastRow: lastRow, HoldWhy: holdWhy,
+					Attempts: []flow.Attempt{{
+						SizeCap: 100, BaseCommit: "b0", RunID: runID, Run: run,
+						Ready: []flow.Ready{{Head: "c1"}}, Rounds: []flow.Round{}, Accepts: []flow.Accept{}, Acts: []flow.Act{},
+					}},
+				}},
+			}
+			if err := SaveState(paths.State(id), st); err != nil {
+				t.Fatal(err)
+			}
+			return eng, paths, id
+		}
+
+		// owner_gate row (N31) + ended worker + empty HoldWhy -> refused from stored state (no GitHub).
+		t.Run("owner_gate_empty_hold_refused", func(t *testing.T) {
+			eng, paths, id := seed(t, nil, "N31", "", "", &flow.RunRecord{
+				Role: flow.RoleWorker, CLI: "claude", Address: "w-old",
+				State: flow.PhaseEnded, Result: flow.EndStopped,
+			})
+			err := eng.Report("tok-coord", "task", json.RawMessage(`{"action":"say","task":"T1","why":"ping"}`))
+			if refusalCode(err) != "no_worker" || !strings.Contains(err.Error(), "send-back") {
+				t.Fatalf("say at N31 ended/empty HoldWhy = %v, want no_worker naming send-back", err)
+			}
+			st, err := LoadState(paths.State(id))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(st.Tasks[0].Attempts[0].Held) != 0 {
+				t.Errorf("Held mutated on refusal: %q", st.Tasks[0].Attempts[0].Held)
+			}
+		})
+
+		// ci row (N33) + ended worker + non-empty HoldWhy ("no slot is free") -> held, logs "held for the next worker: …".
+		t.Run("ci_row_with_hold_why_held", func(t *testing.T) {
+			eng, paths, id := seed(t, nil, "N33", "no slot is free", "", &flow.RunRecord{
+				Role: flow.RoleWorker, CLI: "claude", Address: "w-old",
+				State: flow.PhaseEnded, Result: flow.EndStopped,
+			})
+			if err := eng.Report("tok-coord", "task", json.RawMessage(`{"action":"say","task":"T1","why":"also check the lint failure"}`)); err != nil {
+				t.Fatalf("say at N33 with HoldWhy = %v, want held", err)
+			}
+			st, err := LoadState(paths.State(id))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if held := st.Tasks[0].Attempts[0].Held; len(held) != 1 || !strings.Contains(held[0], "also check the lint failure") {
+				t.Fatalf("Held = %q, want 1 held coordinator message", held)
+			}
+			lines := logRules(t, paths.Log(id), "task say")
+			if len(lines) != 1 || !strings.HasPrefix(lines[0].Decision, "held for the next worker:") || lines[0].Decision == "said to worker" {
+				t.Errorf("task say log = %+v, want Decision starting with %q", lines, "held for the next worker:")
+			}
+		})
+
+		// working row (N22) + ended worker + empty HoldWhy -> held, logs "held for the next worker: …".
+		t.Run("working_row_ended_worker_held", func(t *testing.T) {
+			eng, paths, id := seed(t, nil, "N22", "", "", &flow.RunRecord{
+				Role: flow.RoleWorker, CLI: "claude", Address: "w-old",
+				State: flow.PhaseEnded, Result: flow.EndStopped,
+			})
+			if err := eng.Report("tok-coord", "task", json.RawMessage(`{"action":"say","task":"T1","why":"focus on finding 1 first"}`)); err != nil {
+				t.Fatalf("say at N22 ended = %v, want held", err)
+			}
+			st, err := LoadState(paths.State(id))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if held := st.Tasks[0].Attempts[0].Held; len(held) != 1 || !strings.Contains(held[0], "focus on finding 1 first") {
+				t.Fatalf("Held = %q, want 1 held coordinator message", held)
+			}
+			lines := logRules(t, paths.Log(id), "task say")
+			if len(lines) != 1 || !strings.HasPrefix(lines[0].Decision, "held for the next worker:") || lines[0].Decision == "said to worker" {
+				t.Errorf("task say log = %+v, want Decision starting with %q", lines, "held for the next worker:")
+			}
+		})
+
+		// Live idle worker at N36 -> delivered and logs deliverWorkerLocked's "told worker …", never "said to worker".
+		t.Run("live_idle_worker_logs_told", func(t *testing.T) {
+			ctx := context.Background()
+			srv := hctest.New(t)
+			client := hc.NewClient(srv.Path)
+			w1, err := startRun(ctx, client, world.RunSpec{Name: "worker-t1-live", Cwd: t.TempDir(), Argv: []string{"sh"}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			setIdle(t, srv, client, w1, "idle")
+			eng, paths, id := seed(t, client, "N36", "", w1, &flow.RunRecord{
+				Role: flow.RoleWorker, CLI: "claude", Address: w1,
+				State: flow.PhaseIdle, Status: "idle", StatusReported: true,
+			})
+			if err := eng.Report("tok-coord", "task", json.RawMessage(`{"action":"say","task":"T1","why":"check flaky test"}`)); err != nil {
+				t.Fatalf("say to live idle worker = %v", err)
+			}
+			if sends := sendsTo(t, srv.Requests(), w1); len(sends) != 1 || !strings.Contains(sends[0], "check flaky test") {
+				t.Fatalf("sends to %s = %q, want 1 coordinator message", w1, sends)
+			}
+			lines := logRules(t, paths.Log(id), "task say")
+			if len(lines) != 1 || !strings.HasPrefix(lines[0].Decision, "told worker") || lines[0].Decision == "said to worker" {
+				t.Errorf("task say log = %+v, want Decision starting with %q (never \"said to worker\")", lines, "told worker")
+			}
+		})
+	})
 }

@@ -1,0 +1,120 @@
+
+ ▐▛███▛█   Claude Code v2.1.330
+▝▜██████▀  Haiku 5.5 · Claude Max
+ ▝▝   ▝▝   ~/src/demo-project · /rc
+
+
+❯ <hc from="t51h e2-spike-679">create hello.py with print('hi'), don't commit yet</hc>
+
+⏺ Write(hello.py)
+  ⎿  Wrote 1 line to hello.py
+      1 print('hi')
+
+  Ran 1 shell command
+
+⏺ <hc react="🫡" to="create hello.py with print('hi')"/>
+
+  Created hello.py in the working directory with print('hi'). Running it prints hi, and hello.py shows as untracked. I haven't committed it.
+
+✻ Cooked for 5s · done 8:56 PM
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ commit it
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ auto mode on (shift+tab to cycle)
