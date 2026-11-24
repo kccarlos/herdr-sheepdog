@@ -93,6 +93,40 @@ func GrantSlots(candidates []string, tasks []Task, running, maxRunning int, asks
 	return granted
 }
 
+// YieldSlots picks idle workers (oldest first) whose tasks, matched as stopped,
+// sit at a ci or owner_gate row asking nothing with no open worker ask (4.10).
+func YieldSlots(refused, running, granted, maxRunning int, tasks []Task, facts map[string]Facts, workerState map[string]RunState, asks []Ask, settings Settings, now time.Time) []string {
+	used := running + granted
+	need := used - maxRunning + refused
+	if refused <= 0 || need <= 0 {
+		return nil
+	}
+	var eligible []string
+	for _, t := range tasks {
+		f, ok := facts[t.ID]
+		a := OpenAttempt(t)
+		if !ok || Ended(t) || t.Parked || a == nil || cmp.Or(workerState[t.ID], a.Run.TaskRun().State) != RunIdle ||
+			slices.ContainsFunc(asks, func(x Ask) bool { return x.Task == t.ID && x.Status == AskStatusOpen && x.AskedBy == RoleWorker }) {
+			continue
+		}
+		tc, run := t, RunRecord{}
+		tc.Attempts = slices.Clone(t.Attempts)
+		ac := OpenAttempt(tc)
+		if ac.Run != nil {
+			run = *ac.Run
+		}
+		run.Role, run.State, run.Result, run.EndedAt = RoleWorker, PhaseEnded, EndStopped, now
+		ac.RunID, ac.Run, f.Worker, f.NoSlot = "", &run, Run{State: RunGone}, false
+		if r, d := FirstMatch(TaskRows, In{Task: tc, Settings: settings, Facts: f, Asks: asks, Now: now}); (r.Stage == "ci" || r.Stage == "owner_gate") && len(d.Asked) == 0 {
+			eligible = append(eligible, t.ID)
+		}
+	}
+	if len(eligible) == 0 || len(eligible) < used-maxRunning+1 {
+		return nil
+	}
+	return eligible[:min(len(eligible), need)]
+}
+
 func lastSlotAt(t Task) time.Time {
 	var at time.Time
 	scan := func(acts []Act) {

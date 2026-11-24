@@ -367,7 +367,7 @@ Starting or restarting a worker needs a free slot, like a first start (N10); wit
 
 A start first delivers the messages held for that run (findings a dead worker never received).
 
-Runs a task's matching row does not want are stopped: a reviewer whose round is over (its verdict was accepted) or void (the round is void as soon as the tip moves off the round's commit), and every run of a task at N1 to N3. The worker run is kept alive by every other row while the attempt is open; it is started again only by a row that waits on the worker. A split or a new attempt stops it as part of that decision. A task holds its slot from its worker's start until that run is gone or the task stops, also while the worker is idle: `max_running` caps tasks, not worker turns.
+Runs a task's matching row does not want are stopped: a reviewer whose round is over (its verdict was accepted) or void (the round is void as soon as the tip moves off the round's commit), and every run of a task at N1 to N3. The worker run is kept alive by every other row while the attempt is open; it is started again only by a row that waits on the worker. A split or a new attempt stops it as part of that decision. A task holds its slot from its worker's start until that run is gone or the task stops, also while the worker is idle (but see 4.10). `max_running` caps live workers.
 
 ### 4.9 What the coordinator and the owner can do to a task
 
@@ -380,6 +380,7 @@ Each is a record, accepted by the table in section 7.2. The rules above then lan
 | `close` (only after a "nothing to change" report) | mark | N1, with nothing to merge |
 | `retry` | an act that resets failure, restart, reviewer-try and merge-try counts, closes an attempt whose PR was closed (N4), and allows a run the owner quit to start again. Slice 1 has no `retry`: the owner starting the project again clears every failed act, a failed merge or cleanup act included | N5 and N4 no longer hold |
 | `send-back` (with a why) | a round-like record "changes" from the coordinator | N22 |
+| `say` (with a why) | message delivered to the live worker, or held for the next worker | refused when the worker is stopped and no row will start it; use `send-back` |
 | recap decision: `continue` | closes the recap; raises `size_cap` to lines now + `continue_lines`, and never lowers it | N23 |
 | recap decision: `split` (children pass the plan checks) | mark `split`; children carry `split_from` and the retro's worker change; dependants move to the children | N1 |
 | recap decision: `new` (the brief was amended since the recap opened) | closes the attempt and its PR (with a note); the old branch is kept | N11 |
@@ -390,6 +391,8 @@ Each is a record, accepted by the table in section 7.2. The rules above then lan
 ### 4.10 Scheduling
 
 There is no queue. N10's "a slot is free" is decided by one pure function over all tasks whose matching row asks for a start (a new attempt, or a worker start or restart), in this order: a task the owner just answered (a gated owner ask answered after the task's last slot grant, or before its first slot), then `priority: urgent`, then a task with an open attempt, then the critical path, then oldest. One slot beyond `max_running` may be used by a task the owner just answered or an urgent one. A milestone is open when every earlier milestone is done and its gate task (section 11.4) is done.
+
+For each start that gets no slot, one idle worker is stopped when its task, matched as the stop would leave it, is at a `ci` or `owner_gate` row that asks nothing and has no open ask from its worker; oldest task first, and only when the stops free a slot under `max_running`. The run ends `stopped`: a later restart resumes and is not counted. The slot is granted on the next pass. A stop that fails is tried again and is not a failure of the task (section 8); a stop that cannot be recorded is read as an exit on the next pass and counts. A task idle at a blocked row, or whose worker has an open ask, keeps its slot: a start behind it waits for the coordinator or the owner.
 
 ### 4.11 What the owner sees
 
@@ -1285,7 +1288,6 @@ The first check produced 181 gaps. Absorbing them all would rebuild the old engi
 | O35 | **Decided (design review, 2026-11-23, section 16 K1–K5):** C2 is `make test` plus the exit run's record, not an id count; named tests are required only for PITFALL rows whose class is not a rule table, as a follow-up after 8.4 and before C6; `KB-STA-20` is `LATER` |
 | O36 | Where the old `factory/` history is kept now that `main` has no commit that ever held `factory/` and the owner deleted the remote copy of `pre-reset-4df3a038` on 2026-11-22 keeping only a local tag. **Decided (owner, 2026-11-23):** the local tag `pre-reset-4df3a038` is enough, 8.4 deletion is authorised, and [knowledge-base.md](knowledge-base.md)'s citations of old files remain historical references under that tag |
 | O37 | The size measure trusts the repository's local `.git`: the remote-tracking base ref, and `info/attributes`, which git reads before any `.gitattributes` and cannot be told to skip. A worker that edits `.git` (not its commits) can lower its own count either way. Close both together if a trial shows it happening: compare the base ref with the remote, and refuse a non-empty `info/attributes` at start |
-| O38 | A task waiting only on CI keeps its slot while its worker is idle (trial: 28 minutes with one slot). Owner: scheduling |
 
 ### 17.5 The audit by simulation, and what it means
 
