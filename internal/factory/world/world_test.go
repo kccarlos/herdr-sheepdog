@@ -1108,21 +1108,21 @@ func TestDeltaRangesIncludesHandEditedBaseMerge(t *testing.T) {
 // task worktree from it.
 func sizeRepo(t *testing.T) string {
 	t.Helper()
-	_, wt := sizeRepoWithBase(t, nil)
+	wt := sizeRepoWithBase(t, nil)
 	return wt
 }
 
 // sizeRepoWithBase builds a repo with a bare origin whose pushed base commit
 // holds README.md plus baseFiles, and returns the main checkout and a task
 // worktree branched from origin/main.
-func sizeRepoWithBase(t *testing.T, baseFiles map[string]string) (repo, wt string) {
+func sizeRepoWithBase(t *testing.T, baseFiles map[string]string) (wt string) {
 	t.Helper()
 	tmp := t.TempDir()
 	bare := filepath.Join(tmp, "remote.git")
 	if out, err := exec.Command("git", "init", "--bare", "--initial-branch=main", bare).CombinedOutput(); err != nil {
 		t.Fatalf("git init --bare: %v: %s", err, out)
 	}
-	repo = filepath.Join(tmp, "repo")
+	repo := filepath.Join(tmp, "repo")
 	if out, err := exec.Command("git", "init", "--initial-branch=main", repo).CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
 	}
@@ -1146,7 +1146,7 @@ func sizeRepoWithBase(t *testing.T, baseFiles map[string]string) (repo, wt strin
 	if err != nil {
 		t.Fatal(err)
 	}
-	return repo, w.Path
+	return w.Path
 }
 
 func commitFile(t *testing.T, dir, name, body string) string {
@@ -1186,7 +1186,7 @@ func TestChangedLinesCountsBinaryMarkedFiles(t *testing.T) {
 	}
 
 	// A -diff attribute on the base branch itself also stays counted.
-	_, baseWT := sizeRepoWithBase(t, map[string]string{
+	baseWT := sizeRepoWithBase(t, map[string]string{
 		".gitattributes": "*.gen -diff\n",
 	})
 	commitFile(t, baseWT, "big.gen", strings.Repeat("x\n", 100))
@@ -1201,7 +1201,7 @@ func TestChangedLinesCountsBinaryMarkedFiles(t *testing.T) {
 // branch's committed .gitattributes are excluded from ChangedLines and reported
 // separately as generated lines.
 func TestChangedLinesLeavesOutBaseGeneratedFiles(t *testing.T) {
-	_, wt := sizeRepoWithBase(t, map[string]string{
+	wt := sizeRepoWithBase(t, map[string]string{
 		".gitattributes":  "gen/project.pbx linguist-generated\ndeps.lock linguist-generated=true\n",
 		"gen/project.pbx": numberedLines("old-pbx-", 50),
 		"deps.lock":       numberedLines("old-lock-", 10),
@@ -1259,7 +1259,7 @@ func TestChangedLinesIgnoresAttributesTheWorkerWrites(t *testing.T) {
 // a file explicitly unset with -linguist-generated in the base's .gitattributes
 // stays counted while its generated sibling is left out.
 func TestChangedLinesCountsUnsetGenerated(t *testing.T) {
-	_, wt := sizeRepoWithBase(t, map[string]string{
+	wt := sizeRepoWithBase(t, map[string]string{
 		".gitattributes": "gen/* linguist-generated\ngen/keep.txt -linguist-generated\n",
 	})
 	commitFile(t, wt, "gen/skip.txt", numberedLines("skip-", 40))
@@ -1273,7 +1273,7 @@ func TestChangedLinesCountsUnsetGenerated(t *testing.T) {
 // moving an existing base file into a generated path counts at least the whole
 // file's lines (errs high) rather than hiding them.
 func TestChangedLinesRenameIntoGeneratedPathStillCounts(t *testing.T) {
-	_, wt := sizeRepoWithBase(t, map[string]string{
+	wt := sizeRepoWithBase(t, map[string]string{
 		".gitattributes": "gen/* linguist-generated\n",
 		"hand.go":        numberedLines("hand-", 300),
 	})
@@ -1294,7 +1294,7 @@ func TestChangedLinesRenameIntoGeneratedPathStillCounts(t *testing.T) {
 // non-ErrChangedLinesOverCap error; a timeout returns ErrChangedLinesOverCap.
 func TestChangedLinesAttributeReadFailure(t *testing.T) {
 	ctx := context.Background()
-	_, wt := sizeRepoWithBase(t, map[string]string{
+	wt := sizeRepoWithBase(t, map[string]string{
 		".gitattributes": "gen/big.pbx linguist-generated\n",
 	})
 	commitFile(t, wt, "gen/big.pbx", numberedLines("gen-", 20))
@@ -1363,7 +1363,7 @@ func TestChangedLinesAttributeReadFailure(t *testing.T) {
 // never passes GIT_ATTR_SOURCE to diff, and runs the probe once across reads.
 func TestChangedLinesOldGitCountsEverything(t *testing.T) {
 	ctx := context.Background()
-	_, wt := sizeRepoWithBase(t, map[string]string{
+	wt := sizeRepoWithBase(t, map[string]string{
 		".gitattributes": "gen/big.pbx linguist-generated\n",
 	})
 	commitFile(t, wt, "gen/big.pbx", numberedLines("gen-", 20))

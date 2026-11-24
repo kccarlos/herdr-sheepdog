@@ -1024,22 +1024,7 @@ func (g *Git) DeltaRanges(ctx context.Context, worktree, since, head string) ([]
 
 var ErrChangedLinesOverCap = errors.New("changed lines over cap or unreadable in full")
 
-// ChangedLines is the lines added plus removed at tip against its merge base
-// with the base branch, as git last fetched it (N12, design.md 11.5). It
-// does not fetch: it runs every pass. Every file counts as text, so no
-// attribute or NUL byte the worker commits can hide lines.
-func (g *Git) ChangedLines(ctx context.Context, dir, tip string) (int, error) {
-	ref, _, err := g.remoteBaseCommit(ctx, dir, false)
-	if err != nil {
-		return 0, err
-	}
-	// The patch, not --numstat: numstat still calls a -diff or NUL file
-	// binary under --text.
-	out, err := g.gitCmd(ctx, dir, "diff", "--text", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=0", ref+"..."+tip)
-	var result *GitError
-	if GitTimedOut(err) || errors.As(err, &result) && result.RPC == nil && result.Result.Truncated {
-		return 0, fmt.Errorf("%w: %w", ErrChangedLinesOverCap, err)
-	}
+func countPatchLines(out string) int {
 	n, hunk := 0, false
 	for ln := range strings.Lines(out) {
 		switch {
@@ -1051,7 +1036,81 @@ func (g *Git) ChangedLines(ctx context.Context, dir, tip string) (int, error) {
 			n++
 		}
 	}
-	return n, err
+	return n
+}
+
+func diffCapErr(err error) error {
+	var ge *GitError
+	if GitTimedOut(err) || errors.As(err, &ge) && ge.RPC == nil && ge.Result.Truncated {
+		return fmt.Errorf("%w: %w", ErrChangedLinesOverCap, err)
+	}
+	return err
+}
+
+func (g *Git) attrSourceHonoured(ctx context.Context, dir string) (bool, error) {
+	g.mu.Lock()
+	cached := g.attrSrc
+	g.mu.Unlock()
+	if cached != 0 {
+		return cached > 0, nil
+	}
+	_, err := g.run(ctx, dir, "git", []string{"check-attr", "linguist-generated", "--", "."}, map[string]string{
+		"GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "", "GIT_ATTR_SOURCE": "refs/sheepdog/none",
+	})
+	if code, ok := gitExitCode(err); err != nil && (!ok || code != 128) {
+		if ok {
+			return false, nil
+		}
+		return false, err
+	}
+	honoured := err != nil
+	g.mu.Lock()
+	logNo := g.attrSrc == 0 && !honoured && g.log != nil
+	if honoured {
+		g.attrSrc = 1
+	} else {
+		g.attrSrc = -1
+	}
+	g.mu.Unlock()
+	if logNo {
+		g.log("factory.git_attr_source_unsupported", dir)
+	}
+	return honoured, nil
+}
+
+// ChangedLines is the lines added plus removed at tip against its merge base
+// with the base branch as git last fetched it (N12, design.md 7.3, 11.5),
+// counting -diff and NUL files as text while leaving out paths the base's
+// committed .gitattributes marks linguist-generated (returned separately).
+func (g *Git) ChangedLines(ctx context.Context, dir, tip string) (lines, generated int, err error) {
+	ref, baseSHA, err := g.remoteBaseCommit(ctx, dir, false)
+	if err != nil {
+		return 0, 0, err
+	}
+	diffArgs := []string{"diff", "--text", "--no-ext-diff", "--no-textconv", "--no-color", "--unified=0", ref + "..." + tip}
+	// The patch, not --numstat: numstat still calls a -diff or NUL file binary under --text.
+	out, err := g.gitCmd(ctx, dir, diffArgs...)
+	if err != nil {
+		return 0, 0, diffCapErr(err)
+	}
+	total := countPatchLines(out)
+	if honoured, err := g.attrSourceHonoured(ctx, dir); err != nil {
+		return 0, 0, err
+	} else if !honoured {
+		return total, 0, nil
+	}
+	r, err := g.run(ctx, dir, "git", append(diffArgs, "--", ":(top)", ":(top,exclude,attr:linguist-generated)", ":(top,exclude,attr:linguist-generated=true)"), map[string]string{
+		"GIT_TERMINAL_PROMPT": "0", "GIT_ASKPASS": "", "GIT_ATTR_SOURCE": baseSHA, "GIT_ATTR_NOSYSTEM": "1",
+		"GIT_CONFIG_COUNT": "1", "GIT_CONFIG_KEY_0": "core.attributesFile", "GIT_CONFIG_VALUE_0": "/dev/null",
+	})
+	if err != nil {
+		if _, ok := gitExitCode(err); ok {
+			return total, 0, nil
+		}
+		return 0, 0, diffCapErr(err)
+	}
+	lines = countPatchLines(string(r.Stdout))
+	return lines, max(0, total-lines), nil
 }
 
 // MergeOnly reports whether h is ahead of x by clean merges of the base

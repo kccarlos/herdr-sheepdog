@@ -102,7 +102,7 @@ func (e *Engine) execMerge(ctx context.Context, id string, s *flow.State, ti int
 		return "", false, err
 	}
 	gitCtx, cancelGit = context.WithTimeout(gctx, lockGitTimeout)
-	lines, linesTO, tipMO, err := e.readTipLocked(gitCtx, *a, tip, rel)
+	lines, generated, linesTO, tipMO, err := e.readTipLocked(gitCtx, *a, tip, rel)
 	cancelGit()
 	if err != nil {
 		return "", false, err
@@ -116,7 +116,7 @@ func (e *Engine) execMerge(ctx context.Context, id string, s *flow.State, ti int
 	p := e.readPRLocked(gctx, id, s, ti)
 	notDone, dropped := flow.UnmetDeps(s.Tasks[ti], s.Tasks)
 	fresh := flow.Facts{
-		PR: p, Tip: tip, TipRel: rel, TipMergeOnly: tipMO, Lines: lines, LinesTimeout: linesTO,
+		PR: p, Tip: tip, TipRel: rel, TipMergeOnly: tipMO, Lines: lines, LinesGenerated: generated, LinesTimeout: linesTO,
 		Worker: worker, DepsNotDone: notDone, DepsDropped: dropped, OtherMergeInFlight: otherMergeInFlight(s.Tasks, ti),
 		GitHubUnavailable: e.ghUnavail[id] || s.Project.HasAlert(flow.AlertGitHubUnavailable), BaseRed: f.BaseRed, BaseRedSince: f.BaseRedSince, BaseRedSpell: f.BaseRedSpell,
 	}

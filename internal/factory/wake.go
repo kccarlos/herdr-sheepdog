@@ -85,6 +85,9 @@ func taskFacts(t flow.Task, f flow.Facts, now time.Time) string {
 				out += fmt.Sprintf("; changed lines timed out, size cap %d, estimate %d", a.SizeCap, t.EstimateLines)
 			} else {
 				out += fmt.Sprintf("; changed lines %d, size cap %d, estimate %d", f.Lines, a.SizeCap, t.EstimateLines)
+				if f.LinesGenerated > 0 {
+					out += fmt.Sprintf("; %d generated lines not counted", f.LinesGenerated)
+				}
 			}
 		}
 		if rc.Trigger == flow.TriggerCI {

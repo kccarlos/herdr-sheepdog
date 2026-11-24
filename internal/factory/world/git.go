@@ -62,6 +62,7 @@ type Git struct {
 	mu       sync.Mutex
 	episodes map[string]gitEpisode
 	enospc   map[string]bool
+	attrSrc  int8 // 0 unchecked, 1 honoured, -1 ignored
 }
 
 type gitEpisode struct {
@@ -119,10 +120,18 @@ func GitTimedOut(err error) bool {
 	return errors.As(err, &e) && e.RPC == nil && e.Result.TimedOut
 }
 
-func gitExit(err error, code int) bool {
+func gitExitCode(err error) (int, bool) {
 	var e *GitError
-	return errors.As(err, &e) && e.RPC == nil && !e.Result.TimedOut && !e.Result.Truncated &&
-		e.Result.Signal == nil && e.Result.Code != nil && *e.Result.Code == code
+	if errors.As(err, &e) && e.RPC == nil && !e.suppressed && !e.Result.TimedOut && !e.Result.Truncated &&
+		e.Result.Signal == nil && e.Result.Code != nil {
+		return *e.Result.Code, true
+	}
+	return 0, false
+}
+
+func gitExit(err error, code int) bool {
+	c, ok := gitExitCode(err)
+	return ok && c == code
 }
 
 func (g *Git) suppressed(repo string) bool {

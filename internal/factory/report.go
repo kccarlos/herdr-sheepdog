@@ -946,7 +946,7 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 		if rc.Trigger == flow.TriggerSize {
 			ctx, cancel := context.WithTimeout(world.GitRepository(context.Background(), s.Project.Folder), lockGitTimeout)
 			defer cancel()
-			lines, err := e.git.ChangedLines(ctx, a.Worktree, "HEAD") // the same measure as N12's
+			lines, generated, err := e.git.ChangedLines(ctx, a.Worktree, "HEAD") // the same measure as N12's
 			base := lines
 			if err != nil {
 				e.logError("factory.git_error", id, err)
@@ -955,10 +955,12 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 					base, note = c.lines, " (changed-lines read failed; raised from last good reading)"
 				}
 			}
-			newCap = base + s.Settings.ContinueLines
-			cur := fmt.Sprintf(" (%d now)", lines)
-			if err != nil {
-				cur = ""
+			newCap = max(a.SizeCap, base+s.Settings.ContinueLines)
+			cur := ""
+			if err == nil && generated > 0 {
+				cur = fmt.Sprintf(" (%d now; %d generated lines not counted)", lines, generated)
+			} else if err == nil {
+				cur = fmt.Sprintf(" (%d now)", lines)
 			}
 			msg = fmt.Sprintf("The coordinator lets task %s go on: %s. Your size cap is now %d changed lines%s. Continue the task.", t.ID, why, newCap, cur)
 		}
@@ -973,6 +975,7 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 		dec := "continue"
 		if rc.Trigger == flow.TriggerSize {
 			a.SizeCap, dec = newCap, fmt.Sprintf("continue; size cap %d%s", newCap, note)
+			delete(e.tips, a.Worktree)
 		}
 		a.Working = 0
 		rc.Decided = &flow.RecapDecision{Choice: choice, Why: why, At: now}
