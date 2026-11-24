@@ -268,6 +268,31 @@ func TestCheckInvariantsViolations(t *testing.T) {
 		}
 	})
 
+	t.Run("I1 live retro run on split child of retro parent", func(t *testing.T) {
+		snap := cleanSnapshot()
+		parent := Task{
+			ID: "P1", Title: "feat: parent",
+			Split:  &Split{Children: []string{"T1"}},
+			Retros: []Retro{{Attempt: 1, Round: 4, Cause: "task-too-big", At: snap.Now}},
+		}
+		snap.State.Tasks[0].SplitFrom = "P1"
+		a := &snap.State.Tasks[0].Attempts[0]
+		a.Rounds = []Round{
+			{N: 1, Kind: RoundFull, Head: "c0", Verdict: VerdictChanges, Majors: 1},
+			{N: 2, Kind: RoundDelta, Head: "c0b", Verdict: VerdictChanges, Majors: 1},
+			{N: 3, Kind: RoundDelta, Head: "c1", Verdict: VerdictChanges, Majors: 1},
+		}
+		a.Review = &ReviewRun{
+			Round: 4, Kind: RoundRetro, Head: "c1", RunID: "rev-4",
+			Run: &RunRecord{Address: "rev-4", Role: RoleRetro, State: PhaseWorking},
+		}
+		snap.State.Tasks = append([]Task{parent}, snap.State.Tasks...)
+		vs := CheckInvariants(snap)
+		if !hasViolation(vs, "I1", "T1", "ladder says recap") {
+			t.Fatalf("want I1 violation for live retro on split child of retro parent, got %+v", vs)
+		}
+	})
+
 	t.Run("I1 live run on closed attempt", func(t *testing.T) {
 		snap := cleanSnapshot()
 		snap.State.Tasks[0].Attempts = append([]Attempt{{

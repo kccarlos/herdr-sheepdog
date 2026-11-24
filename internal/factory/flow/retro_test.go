@@ -1,6 +1,7 @@
 package flow
 
 import (
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -89,20 +90,27 @@ func TestRetroRecapDecidedSinceAndAttemptScoping(t *testing.T) {
 	t1 := now.Add(-5 * time.Minute)
 	t2 := now.Add(-1 * time.Minute)
 
-	t.Run("L2_redesign_holds_after_earlier_recap_and_clears_after_later_recap", func(t *testing.T) {
+	t.Run("L2_redesign_holds_after_earlier_recap_and_after_spent_override", func(t *testing.T) {
 		in := with(retroRedesign)
 		in.Task.Retros[0].At = t1
 		in.Task.Recaps = []Recap{{Trigger: TriggerSize, Decided: &RecapDecision{Choice: ChoiceContinue, At: t0}}}
 		if r, d := FirstMatch(LadderRows, in); r.ID != "L2" || d.Why != RecapAnswer {
 			t.Fatalf("REDESIGN newer than prior recap = (%s, %s), want (L2, recap)", r.ID, d.Why)
 		}
+		// Active owner override closes the recap and wins via L1.
 		in.Task.Recaps = append(in.Task.Recaps, Recap{Trigger: TriggerReview, Decided: &RecapDecision{Choice: "override", At: t2}})
-		if r, _ := FirstMatch(LadderRows, in); r.ID == "L2" {
-			t.Fatalf("REDESIGN older than decided recap still matched L2")
+		withOverride("c1", ChecksGreen, false)(&in)
+		if r, d := FirstMatch(LadderRows, in); r.ID != "L1" || d.Why != Passed {
+			t.Fatalf("REDESIGN with active override = (%s, %s), want (L1, passed)", r.ID, d.Why)
+		}
+		// Once N19b spends the override, normal rules resume: L2 must match (never L- / N43).
+		a0(&in).Overrides[0].Spent = true
+		if r, d := FirstMatch(LadderRows, in); r.ID != "L2" || d.Why != RecapAnswer {
+			t.Fatalf("REDESIGN after spent override = (%s, %s), want (L2, recap)", r.ID, d.Why)
 		}
 	})
 
-	t.Run("L3_second_fix_holds_after_earlier_recap_and_clears_after_later_recap", func(t *testing.T) {
+	t.Run("L3_second_fix_holds_after_earlier_recap_and_after_spent_override", func(t *testing.T) {
 		in := with(retroSecondFix)
 		in.Task.Retros[0].At = t0
 		in.Task.Retros[1].At = t1
@@ -110,9 +118,16 @@ func TestRetroRecapDecidedSinceAndAttemptScoping(t *testing.T) {
 		if r, d := FirstMatch(LadderRows, in); r.ID != "L3" || d.Why != RecapAnswer {
 			t.Fatalf("2nd FIX newer than prior recap = (%s, %s), want (L3, recap)", r.ID, d.Why)
 		}
+		// Active owner override closes the recap and wins via L1.
 		in.Task.Recaps = append(in.Task.Recaps, Recap{Trigger: TriggerReview, Decided: &RecapDecision{Choice: "override", At: t2}})
-		if r, _ := FirstMatch(LadderRows, in); r.ID == "L3" {
-			t.Fatalf("2nd FIX older than decided recap still matched L3")
+		withOverride("c1", ChecksGreen, false)(&in)
+		if r, d := FirstMatch(LadderRows, in); r.ID != "L1" || d.Why != Passed {
+			t.Fatalf("2nd FIX with active override = (%s, %s), want (L1, passed)", r.ID, d.Why)
+		}
+		// Once N19b spends the override, normal rules resume: L3 must match (never L4/L5/L-).
+		a0(&in).Overrides[0].Spent = true
+		if r, d := FirstMatch(LadderRows, in); r.ID != "L3" || d.Why != RecapAnswer {
+			t.Fatalf("2nd FIX after spent override = (%s, %s), want (L3, recap)", r.ID, d.Why)
 		}
 	})
 
@@ -293,5 +308,66 @@ func TestKBRET9AndKBRET11RetroExclusionsAndGates(t *testing.T) {
 	designShip.Asks = []Ask{answeredN31Ask("ask-gate-1", "t", "c1", GateOptionMerge, now)}
 	if r, d := FirstMatch(TaskRows, designShip); r.ID != "N42" || !slices.Equal(d.Asked, []string{"record_accept@c1", "merge@c1"}) {
 		t.Fatalf("TaskRows on design retro SHIP after Merge approval = (%s, %v), want (N42, accept+merge)", r.ID, d.Asked)
+	}
+}
+
+// TestProbeL2L3AfterSpentOverride checks design.md 4.3b (N19b: spent override
+// resumes normal rules) and 4.6 (L2/L3/L4/L5): an override-decided recap whose
+// override was later spent must resume at L2/L3 (never fall through to L-/N43,
+// grant a 3rd FIX via L4, launch a 3rd retro via L5, or send RetroUnavailable
+// to L5/N28).
+func TestProbeL2L3AfterSpentOverride(t *testing.T) {
+	t.Run("B1a_L2_redesign_spent_override_no_N43", func(t *testing.T) {
+		in := with(retroRedesign, withOverride("c1", ChecksGreen, true))
+		in.Task.Retros[0].At = now.Add(-5 * time.Minute)
+		in.Task.Recaps = []Recap{{
+			Trigger: TriggerReview,
+			Decided: &RecapDecision{Choice: "override", At: now.Add(-time.Minute)},
+		}}
+		if r, d := FirstMatch(LadderRows, in); r.ID != "L2" || d.Why != RecapAnswer {
+			t.Fatalf("after spent override on REDESIGN: got (%s, %q), want (L2, %q)", r.ID, d.Why, RecapAnswer)
+		}
+	})
+
+	t.Run("B1b_L3_second_fix_spent_override_no_L4_or_L5", func(t *testing.T) {
+		inA := with(retroSecondFix, withOverride("c1", ChecksGreen, true))
+		inA.Task.Retros[0].At = now.Add(-10 * time.Minute)
+		inA.Task.Retros[1].At = now.Add(-5 * time.Minute)
+		inA.Task.Recaps = []Recap{{
+			Trigger: TriggerReview,
+			Decided: &RecapDecision{Choice: "override", At: now.Add(-time.Minute)},
+		}}
+		if r, d := FirstMatch(LadderRows, inA); r.ID != "L3" || d.Why != RecapAnswer {
+			t.Fatalf("after spent override on 2nd FIX at c1: got (%s, %q), want (L3, %q)", r.ID, d.Why, RecapAnswer)
+		}
+
+		// Worker committing c2 after 2nd FIX + spent override must still hit L3, never L5 (3rd retro).
+		inB := inA
+		inB.Task.Attempts = slices.Clone(inA.Task.Attempts)
+		a0(&inB).Ready = append(slices.Clone(a0(&inA).Ready), Ready{Head: "c2"})
+		inB.Facts.Tip, inB.Facts.PR.Head = "c2", "c2"
+		if r, d := FirstMatch(LadderRows, inB); r.ID != "L3" || d.Why != RecapAnswer {
+			t.Fatalf("after spent override on 2nd FIX + new commit c2: got (%s, %q), want (L3, %q)", r.ID, d.Why, RecapAnswer)
+		}
+	})
+
+	t.Run("B1c_L3_failed_delta_spent_override_no_unavailable_L5", func(t *testing.T) {
+		inC := with(retroFixReadyC2, retroUnavail, withOverride("c2", ChecksGreen, true))
+		inC.Task.Retros[0].At = now.Add(-5 * time.Minute)
+		inC.Task.Recaps = []Recap{{
+			Trigger: TriggerReview,
+			Decided: &RecapDecision{Choice: "override", At: now.Add(-time.Minute)},
+		}}
+		if r, d := FirstMatch(LadderRows, inC); r.ID != "L3" || d.Why != RecapAnswer {
+			t.Fatalf("after spent override on failed delta check: got (%s, %q), want (L3, %q)", r.ID, d.Why, RecapAnswer)
+		}
+	})
+}
+
+// TestProbeTaskHadRetroDeleted checks plan.md 12.1: Task.HadRetro is deleted
+// outright in 12.1 and replaced by len(parent.Retros) > 0.
+func TestProbeTaskHadRetroDeleted(t *testing.T) {
+	if _, ok := reflect.TypeOf(Task{}).FieldByName("HadRetro"); ok {
+		t.Fatal("Task.HadRetro still exists; plan.md 12.1 deletes it outright")
 	}
 }

@@ -1,6 +1,7 @@
 package factory
 
 import (
+	"context"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -155,5 +156,51 @@ func TestReportReadyRejectOnRetroFixRefused(t *testing.T) {
 	err := w.eng.Report(w.workTok, "ready", payload)
 	if refusalCode(err) != "nothing_to_reject" {
 		t.Fatalf("ready --reject on retro FIX err = %v, want refusal nothing_to_reject", err)
+	}
+}
+
+// TestReportReadyRejectDoesNotProbeCLIsUnderLock checks design.md 7.2:
+// acceptReadyLocked runs under e.mu inside POST /api/factory/report and must
+// not invoke live CLI/hc probes (probeLaunchFacts) while handling --reject.
+func TestReportReadyRejectDoesNotProbeCLIsUnderLock(t *testing.T) {
+	t.Parallel()
+	w := newRestartWorld(t, "Reject must not probe CLIs under lock")
+	w.pass() // J7 start coordinator
+	coordAddr := w.state().Project.RunID
+	w.applyPlan()
+	w.waitIdle(coordAddr)
+	w.pass() // N11 new attempt
+	w.pass() // N23 start worker
+	w.waitIdle(w.workerID)
+	w.commitAndReady("package demo\n// v1\n", greenRollup, true)
+	c1 := w.commits[0]
+
+	w.edit(func(s *flow.State) {
+		s.Settings.Models = map[string][]flow.Candidate{
+			flow.RoleRetro: {{CLI: world.AgyCLI, Model: "gemini-4-carbon-high", Effort: "high"}},
+		}
+		s.Tasks[0].Attempts[0].Rounds = []flow.Round{
+			{N: 1, Kind: flow.RoundFull, Head: "c0", Verdict: flow.VerdictChanges, Majors: 1},
+			{N: 2, Kind: flow.RoundDelta, Head: "c0b", Verdict: flow.VerdictChanges, Majors: 1},
+			{N: 3, Kind: flow.RoundDelta, Head: c1, Verdict: flow.VerdictChanges, Majors: 1},
+		}
+	})
+
+	probed := false
+	w.eng.mu.Lock()
+	w.eng.cliProbes = nil
+	w.eng.probeLaunch = func(_ context.Context, _ []string) flow.ResolveFacts {
+		probed = true
+		return flow.ResolveFacts{}
+	}
+	w.eng.mu.Unlock()
+
+	payload, _ := json.Marshal(map[string]any{"head": c1, "reject": "disagree with streak"})
+	err := w.eng.Report(w.workTok, "ready", payload)
+	if probed {
+		t.Fatal("acceptReadyLocked invoked probeLaunch (CLI/hc probe) while holding e.mu")
+	}
+	if refusalCode(err) != "nothing_to_reject" {
+		t.Fatalf("ready --reject on 3-round streak err = %v, want refusal nothing_to_reject", err)
 	}
 }
