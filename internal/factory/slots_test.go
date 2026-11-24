@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
@@ -873,5 +874,325 @@ func TestIdleWorkerWaitingOnCIHoldsSlot(t *testing.T) {
 	}
 	if st.Tasks[1].LastRow != "N22" || st.Tasks[1].Attempts[0].RunID != "" {
 		t.Fatalf("T5 started while T3's idle worker held the slot: row=%q run_id=%q", st.Tasks[1].LastRow, st.Tasks[1].Attempts[0].RunID)
+	}
+}
+
+// TestSamePassDepCompletionRespectsMaxRunning checks that a task whose
+// dependency finishes in the same pass (non-candidate during slot selection)
+// still respects max_running instead of opening an attempt without a grant.
+func TestSamePassDepCompletionRespectsMaxRunning(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, base := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := bindRepoFakeGH(t, repo)
+
+	now := time.Date(2026, 11, 24, 10, 0, 0, 0, time.UTC)
+	endedAt := now.Add(-5 * time.Minute)
+	eng := newTestEngine(t, paths, client)
+	eng.Now = func() time.Time { return now }
+	if err := eng.Start(repo, "Same-pass dep completion respects max_running", 1); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	srv.Add(hc.Terminal{
+		Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+		Labels: testCoordLabels(id, "run-elsewhere"),
+		Status: &hc.Status{App: "claude-code", State: "working"},
+	})
+
+	wt0, br0, c0 := makeSlotWorktree(t, ctx, paths, repo, id, "T0", "t0.go")
+	wt1, br1, _ := makeSlotWorktree(t, ctx, paths, repo, id, "T1", "t1.go")
+	writeGHFile(t, gh, "view-1.json", fmt.Sprintf(
+		`{"number":1,"state":"MERGED","headRefOid":%q,"mergeable":"UNKNOWN","statusCheckRollup":[],"baseRefName":"main","mergeCommit":{"oid":"m0"}}`,
+		c0,
+	))
+
+	w1, err := startRun(ctx, client, world.RunSpec{Name: "worker-t1-live", Cwd: wt1, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setTerminalStatusAt(t, srv, client, w1, "working", now.Add(-time.Minute))
+
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Project.RunID = "coord-elsewhere"
+	st.Tasks = []flow.Task{
+		{
+			ID: "T0", Title: "feat: T0 merged PR", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 200, BaseCommit: base, Branch: br0, Worktree: wt0, PR: 1,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: "worker-t0-gone",
+					SessionID: "sess-t0", Resumable: true,
+					State: flow.PhaseEnded, Result: flow.EndExited, EndedAt: endedAt,
+				},
+				Ready: []flow.Ready{{Head: c0}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: c0, Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: c0, Verdict: flow.VerdictPass},
+				},
+				Accepts: []flow.Accept{{Head: c0}},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: endedAt.Add(-time.Minute)}},
+			}},
+		},
+		{
+			ID: "T1", Title: "feat: T1 holding single slot", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 200, BaseCommit: base, Branch: br1, Worktree: wt1, RunID: w1,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: w1,
+					State: flow.PhaseWorking, Status: "working", StatusSince: now.Add(-time.Minute), StatusReported: true,
+				},
+				Ready:   []flow.Ready{},
+				Rounds:  []flow.Round{},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now.Add(-10 * time.Minute)}},
+			}},
+		},
+		{ID: "T2", Title: "feat: T2 after T0", After: []string{"T0"}, EstimateLines: 50},
+	}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Tasks[0].Done == nil {
+		t.Fatalf("T0 was not marked done (row=%q)", st.Tasks[0].LastRow)
+	}
+	if flow.OpenAttempt(st.Tasks[2]) != nil {
+		t.Fatalf("T2 opened an attempt in the same pass while T1 held the only slot (max_running=1): %+v", st.Tasks[2].Attempts)
+	}
+	if st.Tasks[2].LastRow != "N10" || st.Tasks[2].HoldWhy != "no slot is free" {
+		t.Errorf("T2 after pass = row:%q hold:%q, want N10 / %q", st.Tasks[2].LastRow, st.Tasks[2].HoldWhy, "no slot is free")
+	}
+}
+
+// TestSamePassStaleGateCancelRespectsMaxRunning checks that a task whose stale
+// gate ask is cancelled in actTaskLocked (making it a non-candidate during slot
+// selection at N31) still respects max_running when falling through to N32.
+func TestSamePassStaleGateCancelRespectsMaxRunning(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, base := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := bindRepoFakeGH(t, repo)
+
+	now := time.Date(2026, 11, 24, 10, 5, 0, 0, time.UTC)
+	endedAt := now.Add(-5 * time.Minute)
+	eng := newTestEngine(t, paths, client)
+	eng.Now = func() time.Time { return now }
+	if err := eng.Start(repo, "Same-pass stale gate cancel respects max_running", 1); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	srv.Add(hc.Terminal{
+		Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+		Labels: testCoordLabels(id, "run-elsewhere"),
+		Status: &hc.Status{App: "claude-code", State: "working"},
+	})
+
+	wt1, br1, _ := makeSlotWorktree(t, ctx, paths, repo, id, "T1", "t1.go")
+	wt2, br2, c1 := makeSlotWorktree(t, ctx, paths, repo, id, "T2", "t2.go")
+	if err := os.WriteFile(filepath.Join(wt2, "t2.go"), []byte("package demo\n// T2 v2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt2, "add", "t2.go")
+	gitIn(t, wt2, "commit", "-m", "feat: T2 second commit")
+	c2 := gitIn(t, wt2, "rev-parse", "HEAD")
+	gitIn(t, wt2, "push", "origin", c2+":refs/heads/"+br2)
+
+	writeGHFile(t, gh, "view-2.json", fmt.Sprintf(
+		`{"number":2,"state":"OPEN","headRefOid":%q,"mergeable":"CONFLICTING","statusCheckRollup":[],"baseRefName":"main"}`,
+		c2,
+	))
+
+	w1, err := startRun(ctx, client, world.RunSpec{Name: "worker-t1-live", Cwd: wt1, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setTerminalStatusAt(t, srv, client, w1, "working", now.Add(-time.Minute))
+
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Project.RunID = "coord-elsewhere"
+	st.Asks = []flow.Ask{{
+		ID: "ask-stale", Task: "T2", Kind: flow.KindGate, Gated: true,
+		Status: flow.AskStatusOpen, Head: c1,
+	}}
+	st.Tasks = []flow.Task{
+		{
+			ID: "T1", Title: "feat: T1 holding single slot", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 200, BaseCommit: base, Branch: br1, Worktree: wt1, RunID: w1,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: w1,
+					State: flow.PhaseWorking, Status: "working", StatusSince: now.Add(-time.Minute), StatusReported: true,
+				},
+				Ready:   []flow.Ready{},
+				Rounds:  []flow.Round{},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now.Add(-10 * time.Minute)}},
+			}},
+		},
+		{
+			ID: "T2", Title: "feat: T2 stale gate ask with conflict", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 200, BaseCommit: base, Branch: br2, Worktree: wt2, PR: 2,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: "worker-t2-gone",
+					SessionID: "sess-t2", Resumable: true,
+					State: flow.PhaseEnded, Result: flow.EndExited, EndedAt: endedAt,
+				},
+				Ready: []flow.Ready{{Head: c1}, {Head: c2}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: c2, Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: c2, Verdict: flow.VerdictPass},
+				},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: endedAt.Add(-time.Minute)}},
+			}},
+		},
+	}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Asks) != 1 || st.Asks[0].Status != flow.AskStatusCancelled {
+		t.Fatalf("stale gate ask = %+v, want cancelled", st.Asks)
+	}
+	if st.Tasks[1].Attempts[0].RunID != "" {
+		t.Fatalf("T2 launched a second live worker in the same pass at max_running=1: run_id=%q", st.Tasks[1].Attempts[0].RunID)
+	}
+	if st.Tasks[1].LastRow != "N32" || st.Tasks[1].HoldWhy != "no slot is free" {
+		t.Errorf("T2 after pass = row:%q hold:%q, want N32 / %q", st.Tasks[1].LastRow, st.Tasks[1].HoldWhy, "no slot is free")
+	}
+}
+
+// TestClockAdvancePastBackoffRespectsMaxRunning checks that a task still in
+// worker restart back-off during candidate selection (t0+59s) cannot launch
+// over max_running when the clock crosses the 1m back-off deadline before
+// actTaskLocked runs (t0+61s).
+func TestClockAdvancePastBackoffRespectsMaxRunning(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, base := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	bindRepoFakeGH(t, repo)
+
+	t0 := time.Date(2026, 11, 24, 10, 10, 0, 0, time.UTC)
+	eng := newTestEngine(t, paths, client)
+	eng.Now = func() time.Time { return t0.Add(59 * time.Second) }
+	if err := eng.Start(repo, "Clock advance past backoff respects max_running", 1); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	srv.Add(hc.Terminal{
+		Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+		Labels: testCoordLabels(id, "run-elsewhere"),
+		Status: &hc.Status{App: "claude-code", State: "working"},
+	})
+
+	wt1, br1, _ := makeSlotWorktree(t, ctx, paths, repo, id, "T1", "t1.go")
+	wt2, br2, _ := makeSlotWorktree(t, ctx, paths, repo, id, "T2", "t2.go")
+
+	w1, err := startRun(ctx, client, world.RunSpec{Name: "worker-t1-live", Cwd: wt1, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setTerminalStatusAt(t, srv, client, w1, "working", t0)
+
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Project.RunID = "coord-elsewhere"
+	st.Settings.EnsureBackoffMinutes = 1
+	st.Tasks = []flow.Task{
+		{
+			ID: "T1", Title: "feat: T1 holding single slot", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 200, BaseCommit: base, Branch: br1, Worktree: wt1, RunID: w1,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: w1,
+					State: flow.PhaseWorking, Status: "working", StatusSince: t0, StatusReported: true,
+				},
+				Ready:   []flow.Ready{},
+				Rounds:  []flow.Round{},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: t0.Add(-5 * time.Minute)}},
+			}},
+		},
+		{
+			ID: "T2", Title: "feat: T2 crossing restart backoff", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 200, BaseCommit: base, Branch: br2, Worktree: wt2,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: "worker-t2-gone",
+					SessionID: "sess-t2", Resumable: true,
+					State: flow.PhaseEnded, Result: flow.EndExited, EndedAt: t0,
+				},
+				Ready:   []flow.Ready{},
+				Rounds:  []flow.Round{},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: t0.Add(-5 * time.Minute)}},
+			}},
+		},
+	}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	// Candidate selection sees t0+59s (inside 1m back-off); actTaskLocked sees
+	// t0+61s (past 1m back-off).
+	clock := t0.Add(59 * time.Second)
+	eng.Now = func() time.Time {
+		var pcs [8]uintptr
+		frames := runtime.CallersFrames(pcs[:runtime.Callers(2, pcs[:])])
+		for {
+			f, more := frames.Next()
+			if strings.HasSuffix(f.Function, ".actTaskLocked") {
+				clock = t0.Add(61 * time.Second)
+				break
+			}
+			if !more {
+				break
+			}
+		}
+		return clock
+	}
+
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Tasks[1].Attempts[0].RunID != "" {
+		t.Fatalf("T2 launched a second live worker after clock crossed back-off at max_running=1: run_id=%q", st.Tasks[1].Attempts[0].RunID)
+	}
+	if st.Tasks[1].HoldWhy != "no slot is free" {
+		t.Errorf("T2 HoldWhy = %q, want %q (row=%q)", st.Tasks[1].HoldWhy, "no slot is free", st.Tasks[1].LastRow)
 	}
 }

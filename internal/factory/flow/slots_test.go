@@ -261,3 +261,60 @@ func TestCriticalPathsCycle(t *testing.T) {
 		t.Fatalf("GrantSlots(cycle) = %v, want C", got)
 	}
 }
+
+// TestExhaustedNewAttemptReachesN5WhenNoSlot checks that when Facts.NoSlot is
+// true, N5's probe pass skips N10 to inspect N11 and surface an exhausted
+// new_attempt failure, while a non-exhausted task still lands on N10.
+func TestExhaustedNewAttemptReachesN5WhenNoSlot(t *testing.T) {
+	t0 := time.Date(2026, 11, 24, 10, 0, 0, 0, time.UTC)
+	settings := DefaultSettings()
+
+	t.Run("settled_failure_reaches_N5", func(t *testing.T) {
+		task := Task{
+			ID: "T1",
+			Acts: []Act{{
+				Key: AskNewAttempt, Result: "failed", Class: ClassSettled,
+				Err: "worktree path blocked", At: t0,
+			}},
+		}
+		r, d := FirstMatch(TaskRows, In{
+			Task: task, Settings: settings, Facts: Facts{NoSlot: true}, Now: t0.Add(time.Minute),
+		})
+		if r.ID != "N5" || !slices.Equal(d.Asked, []string{"wake_coordinator@failed@new_attempt"}) {
+			t.Fatalf("exhausted settled new_attempt with NoSlot=true = %s %v (%q), want N5 wake_coordinator@failed@new_attempt", r.ID, d.Asked, d.Why)
+		}
+	})
+
+	t.Run("transient_failures_at_limit_reach_N5", func(t *testing.T) {
+		acts := make([]Act, settings.EnsureFailures)
+		for i := range acts {
+			acts[i] = Act{
+				Key: AskNewAttempt, Result: "failed", Class: ClassTransient,
+				Err: "git worktree failed", At: t0.Add(time.Duration(i) * time.Minute),
+			}
+		}
+		task := Task{ID: "T2", Acts: acts}
+		r, d := FirstMatch(TaskRows, In{
+			Task: task, Settings: settings, Facts: Facts{NoSlot: true}, Now: t0.Add(time.Hour),
+		})
+		if r.ID != "N5" || !slices.Equal(d.Asked, []string{"wake_coordinator@failed@new_attempt"}) {
+			t.Fatalf("exhausted transient new_attempt with NoSlot=true = %s %v (%q), want N5 wake_coordinator@failed@new_attempt", r.ID, d.Asked, d.Why)
+		}
+	})
+
+	t.Run("non_exhausted_stays_at_N10", func(t *testing.T) {
+		task := Task{
+			ID: "T3",
+			Acts: []Act{{
+				Key: AskNewAttempt, Result: "failed", Class: ClassTransient,
+				Err: "temporary error", At: t0,
+			}},
+		}
+		r, d := FirstMatch(TaskRows, In{
+			Task: task, Settings: settings, Facts: Facts{NoSlot: true}, Now: t0.Add(time.Hour),
+		})
+		if r.ID != "N10" || len(d.Asked) != 0 || d.Why != "no slot is free" {
+			t.Fatalf("non-exhausted new_attempt with NoSlot=true = %s %v (%q), want N10 no slot is free", r.ID, d.Asked, d.Why)
+		}
+	})
+}
