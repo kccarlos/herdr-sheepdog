@@ -661,6 +661,9 @@ func (e *Engine) observeCoordLocked(ctx context.Context, id string, s *flow.Stat
 
 // passProjectRulesLocked evaluates flow.ProjectRows and executes the matched coordinator action.
 func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.State, now time.Time) {
+	if !e.cleanLocked(id) {
+		return
+	}
 	match := func() (flow.Row[flow.ProjectIn], flow.Decision) {
 		return flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now, CoordFallbackReady: e.passCoordFallback})
 	}
@@ -1445,6 +1448,9 @@ func retroUnavailable(task flow.Task, settings flow.Settings, rf flow.ResolveFac
 }
 
 func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti int, facts flow.Facts, baseTried *bool) {
+	if !e.cleanLocked(id) {
+		return
+	}
 	facts.GitHubUnavailable = e.ghUnavail[id] || s.Project.HasAlert(flow.AlertGitHubUnavailable)
 	if *baseTried {
 		facts.BaseRedSpell, facts.BaseRedWoken = "", false
@@ -1468,18 +1474,25 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 	previousHold, previousHoldKey := s.Tasks[ti].HoldWhy, s.Tasks[ti].HoldKey
 	holdChanged := previousHold != holdWhy
 	s.Tasks[ti].HoldWhy, s.Tasks[ti].HoldKey = holdWhy, holdWhy
-	waitKey := id + "/" + s.Tasks[ti].ID
-	if r.ID != "N9" && r.ID != "N10" && r.ID != "N38" {
+	waitKey, waitVal := id+"/"+s.Tasks[ti].ID, ""
+	if r.ID == "N9" || r.ID == "N10" || r.ID == "N38" {
+		waitVal = r.ID + ":" + d.Why
+	}
+	setWait := func() {
+		if waitVal != "" {
+			if e.waits == nil {
+				e.waits = map[string]string{}
+			}
+			e.waits[waitKey] = waitVal
+		}
+	}
+	if waitVal == "" {
 		delete(e.waits, waitKey)
-	} else if waitVal := r.ID + ":" + d.Why; e.waits[waitKey] != waitVal {
-		if e.waits == nil {
-			e.waits = map[string]string{}
+	} else if len(d.Asked) == 0 && e.waits[waitKey] != waitVal {
+		if e.commitLogLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: facts, Rule: r.ID, Decision: "waiting", Why: d.Why}) {
+			setWait()
 		}
-		e.waits[waitKey] = waitVal
-		if len(d.Asked) == 0 {
-			e.commitLogLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: facts, Rule: r.ID, Decision: "waiting", Why: d.Why})
-			return
-		}
+		return
 	}
 	if len(d.Asked) == 0 {
 		if holdWhy != "" && (rowChanged || holdChanged) {
@@ -1551,7 +1564,9 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 		if errors.As(err, &wait) {
 			s.Tasks[ti].HoldWhy, s.Tasks[ti].HoldKey = wait.Why, wait.Key
 			if rowChanged || previousHoldKey != wait.Key || len(decs) > 0 {
-				e.commitLogLocked(id, s, LogLine{By: "engine", Task: task.ID, Rule: r.ID, Asked: d.Asked[:i+1], Decision: "waiting", Why: wait.Why})
+				if e.commitLogLocked(id, s, LogLine{By: "engine", Task: task.ID, Rule: r.ID, Asked: d.Asked[:i+1], Decision: "waiting", Why: wait.Why}) {
+					setWait()
+				}
 			} else if previousHold != wait.Why {
 				e.saveLocked(id, *s)
 			}
@@ -1592,6 +1607,7 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 		e.logError("factory.commit_error", id, err)
 		return
 	}
+	setWait()
 	for ai, a := range s.Asks {
 		if ai >= len(asksBefore) {
 			e.notifyChangeLocked(id, s.Seq, Change{Kind: flow.EvAskOpen, AskID: a.ID, Task: a.Task})
@@ -1905,6 +1921,9 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 			a.Review.Retries >= s.Settings.ReviewerRetries
 	}
 	voidRound := func(stopped bool) bool {
+		if !e.cleanLocked(id) {
+			return true
+		}
 		if err := e.stopRuns(ctx, []string{cmp.Or(a.Review.RunID, reviewerName(id, t.ID, len(t.Attempts), a.Review.Round))}); err != nil {
 			e.logError("factory.hc_error", id, err)
 			return true
@@ -1981,6 +2000,9 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 	if role == flow.RoleRetro || a.Review.Reviewer.CLI != world.CodexCLI || facts.Reviewer.State == flow.RunGone {
 		return false
 	}
+	if !e.cleanLocked(id) {
+		return true
+	}
 	rctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
 	rd, err := world.ReadCodexReport(rctx, e.HC, a.Review.RunID, a.Review.Code)
 	cancel()
@@ -2012,7 +2034,7 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 	var ref *Refusal
 	if errors.As(err, &ref) {
 		facts.Reviewer.Refused = true
-		if e.HC != nil && a.Review != nil && a.Review.RunID != "" && !a.Review.RefusalSent && e.cleanLocked(id) {
+		if e.HC != nil && a.Review != nil && a.Review.RunID != "" && !a.Review.RefusalSent {
 			msg := fmt.Sprintf("Your verdict was refused (%s). Fix it and end with the report tag again.", ref.Why)
 			sctx, scancel := context.WithTimeout(ctx, lockGitTimeout)
 			sendErr := world.SendRun(sctx, e.HC, a.Review.RunID, msg)
@@ -2296,6 +2318,9 @@ func (e *Engine) deliverWorkerLocked(ctx context.Context, id, taskID string, s *
 		if _, err := e.advanceRunLocked(ctx, id, taskID, s, a.RunID, flow.RoleWorker, "claude", &a.Run); err != nil {
 			return err
 		}
+	}
+	if !e.cleanLocked(id) {
+		return errStoreDirty
 	}
 	if a == nil || (a.RunID == "" && (a.Run == nil || a.Run.State != flow.PhaseEnded)) || (e.HC == nil && a.Run == nil) {
 		if a != nil && a.RunID == "" && (a.Run == nil && !flow.Done(a.Acts, flow.AskStartWorker) || a.Run != nil && a.Run.State == flow.PhaseStarting && a.Run.Address == "") {
@@ -2689,12 +2714,12 @@ func (e *Engine) readPRLocked(ctx context.Context, id string, s *flow.State, ti 
 			oa.PendingChecks = nil
 		}
 	}
-	if (oldPending != oa.PendingChecks || ciFailAdded || !reflect.DeepEqual(p, last)) && ctx.Err() == nil {
+	if (oldPending != oa.PendingChecks || ciFailAdded || !reflect.DeepEqual(p, last)) && ctx.Err() == nil &&
+		e.commitLogLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: p, Rule: "pr_snapshot", Why: "the PR snapshot changed"}) {
 		if e.prs == nil {
 			e.prs = map[string]flow.PR{}
 		}
 		e.prs[a.Worktree] = p
-		e.commitLogLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: p, Rule: "pr_snapshot", Why: "the PR snapshot changed"})
 	}
 	return p
 }
@@ -2827,10 +2852,12 @@ func (e *Engine) saveLocked(id string, s flow.State) bool {
 	return err == nil
 }
 
-func (e *Engine) commitLogLocked(id string, s *flow.State, l LogLine) {
-	if err := e.commitLocked(id, s, l); err != nil {
+func (e *Engine) commitLogLocked(id string, s *flow.State, l LogLine) bool {
+	err := e.commitLocked(id, s, l)
+	if err != nil {
 		e.logError("factory.commit_error", id, err)
 	}
+	return err == nil
 }
 
 func (e *Engine) commitLocked(id string, s *flow.State, l LogLine) error {
