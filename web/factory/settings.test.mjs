@@ -126,7 +126,7 @@ class El {
   dispatchEvent(ev) {
     const e = ev || { type: '' }; e.target ||= this; e.defaultPrevented = Boolean(e.defaultPrevented);
     e.preventDefault ||= () => { e.defaultPrevented = true; }; e.stopPropagation ||= () => { e._s = true; };
-    for (let c = this; c && !e._s; c = c.parentElement) { e.currentTarget = c; for (const fn of c._ls.get(e.type) || []) fn(e); }
+    for (let c = this; c && !e._s; c = c.parentElement) { e.currentTarget = c; for (const fn of c._ls.get(e.type) || []) this.ownerDocument?._track?.(fn(e)); }
     return !e.defaultPrevented;
   }
   click() { if (!this.disabled) this.dispatchEvent({ type: 'click', bubbles: true }); }
@@ -211,32 +211,44 @@ function fakeDaemon({ rows = baseRows(), asks = [], paired = false, settingsStat
   };
   return { fetch, proposed, answered, rows, openAsks, get inFlight() { return inFlight; } };
 }
-let bootSeq = 0;
+const realSet = globalThis.setTimeout, realClr = globalThis.clearTimeout, realCrypto = globalThis.crypto;
+let bootSeq = 0, activeCleanup = null;
 async function bootPage(t, daemon, { width = 1200, settle = true } = {}) {
-  const doc = createDoc(readFileSync(new URL('./index.html', import.meta.url), 'utf8')), idb = createIDB(), origSet = globalThis.setTimeout, origClr = globalThis.clearTimeout;
-  const keys = ['document', 'window', 'location', 'indexedDB', 'fetch', 'addEventListener', 'removeEventListener', 'scrollTo', 'innerWidth', 'matchMedia'];
+  if (activeCleanup) await activeCleanup();
+  const doc = createDoc(readFileSync(new URL('./index.html', import.meta.url), 'utf8')), idb = createIDB();
+  const keys = ['document', 'window', 'location', 'indexedDB', 'fetch', 'crypto', 'addEventListener', 'removeEventListener', 'scrollTo', 'innerWidth', 'matchMedia'];
   const prev = Object.fromEntries(keys.map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
   const pending = new Set(), timers = new Map(), mqls = [], winLs = new Map();
   let curW = width, seq = 1000, disposed = false;
   const px = (n, u) => +n * (u === 'px' ? 1 : 16);
   const evalMQ = (q) => { const mx = q.match(/max-width:\s*([\d.]+)(px|r?em)/), mn = q.match(/min-width:\s*([\d.]+)(px|r?em)/); return (!mx || curW <= px(mx[1], mx[2])) && (!mn || curW >= px(mn[1], mn[2])); };
-  const track = (p) => { if (p?.then) { const m = Promise.resolve(p).finally(() => pending.delete(m)); pending.add(m); } return p; };
-  globalThis.setTimeout = (fn, ms, ...a) => disposed ? ++seq : (+ms >= 500 ? (timers.set(++seq, { fn: () => fn(...a), ms: +ms }), seq) : origSet(() => { if (!disposed) fn(...a); }, ms));
-  globalThis.clearTimeout = (id) => { timers.delete(id) || origClr(id); };
+  const track = (p) => { if (p?.then) { const m = Promise.resolve(p).then(() => {}, () => {}).finally(() => pending.delete(m)); pending.add(m); } return p; };
+  if (settle) doc._track = track;
+  const subtle = new Proxy(realCrypto.subtle, { get(o, p) { const v = o[p]; return typeof v === 'function' ? (...a) => track(v.apply(o, a)) : v; } });
+  globalThis.setTimeout = (fn, ms, ...a) => disposed ? ++seq : (+ms >= 500 ? (timers.set(++seq, { fn: () => fn(...a), ms: +ms }), seq) : realSet(() => { if (!disposed) fn(...a); }, ms));
+  globalThis.clearTimeout = (id) => { timers.delete(id) || realClr(id); };
   const setP = (k, v) => Object.defineProperty(globalThis, k, { value: v, configurable: true, writable: true });
-  for (const [k, v] of [['document', doc], ['window', globalThis], ['indexedDB', idb], ['scrollTo', () => {}], ['innerWidth', curW], ['location', { hash: '', href: 'http://127.0.0.1:7777/factory' }],
+  for (const [k, v] of [['document', doc], ['window', globalThis], ['indexedDB', idb], ['crypto', { subtle, getRandomValues: (a) => realCrypto.getRandomValues(a), randomUUID: () => realCrypto.randomUUID() }], ['scrollTo', () => {}], ['innerWidth', curW], ['location', { hash: '', href: 'http://127.0.0.1:7777/factory' }],
     ['fetch', (p, i) => disposed ? Promise.reject(new Error('disposed')) : (settle ? track(daemon.fetch(p, i)) : daemon.fetch(p, i))],
     ['addEventListener', (ev, fn) => (winLs.get(ev) || winLs.set(ev, []).get(ev)).push(fn)], ['removeEventListener', (ev, fn) => { const l = winLs.get(ev); if (l) winLs.set(ev, l.filter((x) => x !== fn)); }]]) setP(k, v);
   setP('matchMedia', (q) => {
     const ls = [], mq = { media: q, onchange: null, get matches() { return evalMQ(q); }, _last: evalMQ(q), addEventListener: (e, fn) => e === 'change' && ls.push(fn), removeEventListener: (e, fn) => { const i = ls.indexOf(fn); if (i >= 0) ls.splice(i, 1); }, addListener: (fn) => ls.push(fn), removeListener: (fn) => { const i = ls.indexOf(fn); if (i >= 0) ls.splice(i, 1); }, _fire() { const now = evalMQ(q); if (now !== mq._last) { mq._last = now; const ev = { matches: now, media: q }; mq.onchange?.(ev); ls.forEach((fn) => fn(ev)); } } };
     mqls.push(mq); return mq;
   });
-  const flush = async () => { for (let q = 0; q < 3;) { while (pending.size) await Promise.allSettled([...pending]); await new Promise((r) => origSet(r, 0)); q = (pending.size || daemon.inFlight || idb.pending) ? 0 : q + 1; } };
-  t.after(async () => { disposed = true; timers.clear(); if (settle) await flush().catch(() => {}); globalThis.setTimeout = origSet; globalThis.clearTimeout = origClr; for (const [k, d] of Object.entries(prev)) d ? Object.defineProperty(globalThis, k, d) : delete globalThis[k]; });
+  const flush = async () => { for (let q = 0; q < 3;) { while (pending.size) await Promise.allSettled([...pending]); await new Promise((r) => setImmediate(r)); q = (pending.size || daemon.inFlight || idb.pending) ? 0 : q + 1; } };
+  const cleanup = async () => {
+    if (disposed) return;
+    disposed = true; timers.clear();
+    if (settle) await flush().catch(() => {});
+    globalThis.setTimeout = realSet; globalThis.clearTimeout = realClr;
+    for (const [k, d] of Object.entries(prev)) d ? Object.defineProperty(globalThis, k, d) : delete globalThis[k];
+    if (activeCleanup === cleanup) activeCleanup = null;
+  };
+  activeCleanup = cleanup; t.after(cleanup);
   await import(`./app.js?boot=${++bootSeq}`);
-  if (settle) await flush(); else await new Promise((r) => origSet(r, 20));
+  await flush();
   return { doc, flush,
-    async pollNow() { const e = [...timers.entries()].find(([, v]) => v.ms <= 3500); if (e) { timers.delete(e[0]); e[1].fn(); } else doc.getElementById('retry').click(); await flush(); },
+    async pollNow() { const e = [...timers.entries()].find(([, v]) => v.ms <= 3500); if (e) { timers.delete(e[0]); track(e[1].fn()); } else doc.getElementById('retry').click(); await flush(); },
     async setWidth(w) { curW = w; setP('innerWidth', w); mqls.forEach((m) => m._fire()); (winLs.get('resize') || []).forEach((fn) => fn({ type: 'resize' })); await flush(); },
   };
 }
