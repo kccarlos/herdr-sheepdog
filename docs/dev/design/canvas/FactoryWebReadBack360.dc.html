@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Factory web, life cycle — settings refusals and the read-back, 360 px wide</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;background:#FAF8F3}
+</style>
+</helmet>
+<div style="min-height: 100vh; max-width: 360px; background: #FAF8F3">
+<dc-import name="FactoryWebReadBack" theme="light" hint-size="100%,5257px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":360,"height":5257}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

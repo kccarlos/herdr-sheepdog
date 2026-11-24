@@ -1144,6 +1144,270 @@
    "png": null,
    "w": 1440,
    "h": 1840
+  },
+  {
+   "id": "FactoryWebLifeHome",
+   "title": "Factory web, life cycle — the page with everything in place, light",
+   "file": "FactoryWebLifeHome.dc.html",
+   "png": "png/FactoryWebLifeHome.png",
+   "w": 1440,
+   "h": 2171
+  },
+  {
+   "id": "FactoryWebLifeHomeDark",
+   "title": "Factory web, life cycle — the page with everything in place, dark",
+   "file": "FactoryWebLifeHomeDark.dc.html",
+   "png": "png/FactoryWebLifeHomeDark.png",
+   "w": 1440,
+   "h": 2171
+  },
+  {
+   "id": "FactoryWebLifeHome360",
+   "title": "Factory web, life cycle — the page with everything in place, 360 px wide",
+   "file": "FactoryWebLifeHome360.dc.html",
+   "png": "png/FactoryWebLifeHome360.png",
+   "w": 360,
+   "h": 3775
+  },
+  {
+   "id": "FactoryWebNewProject",
+   "title": "Factory web, life cycle — new project, light",
+   "file": "FactoryWebNewProject.dc.html",
+   "png": "png/FactoryWebNewProject.png",
+   "w": 1440,
+   "h": 4206
+  },
+  {
+   "id": "FactoryWebNewProjectDark",
+   "title": "Factory web, life cycle — new project, dark",
+   "file": "FactoryWebNewProjectDark.dc.html",
+   "png": "png/FactoryWebNewProjectDark.png",
+   "w": 1440,
+   "h": 4206
+  },
+  {
+   "id": "FactoryWebNewProject360",
+   "title": "Factory web, life cycle — new project, 360 px wide",
+   "file": "FactoryWebNewProject360.dc.html",
+   "png": "png/FactoryWebNewProject360.png",
+   "w": 360,
+   "h": 7728
+  },
+  {
+   "id": "FactoryWebStartChecks",
+   "title": "Factory web, life cycle — start checks, light",
+   "file": "FactoryWebStartChecks.dc.html",
+   "png": "png/FactoryWebStartChecks.png",
+   "w": 1440,
+   "h": 2068
+  },
+  {
+   "id": "FactoryWebStartChecksDark",
+   "title": "Factory web, life cycle — start checks, dark",
+   "file": "FactoryWebStartChecksDark.dc.html",
+   "png": "png/FactoryWebStartChecksDark.png",
+   "w": 1440,
+   "h": 2068
+  },
+  {
+   "id": "FactoryWebStartChecks360",
+   "title": "Factory web, life cycle — start checks, 360 px wide",
+   "file": "FactoryWebStartChecks360.dc.html",
+   "png": "png/FactoryWebStartChecks360.png",
+   "w": 360,
+   "h": 4841
+  },
+  {
+   "id": "FactoryWebPairing",
+   "title": "Factory web, life cycle — pairing at the first write, light",
+   "file": "FactoryWebPairing.dc.html",
+   "png": "png/FactoryWebPairing.png",
+   "w": 1440,
+   "h": 2171
+  },
+  {
+   "id": "FactoryWebPairingDark",
+   "title": "Factory web, life cycle — pairing at the first write, dark",
+   "file": "FactoryWebPairingDark.dc.html",
+   "png": "png/FactoryWebPairingDark.png",
+   "w": 1440,
+   "h": 2171
+  },
+  {
+   "id": "FactoryWebPairing360",
+   "title": "Factory web, life cycle — pairing at the first write, 360 px wide",
+   "file": "FactoryWebPairing360.dc.html",
+   "png": "png/FactoryWebPairing360.png",
+   "w": 360,
+   "h": 5248
+  },
+  {
+   "id": "FactoryWebProjectActions",
+   "title": "Factory web, life cycle — stop, resume, new goal, reopen, light",
+   "file": "FactoryWebProjectActions.dc.html",
+   "png": "png/FactoryWebProjectActions.png",
+   "w": 1440,
+   "h": 3223
+  },
+  {
+   "id": "FactoryWebProjectActionsDark",
+   "title": "Factory web, life cycle — stop, resume, new goal, reopen, dark",
+   "file": "FactoryWebProjectActionsDark.dc.html",
+   "png": "png/FactoryWebProjectActionsDark.png",
+   "w": 1440,
+   "h": 3223
+  },
+  {
+   "id": "FactoryWebProjectActions360",
+   "title": "Factory web, life cycle — stop, resume, new goal, reopen, 360 px wide",
+   "file": "FactoryWebProjectActions360.dc.html",
+   "png": "png/FactoryWebProjectActions360.png",
+   "w": 360,
+   "h": 6005
+  },
+  {
+   "id": "FactoryWebSettings",
+   "title": "Factory web, life cycle — the settings panel, light",
+   "file": "FactoryWebSettings.dc.html",
+   "png": "png/FactoryWebSettings.png",
+   "w": 1440,
+   "h": 4589
+  },
+  {
+   "id": "FactoryWebSettingsDark",
+   "title": "Factory web, life cycle — the settings panel, dark",
+   "file": "FactoryWebSettingsDark.dc.html",
+   "png": "png/FactoryWebSettingsDark.png",
+   "w": 1440,
+   "h": 4589
+  },
+  {
+   "id": "FactoryWebSettings360",
+   "title": "Factory web, life cycle — the settings panel, 360 px wide",
+   "file": "FactoryWebSettings360.dc.html",
+   "png": "png/FactoryWebSettings360.png",
+   "w": 360,
+   "h": 5642
+  },
+  {
+   "id": "FactoryWebReadBack",
+   "title": "Factory web, life cycle — settings refusals and the read-back, light",
+   "file": "FactoryWebReadBack.dc.html",
+   "png": "png/FactoryWebReadBack.png",
+   "w": 1440,
+   "h": 2667
+  },
+  {
+   "id": "FactoryWebReadBackDark",
+   "title": "Factory web, life cycle — settings refusals and the read-back, dark",
+   "file": "FactoryWebReadBackDark.dc.html",
+   "png": "png/FactoryWebReadBackDark.png",
+   "w": 1440,
+   "h": 2667
+  },
+  {
+   "id": "FactoryWebReadBack360",
+   "title": "Factory web, life cycle — settings refusals and the read-back, 360 px wide",
+   "file": "FactoryWebReadBack360.dc.html",
+   "png": "png/FactoryWebReadBack360.png",
+   "w": 360,
+   "h": 5257
+  },
+  {
+   "id": "FactoryWebModels",
+   "title": "Factory web, life cycle — models per role, light",
+   "file": "FactoryWebModels.dc.html",
+   "png": "png/FactoryWebModels.png",
+   "w": 1440,
+   "h": 2989
+  },
+  {
+   "id": "FactoryWebModelsDark",
+   "title": "Factory web, life cycle — models per role, dark",
+   "file": "FactoryWebModelsDark.dc.html",
+   "png": "png/FactoryWebModelsDark.png",
+   "w": 1440,
+   "h": 2989
+  },
+  {
+   "id": "FactoryWebModels360",
+   "title": "Factory web, life cycle — models per role, 360 px wide",
+   "file": "FactoryWebModels360.dc.html",
+   "png": "png/FactoryWebModels360.png",
+   "w": 360,
+   "h": 7149
+  },
+  {
+   "id": "FactoryWebTaskLife",
+   "title": "Factory web, life cycle — task view and step bar, light",
+   "file": "FactoryWebTaskLife.dc.html",
+   "png": "png/FactoryWebTaskLife.png",
+   "w": 1440,
+   "h": 3413
+  },
+  {
+   "id": "FactoryWebTaskLifeDark",
+   "title": "Factory web, life cycle — task view and step bar, dark",
+   "file": "FactoryWebTaskLifeDark.dc.html",
+   "png": "png/FactoryWebTaskLifeDark.png",
+   "w": 1440,
+   "h": 3413
+  },
+  {
+   "id": "FactoryWebTaskLife360",
+   "title": "Factory web, life cycle — task view and step bar, 360 px wide",
+   "file": "FactoryWebTaskLife360.dc.html",
+   "png": "png/FactoryWebTaskLife360.png",
+   "w": 360,
+   "h": 6006
+  },
+  {
+   "id": "FactoryWebLog",
+   "title": "Factory web, life cycle — the log, light",
+   "file": "FactoryWebLog.dc.html",
+   "png": "png/FactoryWebLog.png",
+   "w": 1440,
+   "h": 1837
+  },
+  {
+   "id": "FactoryWebLogDark",
+   "title": "Factory web, life cycle — the log, dark",
+   "file": "FactoryWebLogDark.dc.html",
+   "png": "png/FactoryWebLogDark.png",
+   "w": 1440,
+   "h": 1837
+  },
+  {
+   "id": "FactoryWebLog360",
+   "title": "Factory web, life cycle — the log, 360 px wide",
+   "file": "FactoryWebLog360.dc.html",
+   "png": "png/FactoryWebLog360.png",
+   "w": 360,
+   "h": 4026
+  },
+  {
+   "id": "FactoryWebGraph",
+   "title": "Factory web, life cycle — the task graph, light",
+   "file": "FactoryWebGraph.dc.html",
+   "png": "png/FactoryWebGraph.png",
+   "w": 1440,
+   "h": 2381
+  },
+  {
+   "id": "FactoryWebGraphDark",
+   "title": "Factory web, life cycle — the task graph, dark",
+   "file": "FactoryWebGraphDark.dc.html",
+   "png": "png/FactoryWebGraphDark.png",
+   "w": 1440,
+   "h": 2381
+  },
+  {
+   "id": "FactoryWebGraph360",
+   "title": "Factory web, life cycle — the task graph, 360 px wide",
+   "file": "FactoryWebGraph360.dc.html",
+   "png": "png/FactoryWebGraph360.png",
+   "w": 360,
+   "h": 3083
   }
  ]
 }

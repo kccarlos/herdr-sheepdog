@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Factory web, life cycle — the task graph, 360 px wide</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0;background:#FAF8F3}
+</style>
+</helmet>
+<div style="min-height: 100vh; max-width: 360px; background: #FAF8F3">
+<dc-import name="FactoryWebGraph" theme="light" hint-size="100%,3083px"></dc-import>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":360,"height":3083}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>
