@@ -265,16 +265,22 @@ func (s *Supervisor) startAgent(ctx context.Context, req spawnStart) (started, e
 func spaceDir(snap herdr.Snapshot, id string) (spawnDir, error) {
 	label := snap.WorkspaceLabel(id)
 	var first herdr.PaneInfo
+	var remote bool
 	for _, p := range snap.Panes {
-		if p.WorkspaceID == id && (first.PaneID == "" || paneLess(p.PaneID, first.PaneID)) {
+		if p.WorkspaceID != id {
+			continue
+		}
+		if hc.IsRemote(p.PaneID) {
+			remote = true
+		} else if first.PaneID == "" || paneLess(p.PaneID, first.PaneID) {
 			first = p
 		}
 	}
+	if first.PaneID == "" && remote {
+		return spawnDir{}, fmt.Errorf("the space %s runs on another machine", label)
+	}
 	if first.PaneID == "" {
 		return spawnDir{}, fmt.Errorf("%w: %s", ErrNoSuchSpace, id)
-	}
-	if hc.IsRemote(first.PaneID) {
-		return spawnDir{}, fmt.Errorf("the space %s runs on another machine", label)
 	}
 	path := herdr.RealDir(first.Cwd)
 	for _, w := range snap.Workspaces {

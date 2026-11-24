@@ -146,6 +146,9 @@ func (h brainHost) ReadSession(ctx context.Context, paneID string) (brain.Sessio
 	if !ok {
 		return brain.SessionRead{}, errors.New("that agent is gone")
 	}
+	if hc.IsRemote(paneID) {
+		return brain.SessionRead{}, errors.New("read_screen: the agent runs on another machine; read its screen instead")
+	}
 	alias := aliasOr(row.Alias)
 	roots := h.s.paneRoots(ctx, row)
 	d, err := h.s.cfg.WorkerLog.Tail(workerSessionWithRoots(row, roots))

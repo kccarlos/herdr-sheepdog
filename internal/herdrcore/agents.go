@@ -34,7 +34,7 @@ func (b *Backend) GetAgent(ctx context.Context, target string) (herdr.AgentInfo,
 		if kind, ok := b.launching(t.Address); ok {
 			// Typed into the shell, not running yet (hc samples the
 			// foreground program about twice a second).
-			return herdr.AgentInfo{PaneID: t.Address, TerminalID: t.Address, Agent: kind, Cwd: cwdOf(t), LaunchPending: true}, nil
+			return herdr.AgentInfo{PaneID: t.Address, TerminalID: t.Address, Agent: kind, Cwd: hc.LocalCwd(t.Address, cwdOf(t)), LaunchPending: true}, nil
 		}
 	}
 	b.endLaunch(t.Address)

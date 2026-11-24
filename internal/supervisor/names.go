@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/prose"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
@@ -58,7 +59,7 @@ type namesState struct {
 // row (the store recomputes the spoken names). Any error just leaves
 // the title as it was: the title is a nicety, never a reason to log.
 func (s *Supervisor) refreshTitle(row state.Agent, roots workerlog.ProcessRoots) {
-	if (row.SessionValue == "" && !roots.HasPID()) || s.cfg.WorkerLog == nil {
+	if hc.IsRemote(row.PaneID) || (row.SessionValue == "" && !roots.HasPID()) || s.cfg.WorkerLog == nil {
 		return
 	}
 	title, err := s.cfg.WorkerLog.Title(workerSessionWithRoots(row, roots))

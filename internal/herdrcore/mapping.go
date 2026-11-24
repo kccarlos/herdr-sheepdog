@@ -126,7 +126,7 @@ func agentInfo(t hc.Terminal, state herdr.State) herdr.AgentInfo {
 		Status:         state,
 		Agent:          kindOf(t),
 		Name:           t.Name,
-		Cwd:            cwdOf(t),
+		Cwd:            hc.LocalCwd(t.Address, cwdOf(t)),
 		TerminalTitle:  t.Title,
 		StateChangeSeq: t.Turn,
 		Labels:         maps.Clone(t.Labels),
@@ -141,8 +141,8 @@ func paneInfo(t hc.Terminal, state herdr.State) herdr.PaneInfo {
 		TabID:         t.Labels[labelTab],
 		Status:        state,
 		Agent:         agentKind(t),
-		Cwd:           cwdOf(t),
+		Cwd:           hc.LocalCwd(t.Address, cwdOf(t)),
 		TerminalTitle: t.Title,
-		PhoneShell:    t.Labels[spawnLabel] == shellValue,
+		PhoneShell:    !hc.IsRemote(t.Address) && t.Labels[spawnLabel] == shellValue,
 	}
 }

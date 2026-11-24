@@ -196,6 +196,9 @@ func (s *Supervisor) paneRoots(ctx context.Context, row state.Agent) workerlog.P
 // workerSessionWithRoots is the row's session for workerlog, carrying the
 // pane's live foreground process roots when known.
 func workerSessionWithRoots(row state.Agent, roots workerlog.ProcessRoots) workerlog.Session {
+	if hc.IsRemote(row.PaneID) {
+		return workerlog.Session{}
+	}
 	return workerlog.Session{
 		Pane:   row.PaneID,
 		Roots:  roots,
@@ -248,6 +251,9 @@ func (s *Supervisor) syncDiscoveredSession(paneID string) {
 // after journalRetry. A transcript that cannot be read still leaves an
 // entry when the row knows the instruction.
 func (s *Supervisor) recordJournal(ctx context.Context, row state.Agent, roots workerlog.ProcessRoots, event string, finish bool) *workerlog.TurnError {
+	if hc.IsRemote(row.PaneID) {
+		return nil
+	}
 	alias := aliasOr(row.Alias)
 	sess := workerSessionWithRoots(row, roots)
 	prevDisc, _ := s.cfg.WorkerLog.Discovered(row.PaneID)

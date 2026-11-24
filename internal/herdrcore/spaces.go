@@ -61,7 +61,8 @@ func (s *spaceSet) add(t hc.Terminal, state herdr.State) {
 		s.byID[id] = sp
 		s.order = append(s.order, id)
 	}
-	if t.CreatedMS < sp.first.CreatedMS {
+	spRemote, tRemote := hc.IsRemote(sp.first.Address), hc.IsRemote(t.Address)
+	if (spRemote && !tRemote) || (spRemote == tRemote && t.CreatedMS < sp.first.CreatedMS) {
 		sp.first = t
 	}
 	sp.panes++
