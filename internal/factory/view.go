@@ -38,6 +38,7 @@ type GraphView struct {
 type TaskView struct {
 	Ref          string   `json:"ref"`
 	Title        string   `json:"title"`
+	Brief        string   `json:"brief,omitempty"`
 	Stage        string   `json:"stage"`
 	WhyWaiting   string   `json:"why_waiting,omitempty"`
 	After        []string `json:"after"`

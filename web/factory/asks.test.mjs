@@ -543,7 +543,7 @@ function createFakeIndexedDB() {
   };
 }
 
-function fakeFactoryPageDaemon({ shortCode = 'ABCD-EFGH', daemonId = 'DAEMON_PAGE_1', requireSessionForReads = false, asks = fixture.asks, tasks = null } = {}) {
+function fakeFactoryPageDaemon({ shortCode = 'ABCD-EFGH', daemonId = 'DAEMON_PAGE_1', requireSessionForReads = false, asks = fixture.asks, tasks = null, goal = 'demo goal', log = [] } = {}) {
   const calls = [];
   const answered = [];
   const openAsks = asks.map((a) => ({ ...a }));
@@ -653,7 +653,7 @@ function fakeFactoryPageDaemon({ shortCode = 'ABCD-EFGH', daemonId = 'DAEMON_PAG
         if (path === '/api/factory/projects') {
           return reply(200, {
             protocol: 1,
-            projects: [{ id: 'proj-demo', goal: 'demo goal', running: true, counts: projectCounts }],
+            projects: [{ id: 'proj-demo', goal, running: true, counts: projectCounts }],
           });
         }
         if (path === '/api/factory/projects/proj-demo/graph') {
@@ -664,7 +664,7 @@ function fakeFactoryPageDaemon({ shortCode = 'ABCD-EFGH', daemonId = 'DAEMON_PAG
           });
         }
         if (path.startsWith('/api/factory/projects/proj-demo/log')) {
-          return reply(200, { protocol: 1, project: 'proj-demo', lines: [] });
+          return reply(200, { protocol: 1, project: 'proj-demo', lines: log });
         }
         if (path === '/api/factory/asks') {
           return reply(200, { protocol: 1, asks: openAsks.filter((a) => a.status === 'open') });
@@ -704,7 +704,7 @@ function fakeFactoryPageDaemon({ shortCode = 'ABCD-EFGH', daemonId = 'DAEMON_PAG
 
 let appImportSeq = 0;
 
-async function bootFactoryPage(t, daemon) {
+async function bootFactoryPage(t, daemon, { hash = '' } = {}) {
   const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
   const doc = createMiniDocument(html);
   const idb = createFakeIndexedDB();
@@ -788,8 +788,9 @@ async function bootFactoryPage(t, daemon) {
     return track(daemon.fetch(path, init));
   };
 
+  const locHash = hash ? (hash.startsWith('#') ? hash : `#${hash}`) : '';
   Object.defineProperty(globalThis, 'document', { value: doc, configurable: true, writable: true });
-  Object.defineProperty(globalThis, 'location', { value: { hash: '', href: 'http://127.0.0.1:7777/factory' }, configurable: true, writable: true });
+  Object.defineProperty(globalThis, 'location', { value: { hash: locHash, href: `http://127.0.0.1:7777/factory${locHash}` }, configurable: true, writable: true });
   Object.defineProperty(globalThis, 'indexedDB', { value: idb, configurable: true, writable: true });
   Object.defineProperty(globalThis, 'fetch', { value: wrappedFetch, configurable: true, writable: true });
   Object.defineProperty(globalThis, 'crypto', { value: trackedCrypto, configurable: true, writable: true });
@@ -1156,5 +1157,199 @@ test('KB-TSK-19: owner_gate and owner_answer stages have labels, dots, alert hig
       /blocked_or_failed|owner_gate|owner_answer/,
       'boardHTML must read the alert flag from STAGE instead of naming stages inline',
     );
+  });
+});
+
+test('project goal title, collapsible markdown goal, task brief, project card, log, and XSS safety', async (t) => {
+  const multiLineGoal = '# **Speed up** the factory view\n\n## Scope\n\n- Keep tasks above the fold\n- Render markdown safely';
+
+  await t.test('Test 3: board renders .goal-title and closed details.goal-full with markdown; omits details when goal equals plain title', async (st) => {
+    const daemon = fakeFactoryPageDaemon({
+      daemonId: 'DAEMON_GOAL_FULL',
+      asks: [],
+      goal: multiLineGoal,
+    });
+    const page = await bootFactoryPage(st, daemon);
+    const mainEl = page.doc.getElementById('main');
+
+    const headSpan = mainEl.querySelector('.head span');
+    assert.ok(headSpan, 'expected count span in .head');
+    assert.equal(headSpan.textContent, '0 of 1 done', '.head should stay compact with done count only');
+
+    const goalTitleEl = mainEl.querySelector('p.goal-title');
+    assert.ok(goalTitleEl, 'expected p.goal-title under .head');
+    assert.equal(goalTitleEl.textContent, 'Speed up the factory view');
+
+    const details = mainEl.querySelector('details.goal-full');
+    assert.ok(details, 'expected details.goal-full for multi-line markdown goal');
+    assert.equal(details.open, false, 'details.goal-full must be closed by default');
+    assert.equal(details.querySelector('summary')?.textContent, 'full project goal');
+
+    const mdBody = details.querySelector('.md-body');
+    assert.ok(mdBody, 'expected .md-body inside details.goal-full');
+    assert.equal(mdBody.querySelector('h4')?.textContent, 'Scope');
+    assert.deepEqual(
+      mdBody.querySelectorAll('ul li').map((li) => li.textContent),
+      ['Keep tasks above the fold', 'Render markdown safely'],
+    );
+  });
+
+  await t.test('Test 3b: board omits details.goal-full when goal equals plain derived title', async (st) => {
+    const daemon = fakeFactoryPageDaemon({
+      daemonId: 'DAEMON_GOAL_PLAIN',
+      asks: [],
+      goal: 'Short plain project goal',
+    });
+    const page = await bootFactoryPage(st, daemon);
+    const mainEl = page.doc.getElementById('main');
+
+    const goalTitleEl = mainEl.querySelector('p.goal-title');
+    assert.ok(goalTitleEl, 'expected p.goal-title for plain goal');
+    assert.equal(goalTitleEl.textContent, 'Short plain project goal');
+    assert.equal(mainEl.querySelector('details.goal-full'), null, 'details.goal-full must be omitted when goal equals title');
+  });
+
+  await t.test('Test 3c: #proj-demo/T1 renders t.brief markdown inside .md-body, omits when empty, and board rows never show brief', async (st) => {
+    const tasks = [
+      {
+        ref: 'T1',
+        title: 'feat: demo task',
+        brief: '## Plan\n\n- Wire markdown helper\n- Keep contrast AA',
+        stage: 'working',
+        layer: 1,
+        after: [],
+        dependents: [],
+      },
+      {
+        ref: 'T2',
+        title: 'feat: no brief task',
+        stage: 'queued',
+        layer: 1,
+        after: [],
+        dependents: [],
+      },
+    ];
+
+    await st.test('board rows never show task brief', async (bt) => {
+      const boardDaemon = fakeFactoryPageDaemon({ daemonId: 'DAEMON_BRIEF_BOARD', asks: [], tasks });
+      const boardPage = await bootFactoryPage(bt, boardDaemon);
+      const boardMain = boardPage.doc.getElementById('main');
+      assert.ok(!boardMain.innerHTML.includes('Wire markdown helper'), 'board rows must never render task brief');
+    });
+
+    await st.test('#proj-demo/T1 renders t.brief markdown inside .md-body', async (t1t) => {
+      const t1Daemon = fakeFactoryPageDaemon({ daemonId: 'DAEMON_BRIEF_T1', asks: [], tasks });
+      const t1Page = await bootFactoryPage(t1t, t1Daemon, { hash: '#proj-demo/T1' });
+      const t1Main = t1Page.doc.getElementById('main');
+      const briefSection = t1Main.querySelector('.col-main section.card[aria-label="Brief"]');
+      assert.ok(briefSection, 'expected Brief card section on #proj-demo/T1');
+      assert.equal(briefSection.querySelector('h2')?.textContent, 'brief');
+      const mdBody = briefSection.querySelector('.md-body');
+      assert.ok(mdBody, 'expected .md-body inside Brief section');
+      assert.equal(mdBody.querySelector('h4')?.textContent, 'Plan');
+      assert.deepEqual(
+        mdBody.querySelectorAll('ul li').map((li) => li.textContent),
+        ['Wire markdown helper', 'Keep contrast AA'],
+      );
+    });
+
+    await st.test('#proj-demo/T2 omits Brief section when brief is empty', async (t2t) => {
+      const t2Daemon = fakeFactoryPageDaemon({ daemonId: 'DAEMON_BRIEF_T2', asks: [], tasks });
+      const t2Page = await bootFactoryPage(t2t, t2Daemon, { hash: '#proj-demo/T2' });
+      const t2Main = t2Page.doc.getElementById('main');
+      assert.equal(t2Main.querySelector('section[aria-label="Brief"]'), null, 'Brief section must be omitted when brief is empty');
+    });
+  });
+
+  await t.test('Test 4: project card renders .proj-title (no <b>) with plain title only, and style.css clamps .proj-title without max-height on .md-body', async (st) => {
+    const daemon = fakeFactoryPageDaemon({
+      daemonId: 'DAEMON_PROJ_CARD',
+      asks: [],
+      goal: multiLineGoal,
+    });
+    const page = await bootFactoryPage(st, daemon);
+    const projectsEl = page.doc.getElementById('projects');
+
+    const proj = projectsEl.querySelector('a.proj');
+    assert.ok(proj, 'expected project card link');
+    assert.equal(proj.querySelector('b'), null, 'project card must not use <b>');
+    const titleEl = proj.querySelector('.proj-title');
+    assert.ok(titleEl, 'project card must render .proj-title');
+    assert.equal(titleEl.textContent, 'Speed up the factory view');
+    assert.ok(!proj.textContent.includes('Keep tasks above the fold'), 'project card must not include goal body');
+
+    const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+    const projTitleRule = css.match(/(?:^|[\n}])\s*\.proj-title\s*\{([^}]*)\}/);
+    assert.ok(projTitleRule, 'style.css must define .proj-title');
+    assert.match(projTitleRule[1], /-webkit-line-clamp:\s*2\b/, '.proj-title must set -webkit-line-clamp: 2');
+    assert.match(projTitleRule[1], /(?:^|[\s;])line-clamp:\s*2\b/, '.proj-title must set line-clamp: 2');
+
+    const mdBodyRule = css.match(/(?:^|[\n}])\s*\.md-body\s*\{([^}]*)\}/);
+    assert.ok(mdBodyRule, 'style.css must define .md-body');
+    assert.doesNotMatch(mdBodyRule[1], /\bmax-height\b/i, '.md-body must not set max-height');
+  });
+
+  await t.test('Test 5: owner started log entry renders derived title only, while other entries keep full why', async (st) => {
+    const otherWhy = 'The coordinator split work into 3 tasks.\nFull details stay visible.';
+    const daemon = fakeFactoryPageDaemon({
+      daemonId: 'DAEMON_GOAL_LOG',
+      asks: [],
+      goal: multiLineGoal,
+      log: [
+        { at: '2026-11-23T12:00:00Z', by: 'owner', decision: 'started', why: multiLineGoal },
+        { at: '2026-11-23T12:01:00Z', by: 'coordinator', task: 'T1', decision: 'planned', why: otherWhy },
+      ],
+    });
+    const page = await bootFactoryPage(st, daemon);
+    const mainEl = page.doc.getElementById('main');
+
+    const items = mainEl.querySelectorAll('ul.log li');
+    assert.equal(items.length, 2, 'expected 2 log entries');
+    const startedItem = items.find((li) => li.textContent.includes('owner') && li.textContent.includes('started'));
+    const otherItem = items.find((li) => li.textContent.includes('coordinator') && li.textContent.includes('planned'));
+    assert.ok(startedItem, 'expected owner started log item');
+    assert.ok(otherItem, 'expected coordinator planned log item');
+
+    assert.equal(startedItem.querySelector('.muted')?.textContent, 'Speed up the factory view');
+    assert.ok(!startedItem.textContent.includes('Keep tasks above the fold'), 'owner started log line must not include full goal body');
+    assert.equal(otherItem.querySelector('.muted')?.textContent, otherWhy);
+  });
+
+  await t.test('Test 6: hostile goal and task brief produce zero raw script, img, or javascript: href in #main and #projects', async (st) => {
+    const hostileGoal = '# Hostile <script>alert(1)</script>\n\n- <img src=x onerror=alert(1)>\n- [x](javascript:alert(1))';
+    const hostileBrief = '## Brief <script>alert(2)</script>\n\n- <img src=x onerror=alert(2)>\n- [x](javascript:alert(2))';
+    const tasks = [
+      { ref: 'T1', title: 'feat: hostile brief', brief: hostileBrief, stage: 'working', layer: 1, after: [], dependents: [] },
+    ];
+
+    await st.test('board view with hostile goal', async (bt) => {
+      const boardDaemon = fakeFactoryPageDaemon({ daemonId: 'DAEMON_XSS_BOARD', asks: [], goal: hostileGoal, tasks });
+      const boardPage = await bootFactoryPage(bt, boardDaemon);
+      const boardMain = boardPage.doc.getElementById('main');
+      const boardProjects = boardPage.doc.getElementById('projects');
+
+      assert.ok(boardMain.querySelector('details.goal-full .md-body'), 'hostile goal must render through .goal-full .md-body');
+      for (const html of [boardMain.innerHTML, boardProjects.innerHTML]) {
+        assert.doesNotMatch(html, /<script/i);
+        assert.doesNotMatch(html, /<img/i);
+        assert.doesNotMatch(html, /href="javascript:/i);
+      }
+      assert.ok(boardMain.innerHTML.includes('&lt;script&gt;'), 'escaped script tag expected in #main');
+    });
+
+    await st.test('task view #proj-demo/T1 with hostile brief', async (tt) => {
+      const taskDaemon = fakeFactoryPageDaemon({ daemonId: 'DAEMON_XSS_TASK', asks: [], goal: hostileGoal, tasks });
+      const taskPage = await bootFactoryPage(tt, taskDaemon, { hash: '#proj-demo/T1' });
+      const taskMain = taskPage.doc.getElementById('main');
+      const taskProjects = taskPage.doc.getElementById('projects');
+
+      assert.ok(taskMain.querySelector('section[aria-label="Brief"] .md-body'), 'hostile brief must render through Brief .md-body');
+      for (const html of [taskMain.innerHTML, taskProjects.innerHTML]) {
+        assert.doesNotMatch(html, /<script/i);
+        assert.doesNotMatch(html, /<img/i);
+        assert.doesNotMatch(html, /href="javascript:/i);
+      }
+      assert.ok(taskMain.innerHTML.includes('&lt;script&gt;'), 'escaped script tag expected in task #main');
+    });
   });
 });
