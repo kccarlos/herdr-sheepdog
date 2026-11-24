@@ -834,18 +834,25 @@ func resolveWorkerReason(t flow.Task, s flow.Settings, facts flow.ResolveFacts) 
 func launchArgv(role string, c flow.Candidate, cwd, session string, resume bool) []string {
 	switch c.CLI {
 	case world.CodexCLI:
-		if role == flow.RoleReviewer {
+		switch role {
+		case flow.RoleReviewer:
 			return world.CodexArgv(c.Model, c.Effort, cwd)
+		case flow.RoleWorker, flow.RoleCoordinator:
+			if !resume {
+				session = ""
+			}
+			return world.CodexWorkArgv(c.Model, c.Effort, cwd, session)
 		}
-		if !resume {
-			session = ""
-		}
-		return world.CodexWorkArgv(c.Model, c.Effort, cwd, session)
 	case world.AgyCLI:
-		if role == flow.RoleReviewer || role == flow.RoleRetro || !resume {
-			session = ""
+		switch role {
+		case flow.RoleReviewer, flow.RoleRetro:
+			return world.AgyArgv(c.Model, "", "")
+		case flow.RoleWorker, flow.RoleCoordinator:
+			if !resume {
+				session = ""
+			}
+			return world.AgyArgv(c.Model, session, "")
 		}
-		return world.AgyArgv(c.Model, session, "")
 	case "claude":
 		return world.ClaudeSessionArgv(role, c.Model, c.Effort, "bypassPermissions", session, resume)
 	}
@@ -1949,7 +1956,7 @@ func (e *Engine) observeReviewLocked(ctx context.Context, id string, s *flow.Sta
 		slices.ContainsFunc(s.Asks, func(ask flow.Ask) bool {
 			return ask.Status == flow.AskStatusOpen && ask.AskedBy == role && ask.RunID == a.Review.RunID
 		}))
-	if a.Review.Reviewer.CLI != world.CodexCLI || facts.Reviewer.State == flow.RunGone {
+	if role == flow.RoleRetro || a.Review.Reviewer.CLI != world.CodexCLI || facts.Reviewer.State == flow.RunGone {
 		return false
 	}
 	rctx, cancel := context.WithTimeout(ctx, lockGitTimeout)
@@ -2052,7 +2059,7 @@ func (e *Engine) execStartReviewer(ctx context.Context, id string, s *flow.State
 	var env map[string]string
 	if term.State == "live" {
 		choice = terminalChoice(term, flow.Candidate{})
-		if choice.CLI == "" || choice.Model == "" || check(choice).Why != "" {
+		if choice.CLI == "" || choice.Model == "" || (term.Labels["sheepdog.role"] != role && (isRetro || term.Labels["sheepdog.role"] != "")) || check(choice).Why != "" {
 			term, adopt = hc.Terminal{}, false
 		} else if isRetro {
 			kind = flow.RoundRetro
