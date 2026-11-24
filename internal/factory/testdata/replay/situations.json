@@ -18,5 +18,13 @@
   {"id": "A7", "role": "coordinator", "notes": "field notes 17, 18, 27", "message": "The owner: \"Add sign-in, then a settings screen for it.\"",
    "run": ["sheepdog factory plan apply"], "says": ["milestones", "owner's words", "never paraphrase"]},
   {"id": "A8", "role": "coordinator", "notes": "field notes 27, 42", "message": "Wake: T4's recap says the change is two jobs; split it.",
-   "run": ["sheepdog factory recap decide"], "says": ["split", "--child"], "never": ["task drop", "plan amend"]}
+   "run": ["sheepdog factory recap decide"], "says": ["split", "--child"], "never": ["task drop", "plan amend"]},
+  {"id": "RET1", "role": "retro", "notes": "KB-RET-15; design.md 7.2", "message": "You are tempted to edit the code yourself while investigating why rounds 2 and 3 failed.",
+   "says": ["Read only", "never edit files", "worktree"], "never": ["<report>"]},
+  {"id": "RET2", "role": "retro", "notes": "prompts.md 4; KB-RET-15", "message": "Rounds 2 and 3 both failed on the same design assumption; another patch fix will not converge.",
+   "says": ["premise", "redesign", "fix"], "never": ["<report>"]},
+  {"id": "RET3", "role": "retro", "notes": "prompts.md 4, 5.5", "message": "You found the root cause and must decide whether the worker and coordinator changes are checks or brief wording.",
+   "says": ["repo", "check", "brief"], "never": ["<report>"]},
+  {"id": "RET4", "role": "retro", "notes": "prompts.md 5.5; design.md 7.2", "message": "Your findings are written to the findings file outside the worktree and you are ready to submit the retro outcome.",
+   "run": ["sheepdog factory report retro"], "says": ["--cause", "--worker-change-kind", "--coordinator-change-kind", "--findings"], "never": ["<report>"]}
 ]}

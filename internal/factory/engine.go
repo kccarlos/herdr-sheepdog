@@ -39,6 +39,9 @@ var reviewerTemplate string
 //go:embed reviewer_cmd.md
 var reviewerCmdTemplate string
 
+// Stub for PR 12.2 TDD step 1 (replaced with //go:embed retro.md in step 2).
+var retroTemplate string
+
 var lockGitTimeout = world.GitStageTimeout
 
 // ghTimeout bounds one GitHub executor or snapshot (a push plus gh calls).
@@ -1743,6 +1746,11 @@ func (e *Engine) reviewerPromptWith(ctx context.Context, tmpl string, t flow.Tas
 	return fill(tmpl, "{id}", t.ID, "{title}", t.Title, "{brief}", cmp.Or(strings.TrimSpace(t.Brief), "(none)"),
 		"{outcomes}", bullets(t.Outcomes), "{proofs}", proofs, "{rejections}", rejections, "{diff}", diff, "{kind}", kind, "{head}", h, "{round}", fmt.Sprint(round), "{code}", a.Review.Code,
 		"{sheepdog}", bin, "{findings_path}", findingsPath), nil
+}
+
+// Stub for PR 12.2 TDD step 1 (implemented in step 2).
+func (e *Engine) retroPrompt(tmpl string, t flow.Task, a flow.Attempt, s flow.Settings, h, diff string, lines, round int, bin, findingsPath string) string {
+	return ""
 }
 
 func (e *Engine) reviewDraftPath(id, task string, round int, code string) string {
