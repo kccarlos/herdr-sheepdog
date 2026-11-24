@@ -105,19 +105,17 @@ func taskFacts(t flow.Task, f flow.Facts, now time.Time) string {
 		if rc.Trigger == flow.TriggerTime {
 			out += fmt.Sprintf("; working time %s", flow.WorkingTime(t).Truncate(time.Minute))
 		}
-		if n := len(t.Retros); n > 0 {
-			ret := t.Retros[n-1]
-			rv, rp := "none", "none"
-			if ret.Attempt >= 1 && ret.Attempt <= len(t.Attempts) {
-				for _, r := range t.Attempts[ret.Attempt-1].Rounds {
-					if r.N == ret.Round && r.Kind == flow.RoundRetro {
-						rv, rp = cmp.Or(r.Verdict, "none"), cmp.Or(r.ReportPath, "none")
+		if a := flow.OpenAttempt(t); a != nil {
+			if rs := flow.AttemptRetros(*a); len(rs) > 0 {
+				r := rs[len(rs)-1]
+				for i := len(t.Retros) - 1; i >= 0; i-- {
+					if ret := t.Retros[i]; ret.Attempt == len(t.Attempts) && ret.Round == r.N {
+						out += fmt.Sprintf("; retro r%d %s (cause %s; coordinator %s: %s; report %s)",
+							r.N, cmp.Or(r.Verdict, "none"), ret.Cause, ret.CoordinatorChangeKind, ret.CoordinatorChange, cmp.Or(r.ReportPath, "none"))
 						break
 					}
 				}
 			}
-			out += fmt.Sprintf("; retro r%d %s (cause %s; coordinator %s: %s; report %s)",
-				ret.Round, rv, ret.Cause, ret.CoordinatorChangeKind, ret.CoordinatorChange, rp)
 		}
 	}
 	return out

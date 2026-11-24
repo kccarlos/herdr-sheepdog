@@ -301,8 +301,8 @@ PY
 import json, sys
 s, tid = json.load(open(sys.argv[1])), sys.argv[2]
 p = s.get("project") or {}
-for w in (p.get("wakes") or []) + (p.get("coord_wakes_in_flight") or []):
-    if w.get("task") == tid and w.get("key") == "recap":
+for w in reversed((p.get("coord_wakes_in_flight") or []) + (p.get("wakes") or [])):
+    if w.get("task") == tid and str(w.get("key") or "").split("@", 1)[0] == "recap":
         print(w.get("facts") or "")
         sys.exit(0)
 PY

@@ -25,10 +25,9 @@ func recordAccept(t flow.Task, a *flow.Attempt, settings flow.Settings, f flow.F
 	for _, r := range flow.PassingCovering(*a, h) {
 		rounds = append(rounds, r.N)
 	}
-	if !byOverride && len(rounds) == 0 {
-		if r := flow.NewestCovering(*a, h); r != nil && r.Kind == flow.RoundRetro && r.Verdict == flow.VerdictShip {
-			rounds = append(rounds, r.N)
-		}
+	retroShip := false
+	if r := flow.NewestCovering(*a, h); r != nil && r.Kind == flow.RoundRetro && r.Verdict == flow.VerdictShip {
+		rounds, retroShip = append(rounds, r.N), true
 	}
 	ac := flow.Accept{Head: h, By: "bar", Rounds: rounds}
 	msg := fmt.Sprintf("accepted %s by the bar (rounds %v)", h, rounds)
@@ -37,7 +36,7 @@ func recordAccept(t flow.Task, a *flow.Attempt, settings flow.Settings, f flow.F
 		if ov == nil {
 			return ""
 		}
-		ac.By, ac.Waived, ac.ProofID = "override", overrideWaived(t, *a, settings, f, len(rounds)), ov.ProofID
+		ac.By, ac.Waived, ac.ProofID = "override", overrideWaived(t, *a, settings, f, !retroShip && len(rounds) < settings.ReviewRounds), ov.ProofID
 		msg = fmt.Sprintf("accepted %s by override (waived %v, proof %s)", h, ac.Waived, ov.ProofID)
 	}
 	if !slices.ContainsFunc(a.Accepts, func(x flow.Accept) bool { return x.Head == h }) {
@@ -46,13 +45,13 @@ func recordAccept(t flow.Task, a *flow.Attempt, settings flow.Settings, f flow.F
 	return msg
 }
 
-func overrideWaived(t flow.Task, a flow.Attempt, s flow.Settings, f flow.Facts, passing int) []string {
+func overrideWaived(t flow.Task, a flow.Attempt, s flow.Settings, f flow.Facts, waiveReview bool) []string {
 	var w []string
 	for _, c := range []struct {
 		on   bool
 		name string
 	}{
-		{passing < s.ReviewRounds, "review"}, {f.PR.Checks != flow.ChecksGreen, "checks"},
+		{waiveReview, "review"}, {f.PR.Checks != flow.ChecksGreen, "checks"},
 		{f.PR.Behind || f.PR.BehindUnknown, "behind"}, {f.BaseRed, "base_red"},
 		{f.PR.ReviewRequired, "review_required"}, {f.Worker.State == flow.RunWorking, "worker_working"},
 		{f.TipRel == flow.RelAhead, "unreported_tip"}, {f.LinesTimeout || f.Lines > a.SizeCap, "size_cap"},
