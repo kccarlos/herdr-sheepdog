@@ -3,17 +3,20 @@ package flow
 import (
 	"slices"
 	"testing"
+	"time"
 )
 
-// TestGrantSlots checks design.md 4.10 and KB-TSK-16: ordering by urgent,
-// critical path (longest remaining chain of estimate_lines through after),
-// then oldest, with up to max_running - running slots plus one extra slot for
-// an urgent task.
+// TestGrantSlots checks design.md 4.10 and KB-TSK-16: ordering by owner-answered,
+// urgent, open attempt, critical path (longest remaining chain of estimate_lines
+// through after), then oldest, with up to max_running - running slots plus one
+// extra slot for an owner-answered or urgent task.
 func TestGrantSlots(t *testing.T) {
+	t0 := time.Date(2026, 11, 22, 21, 38, 0, 0, time.UTC)
 	cases := []struct {
 		name       string
 		tasks      []Task
 		candidates []string
+		asks       []Ask
 		running    int
 		maxRunning int
 		want       []string
@@ -124,10 +127,63 @@ func TestGrantSlots(t *testing.T) {
 			running:    0, maxRunning: 2,
 			want: []string{"U1", "N1"},
 		},
+		{
+			name: "open_attempt_beats_new_attempt_with_longer_critical_path",
+			tasks: []Task{
+				{ID: "T3", EstimateLines: 300},
+				{ID: "T5", EstimateLines: 200, Attempts: []Attempt{{BaseCommit: "b0"}}},
+			},
+			candidates: []string{"T3", "T5"},
+			running:    0, maxRunning: 1,
+			want: []string{"T5"},
+		},
+		{
+			name: "owner_answered_beats_urgent_and_open_attempt",
+			tasks: []Task{
+				{ID: "O1", EstimateLines: 10},
+				{ID: "U1", EstimateLines: 10, Priority: PriorityUrgent},
+				{ID: "T5", EstimateLines: 200, Attempts: []Attempt{{BaseCommit: "b0"}}},
+				{ID: "T3", EstimateLines: 300},
+			},
+			candidates: []string{"T3", "T5", "U1", "O1"},
+			asks: []Ask{{
+				ID: "ask-1", Task: "O1", Gated: true,
+				Status: AskStatusAnswered, AnsweredBy: "owner", AnsweredAt: t0,
+			}},
+			running: 0, maxRunning: 1,
+			want: []string{"O1"},
+		},
+		{
+			name: "urgent_beats_open_attempt_and_new_attempt",
+			tasks: []Task{
+				{ID: "U1", EstimateLines: 10, Priority: PriorityUrgent},
+				{ID: "T5", EstimateLines: 200, Attempts: []Attempt{{BaseCommit: "b0"}}},
+				{ID: "T3", EstimateLines: 300},
+			},
+			candidates: []string{"T3", "T5", "U1"},
+			running:    0, maxRunning: 1,
+			want: []string{"U1"},
+		},
+		{
+			name: "owner_answered_and_urgent_beat_open_attempt_which_beats_new",
+			tasks: []Task{
+				{ID: "O1", EstimateLines: 10},
+				{ID: "U1", EstimateLines: 10, Priority: PriorityUrgent},
+				{ID: "T5", EstimateLines: 200, Attempts: []Attempt{{BaseCommit: "b0"}}},
+				{ID: "T3", EstimateLines: 300},
+			},
+			candidates: []string{"T3", "T5", "U1", "O1"},
+			asks: []Ask{{
+				ID: "ask-1", Task: "O1", Gated: true,
+				Status: AskStatusAnswered, AnsweredBy: "owner", AnsweredAt: t0,
+			}},
+			running: 0, maxRunning: 3,
+			want: []string{"O1", "U1", "T5"},
+		},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := GrantSlots(c.candidates, c.tasks, c.running, c.maxRunning)
+			got := GrantSlots(c.candidates, c.tasks, c.running, c.maxRunning, c.asks...)
 			var ids []string
 			for id := range got {
 				ids = append(ids, id)
@@ -204,4 +260,61 @@ func TestCriticalPathsCycle(t *testing.T) {
 	if got := GrantSlots([]string{"B", "C"}, tasks, 0, 1); !got["C"] || got["B"] {
 		t.Fatalf("GrantSlots(cycle) = %v, want C", got)
 	}
+}
+
+// TestExhaustedNewAttemptReachesN5WhenNoSlot checks that when Facts.NoSlot is
+// true, N5's probe pass skips N10 to inspect N11 and surface an exhausted
+// new_attempt failure, while a non-exhausted task still lands on N10.
+func TestExhaustedNewAttemptReachesN5WhenNoSlot(t *testing.T) {
+	t0 := time.Date(2026, 11, 24, 10, 0, 0, 0, time.UTC)
+	settings := DefaultSettings()
+
+	t.Run("settled_failure_reaches_N5", func(t *testing.T) {
+		task := Task{
+			ID: "T1",
+			Acts: []Act{{
+				Key: AskNewAttempt, Result: "failed", Class: ClassSettled,
+				Err: "worktree path blocked", At: t0,
+			}},
+		}
+		r, d := FirstMatch(TaskRows, In{
+			Task: task, Settings: settings, Facts: Facts{NoSlot: true}, Now: t0.Add(time.Minute),
+		})
+		if r.ID != "N5" || !slices.Equal(d.Asked, []string{"wake_coordinator@failed@new_attempt"}) {
+			t.Fatalf("exhausted settled new_attempt with NoSlot=true = %s %v (%q), want N5 wake_coordinator@failed@new_attempt", r.ID, d.Asked, d.Why)
+		}
+	})
+
+	t.Run("transient_failures_at_limit_reach_N5", func(t *testing.T) {
+		acts := make([]Act, settings.EnsureFailures)
+		for i := range acts {
+			acts[i] = Act{
+				Key: AskNewAttempt, Result: "failed", Class: ClassTransient,
+				Err: "git worktree failed", At: t0.Add(time.Duration(i) * time.Minute),
+			}
+		}
+		task := Task{ID: "T2", Acts: acts}
+		r, d := FirstMatch(TaskRows, In{
+			Task: task, Settings: settings, Facts: Facts{NoSlot: true}, Now: t0.Add(time.Hour),
+		})
+		if r.ID != "N5" || !slices.Equal(d.Asked, []string{"wake_coordinator@failed@new_attempt"}) {
+			t.Fatalf("exhausted transient new_attempt with NoSlot=true = %s %v (%q), want N5 wake_coordinator@failed@new_attempt", r.ID, d.Asked, d.Why)
+		}
+	})
+
+	t.Run("non_exhausted_stays_at_N10", func(t *testing.T) {
+		task := Task{
+			ID: "T3",
+			Acts: []Act{{
+				Key: AskNewAttempt, Result: "failed", Class: ClassTransient,
+				Err: "temporary error", At: t0,
+			}},
+		}
+		r, d := FirstMatch(TaskRows, In{
+			Task: task, Settings: settings, Facts: Facts{NoSlot: true}, Now: t0.Add(time.Hour),
+		})
+		if r.ID != "N10" || len(d.Asked) != 0 || d.Why != "no slot is free" {
+			t.Fatalf("non-exhausted new_attempt with NoSlot=true = %s %v (%q), want N10 no slot is free", r.ID, d.Asked, d.Why)
+		}
+	})
 }

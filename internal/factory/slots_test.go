@@ -3,11 +3,14 @@ package factory
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
@@ -520,5 +523,676 @@ func TestWorkerRunStateReadOncePerPass(t *testing.T) {
 		if counts[w] != 1 {
 			t.Errorf("terminal.get count for worker %s = %d, want 1", w, counts[w])
 		}
+	}
+}
+
+func makeSlotWorktree(t *testing.T, ctx context.Context, paths Paths, repo, id, taskID, file string) (wtPath, branch, head string) {
+	t.Helper()
+	wt, err := fixtureGit(t).NewWorktree(ctx, repo, paths.Worktree(id, taskID, 1), taskID+"-1", "feat: "+taskID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(wt.Path, file), []byte("package demo\n// "+taskID+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt.Path, "add", file)
+	gitIn(t, wt.Path, "commit", "-m", "feat: "+taskID)
+	head = gitIn(t, wt.Path, "rev-parse", "HEAD")
+	gitIn(t, wt.Path, "push", "origin", head+":refs/heads/"+wt.Branch)
+	return wt.Path, wt.Branch, head
+}
+
+func writeOpenPRView(t *testing.T, gh string, num int, head, rollup string) {
+	t.Helper()
+	body := fmt.Sprintf(`{"number":%d,"state":"OPEN","headRefOid":%q,"mergeable":"MERGEABLE","statusCheckRollup":%s,"baseRefName":"main"}`, num, head, rollup)
+	writeGHFile(t, gh, fmt.Sprintf("view-%d.json", num), body)
+}
+
+// TestCIWaitingTaskTakesNoSlot checks finding 10a (trial seq 65, max_running 1):
+// T1 (critical path 760) passed review and waits on CI at N36 with its worker
+// ended; T5 (critical path 200) is at N22 with findings and its worker ended.
+// T1's matching row asks for no worker, so T1 must not take the slot and T5's
+// worker must start in the first pass.
+func TestCIWaitingTaskTakesNoSlot(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, base := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := bindRepoFakeGH(t, repo)
+
+	now := time.Date(2026, 11, 22, 20, 34, 0, 0, time.UTC)
+	endedAt := now.Add(-5 * time.Minute)
+	eng := newTestEngine(t, paths, client)
+	eng.Now = func() time.Time { return now }
+	if err := eng.Start(repo, "Trial finding 10a", 1); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	srv.Add(hc.Terminal{
+		Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+		Labels: testCoordLabels(id, "run-elsewhere"),
+		Status: &hc.Status{App: "claude-code", State: "working"},
+	})
+
+	wt1, br1, c1 := makeSlotWorktree(t, ctx, paths, repo, id, "T1", "t1.go")
+	wt5, br5, c5 := makeSlotWorktree(t, ctx, paths, repo, id, "T5", "t5.go")
+	writeOpenPRView(t, gh, 1, c1, "["+ciCheck("ci", "IN_PROGRESS", "", "101", "1001")+"]")
+	writeOpenPRView(t, gh, 5, c5, "[]")
+
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Project.RunID = "coord-elsewhere"
+	st.Tasks = []flow.Task{
+		{
+			ID: "T1", Title: "feat: T1 waiting on CI", EstimateLines: 760,
+			Attempts: []flow.Attempt{{
+				SizeCap: 1600, BaseCommit: base, Branch: br1, Worktree: wt1, PR: 1,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: "worker-t1-gone",
+					SessionID: "sess-t1", Resumable: true,
+					State: flow.PhaseEnded, Result: flow.EndExited, EndedAt: endedAt,
+				},
+				Ready: []flow.Ready{{Head: c1}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: c1, Verdict: flow.VerdictPass},
+				},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: endedAt.Add(-time.Minute)}},
+			}},
+		},
+		{
+			ID: "T5", Title: "feat: T5 fix round 1 findings", EstimateLines: 200,
+			Attempts: []flow.Attempt{{
+				SizeCap: 400, BaseCommit: base, Branch: br5, Worktree: wt5, PR: 5,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: "worker-t5-gone",
+					SessionID: "sess-t5", Resumable: true,
+					State: flow.PhaseEnded, Result: flow.EndExited, EndedAt: endedAt,
+				},
+				Ready:   []flow.Ready{{Head: c5}},
+				Rounds:  []flow.Round{{N: 1, Kind: flow.RoundFull, Head: c5, Verdict: flow.VerdictChanges, Majors: 1, ReportPath: "/r/t5-r1.md"}},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: endedAt.Add(-time.Minute)}},
+			}},
+		},
+	}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Tasks[0].LastRow != "N36" || st.Tasks[0].Attempts[0].RunID != "" {
+		t.Errorf("T1 after pass = row:%q run_id:%q, want N36 with no worker started", st.Tasks[0].LastRow, st.Tasks[0].Attempts[0].RunID)
+	}
+	if st.Tasks[1].Attempts[0].RunID == "" {
+		t.Fatalf("T5 worker did not start in the first pass while T1 waited on CI (T5 row=%q hold=%q)", st.Tasks[1].LastRow, st.Tasks[1].HoldWhy)
+	}
+}
+
+// TestRestartBeforeNewAttempt checks finding 10b (trial seq 109/161, max_running 1):
+// an open attempt asking to restart its worker (T5 at N22, critical path 200)
+// gets the free slot ahead of new attempts with longer critical paths (T3 300, T4 250).
+func TestRestartBeforeNewAttempt(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, base := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := bindRepoFakeGH(t, repo)
+
+	now := time.Date(2026, 11, 22, 21, 38, 0, 0, time.UTC)
+	endedAt := now.Add(-5 * time.Minute)
+	eng := newTestEngine(t, paths, client)
+	eng.Now = func() time.Time { return now }
+	if err := eng.Start(repo, "Trial finding 10b", 1); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	srv.Add(hc.Terminal{
+		Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+		Labels: testCoordLabels(id, "run-elsewhere"),
+		Status: &hc.Status{App: "claude-code", State: "working"},
+	})
+
+	wt5, br5, c5 := makeSlotWorktree(t, ctx, paths, repo, id, "T5", "t5.go")
+	writeOpenPRView(t, gh, 5, c5, "[]")
+
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Project.RunID = "coord-elsewhere"
+	st.Tasks = []flow.Task{
+		{ID: "T3", Title: "feat: T3 new attempt", EstimateLines: 300},
+		{ID: "T4", Title: "feat: T4 new attempt", EstimateLines: 250},
+		{
+			ID: "T5", Title: "feat: T5 fix round 1 findings", EstimateLines: 200,
+			Attempts: []flow.Attempt{{
+				SizeCap: 400, BaseCommit: base, Branch: br5, Worktree: wt5, PR: 5,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: "worker-t5-gone",
+					SessionID: "sess-t5", Resumable: true,
+					State: flow.PhaseEnded, Result: flow.EndExited, EndedAt: endedAt,
+				},
+				Ready:   []flow.Ready{{Head: c5}},
+				Rounds:  []flow.Round{{N: 1, Kind: flow.RoundFull, Head: c5, Verdict: flow.VerdictChanges, Majors: 1, ReportPath: "/r/t5-r1.md"}},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: endedAt.Add(-time.Minute)}},
+			}},
+		},
+	}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Tasks[2].Attempts[0].RunID == "" {
+		t.Fatalf("T5 open-attempt restart did not beat new attempts T3/T4 (T3 attempts=%d T4 attempts=%d T5 row=%q)",
+			len(st.Tasks[0].Attempts), len(st.Tasks[1].Attempts), st.Tasks[2].LastRow)
+	}
+	if flow.OpenAttempt(st.Tasks[0]) != nil || flow.OpenAttempt(st.Tasks[1]) != nil {
+		t.Errorf("new attempts opened while T5 restarted: T3=%d T4=%d", len(st.Tasks[0].Attempts), len(st.Tasks[1].Attempts))
+	}
+}
+
+// TestBackoffRestartIsNoCandidate checks C3 non-starvation: an open attempt
+// whose worker restart is in back-off asks nothing, so it is not a slot
+// candidate and a queued new attempt B gets the single free slot.
+func TestBackoffRestartIsNoCandidate(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, base := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	bindRepoFakeGH(t, repo)
+
+	now := time.Date(2026, 11, 22, 21, 40, 0, 0, time.UTC)
+	endedAt := now.Add(-10 * time.Second) // inside 1m ensure_backoff_minutes
+	eng := newTestEngine(t, paths, client)
+	eng.Now = func() time.Time { return now }
+	if err := eng.Start(repo, "Backoff non-starvation", 1); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	srv.Add(hc.Terminal{
+		Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+		Labels: testCoordLabels(id, "run-elsewhere"),
+		Status: &hc.Status{App: "claude-code", State: "working"},
+	})
+
+	wtA, brA, _ := makeSlotWorktree(t, ctx, paths, repo, id, "A", "a.go")
+
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Project.RunID = "coord-elsewhere"
+	st.Tasks = []flow.Task{
+		{
+			ID: "A", Title: "feat: A in restart backoff", EstimateLines: 300,
+			Attempts: []flow.Attempt{{
+				SizeCap: 600, BaseCommit: base, Branch: brA, Worktree: wtA,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: "worker-a-gone",
+					SessionID: "sess-a", Resumable: true,
+					State: flow.PhaseEnded, Result: flow.EndExited, EndedAt: endedAt,
+				},
+				Ready:   []flow.Ready{},
+				Rounds:  []flow.Round{},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: endedAt.Add(-time.Minute)}},
+			}},
+		},
+		{ID: "B", Title: "feat: B new attempt", EstimateLines: 50},
+	}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if flow.OpenAttempt(st.Tasks[1]) == nil {
+		t.Fatalf("B did not start while A was in restart back-off (A row=%q hold=%q)", st.Tasks[0].LastRow, st.Tasks[0].HoldWhy)
+	}
+	if st.Tasks[0].Attempts[0].RunID != "" {
+		t.Errorf("A restarted during back-off: run_id=%q", st.Tasks[0].Attempts[0].RunID)
+	}
+	if st.Tasks[0].HoldWhy != "waiting for worker restart back-off" {
+		t.Errorf("A HoldWhy = %q, want %q", st.Tasks[0].HoldWhy, "waiting for worker restart back-off")
+	}
+}
+
+// TestIdleWorkerWaitingOnCIHoldsSlot pins today's rule for O38 (C4, trial 22:00-22:28):
+// T3 passed review and waits on CI at N36 with its worker live and idle; it
+// holds the single slot until its worker run is gone, so T5 at N22 waits.
+func TestIdleWorkerWaitingOnCIHoldsSlot(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, base := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := bindRepoFakeGH(t, repo)
+
+	now := time.Date(2026, 11, 22, 22, 0, 0, 0, time.UTC)
+	endedAt := now.Add(-5 * time.Minute)
+	eng := newTestEngine(t, paths, client)
+	eng.Now = func() time.Time { return now }
+	if err := eng.Start(repo, "O38 idle worker holds slot", 1); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	srv.Add(hc.Terminal{
+		Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+		Labels: testCoordLabels(id, "run-elsewhere"),
+		Status: &hc.Status{App: "claude-code", State: "working"},
+	})
+
+	wt3, br3, c3 := makeSlotWorktree(t, ctx, paths, repo, id, "T3", "t3.go")
+	wt5, br5, c5 := makeSlotWorktree(t, ctx, paths, repo, id, "T5", "t5.go")
+	writeOpenPRView(t, gh, 3, c3, "["+ciCheck("ci", "IN_PROGRESS", "", "301", "3001")+"]")
+	writeOpenPRView(t, gh, 5, c5, "[]")
+
+	w3, err := startRun(ctx, client, world.RunSpec{Name: "worker-t3-idle", Cwd: wt3, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setTerminalStatusAt(t, srv, client, w3, "idle", now.Add(-time.Minute))
+
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Project.RunID = "coord-elsewhere"
+	st.Tasks = []flow.Task{
+		{
+			ID: "T3", Title: "feat: T3 idle waiting on CI", EstimateLines: 300,
+			Attempts: []flow.Attempt{{
+				SizeCap: 600, BaseCommit: base, Branch: br3, Worktree: wt3, PR: 3, RunID: w3,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: w3,
+					State: flow.PhaseIdle, Status: "idle", StatusSince: now.Add(-time.Minute), StatusReported: true,
+				},
+				Ready: []flow.Ready{{Head: c3}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: c3, Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: c3, Verdict: flow.VerdictPass},
+				},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now.Add(-10 * time.Minute)}},
+			}},
+		},
+		{
+			ID: "T5", Title: "feat: T5 waiting on slot", EstimateLines: 200,
+			Attempts: []flow.Attempt{{
+				SizeCap: 400, BaseCommit: base, Branch: br5, Worktree: wt5, PR: 5,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: "worker-t5-gone",
+					SessionID: "sess-t5", Resumable: true,
+					State: flow.PhaseEnded, Result: flow.EndExited, EndedAt: endedAt,
+				},
+				Ready:   []flow.Ready{{Head: c5}},
+				Rounds:  []flow.Round{{N: 1, Kind: flow.RoundFull, Head: c5, Verdict: flow.VerdictChanges, Majors: 1, ReportPath: "/r/t5-r1.md"}},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: endedAt.Add(-time.Minute)}},
+			}},
+		},
+	}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Tasks[0].LastRow != "N36" || st.Tasks[0].Attempts[0].RunID != w3 {
+		t.Errorf("T3 after pass = row:%q run_id:%q, want N36 keeping idle worker %q", st.Tasks[0].LastRow, st.Tasks[0].Attempts[0].RunID, w3)
+	}
+	if st.Tasks[1].LastRow != "N22" || st.Tasks[1].Attempts[0].RunID != "" {
+		t.Fatalf("T5 started while T3's idle worker held the slot: row=%q run_id=%q", st.Tasks[1].LastRow, st.Tasks[1].Attempts[0].RunID)
+	}
+}
+
+// TestSamePassDepCompletionRespectsMaxRunning checks that a task whose
+// dependency finishes in the same pass (non-candidate during slot selection)
+// still respects max_running instead of opening an attempt without a grant.
+func TestSamePassDepCompletionRespectsMaxRunning(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, base := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := bindRepoFakeGH(t, repo)
+
+	now := time.Date(2026, 11, 24, 10, 0, 0, 0, time.UTC)
+	endedAt := now.Add(-5 * time.Minute)
+	eng := newTestEngine(t, paths, client)
+	eng.Now = func() time.Time { return now }
+	if err := eng.Start(repo, "Same-pass dep completion respects max_running", 1); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	srv.Add(hc.Terminal{
+		Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+		Labels: testCoordLabels(id, "run-elsewhere"),
+		Status: &hc.Status{App: "claude-code", State: "working"},
+	})
+
+	wt0, br0, c0 := makeSlotWorktree(t, ctx, paths, repo, id, "T0", "t0.go")
+	wt1, br1, _ := makeSlotWorktree(t, ctx, paths, repo, id, "T1", "t1.go")
+	writeGHFile(t, gh, "view-1.json", fmt.Sprintf(
+		`{"number":1,"state":"MERGED","headRefOid":%q,"mergeable":"UNKNOWN","statusCheckRollup":[],"baseRefName":"main","mergeCommit":{"oid":"m0"}}`,
+		c0,
+	))
+
+	w1, err := startRun(ctx, client, world.RunSpec{Name: "worker-t1-live", Cwd: wt1, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setTerminalStatusAt(t, srv, client, w1, "working", now.Add(-time.Minute))
+
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Project.RunID = "coord-elsewhere"
+	st.Tasks = []flow.Task{
+		{
+			ID: "T0", Title: "feat: T0 merged PR", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 200, BaseCommit: base, Branch: br0, Worktree: wt0, PR: 1,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: "worker-t0-gone",
+					SessionID: "sess-t0", Resumable: true,
+					State: flow.PhaseEnded, Result: flow.EndExited, EndedAt: endedAt,
+				},
+				Ready: []flow.Ready{{Head: c0}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: c0, Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: c0, Verdict: flow.VerdictPass},
+				},
+				Accepts: []flow.Accept{{Head: c0}},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: endedAt.Add(-time.Minute)}},
+			}},
+		},
+		{
+			ID: "T1", Title: "feat: T1 holding single slot", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 200, BaseCommit: base, Branch: br1, Worktree: wt1, RunID: w1,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: w1,
+					State: flow.PhaseWorking, Status: "working", StatusSince: now.Add(-time.Minute), StatusReported: true,
+				},
+				Ready:   []flow.Ready{},
+				Rounds:  []flow.Round{},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now.Add(-10 * time.Minute)}},
+			}},
+		},
+		{ID: "T2", Title: "feat: T2 after T0", After: []string{"T0"}, EstimateLines: 50},
+	}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Tasks[0].Done == nil {
+		t.Fatalf("T0 was not marked done (row=%q)", st.Tasks[0].LastRow)
+	}
+	if flow.OpenAttempt(st.Tasks[2]) != nil {
+		t.Fatalf("T2 opened an attempt in the same pass while T1 held the only slot (max_running=1): %+v", st.Tasks[2].Attempts)
+	}
+	if st.Tasks[2].LastRow != "N10" || st.Tasks[2].HoldWhy != "no slot is free" {
+		t.Errorf("T2 after pass = row:%q hold:%q, want N10 / %q", st.Tasks[2].LastRow, st.Tasks[2].HoldWhy, "no slot is free")
+	}
+}
+
+// TestSamePassStaleGateCancelRespectsMaxRunning checks that a task whose stale
+// gate ask is cancelled in actTaskLocked (making it a non-candidate during slot
+// selection at N31) still respects max_running when falling through to N32.
+func TestSamePassStaleGateCancelRespectsMaxRunning(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, base := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	gh := bindRepoFakeGH(t, repo)
+
+	now := time.Date(2026, 11, 24, 10, 5, 0, 0, time.UTC)
+	endedAt := now.Add(-5 * time.Minute)
+	eng := newTestEngine(t, paths, client)
+	eng.Now = func() time.Time { return now }
+	if err := eng.Start(repo, "Same-pass stale gate cancel respects max_running", 1); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	srv.Add(hc.Terminal{
+		Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+		Labels: testCoordLabels(id, "run-elsewhere"),
+		Status: &hc.Status{App: "claude-code", State: "working"},
+	})
+
+	wt1, br1, _ := makeSlotWorktree(t, ctx, paths, repo, id, "T1", "t1.go")
+	wt2, br2, c1 := makeSlotWorktree(t, ctx, paths, repo, id, "T2", "t2.go")
+	if err := os.WriteFile(filepath.Join(wt2, "t2.go"), []byte("package demo\n// T2 v2\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	gitIn(t, wt2, "add", "t2.go")
+	gitIn(t, wt2, "commit", "-m", "feat: T2 second commit")
+	c2 := gitIn(t, wt2, "rev-parse", "HEAD")
+	gitIn(t, wt2, "push", "origin", c2+":refs/heads/"+br2)
+
+	writeGHFile(t, gh, "view-2.json", fmt.Sprintf(
+		`{"number":2,"state":"OPEN","headRefOid":%q,"mergeable":"CONFLICTING","statusCheckRollup":[],"baseRefName":"main"}`,
+		c2,
+	))
+
+	w1, err := startRun(ctx, client, world.RunSpec{Name: "worker-t1-live", Cwd: wt1, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setTerminalStatusAt(t, srv, client, w1, "working", now.Add(-time.Minute))
+
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Project.RunID = "coord-elsewhere"
+	st.Asks = []flow.Ask{{
+		ID: "ask-stale", Task: "T2", Kind: flow.KindGate, Gated: true,
+		Status: flow.AskStatusOpen, Head: c1,
+	}}
+	st.Tasks = []flow.Task{
+		{
+			ID: "T1", Title: "feat: T1 holding single slot", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 200, BaseCommit: base, Branch: br1, Worktree: wt1, RunID: w1,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: w1,
+					State: flow.PhaseWorking, Status: "working", StatusSince: now.Add(-time.Minute), StatusReported: true,
+				},
+				Ready:   []flow.Ready{},
+				Rounds:  []flow.Round{},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: now.Add(-10 * time.Minute)}},
+			}},
+		},
+		{
+			ID: "T2", Title: "feat: T2 stale gate ask with conflict", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 200, BaseCommit: base, Branch: br2, Worktree: wt2, PR: 2,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: "worker-t2-gone",
+					SessionID: "sess-t2", Resumable: true,
+					State: flow.PhaseEnded, Result: flow.EndExited, EndedAt: endedAt,
+				},
+				Ready: []flow.Ready{{Head: c1}, {Head: c2}},
+				Rounds: []flow.Round{
+					{N: 1, Kind: flow.RoundFull, Head: c2, Verdict: flow.VerdictPass},
+					{N: 2, Kind: flow.RoundFull, Head: c2, Verdict: flow.VerdictPass},
+				},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: endedAt.Add(-time.Minute)}},
+			}},
+		},
+	}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(st.Asks) != 1 || st.Asks[0].Status != flow.AskStatusCancelled {
+		t.Fatalf("stale gate ask = %+v, want cancelled", st.Asks)
+	}
+	if st.Tasks[1].Attempts[0].RunID != "" {
+		t.Fatalf("T2 launched a second live worker in the same pass at max_running=1: run_id=%q", st.Tasks[1].Attempts[0].RunID)
+	}
+	if st.Tasks[1].LastRow != "N32" || st.Tasks[1].HoldWhy != "no slot is free" {
+		t.Errorf("T2 after pass = row:%q hold:%q, want N32 / %q", st.Tasks[1].LastRow, st.Tasks[1].HoldWhy, "no slot is free")
+	}
+}
+
+// TestClockAdvancePastBackoffRespectsMaxRunning checks that a task still in
+// worker restart back-off during candidate selection (t0+59s) cannot launch
+// over max_running when the clock crosses the 1m back-off deadline before
+// actTaskLocked runs (t0+61s).
+func TestClockAdvancePastBackoffRespectsMaxRunning(t *testing.T) {
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+	paths := testPaths(t)
+	repo, base := initGitRepoWithRemote(t)
+	githubOrigin(t, repo)
+	bindRepoFakeGH(t, repo)
+
+	t0 := time.Date(2026, 11, 24, 10, 10, 0, 0, time.UTC)
+	eng := newTestEngine(t, paths, client)
+	eng.Now = func() time.Time { return t0.Add(59 * time.Second) }
+	if err := eng.Start(repo, "Clock advance past backoff respects max_running", 1); err != nil {
+		t.Fatal(err)
+	}
+	id := eng.projectDirs()[0].Name()
+	srv.Add(hc.Terminal{
+		Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live",
+		Labels: testCoordLabels(id, "run-elsewhere"),
+		Status: &hc.Status{App: "claude-code", State: "working"},
+	})
+
+	wt1, br1, _ := makeSlotWorktree(t, ctx, paths, repo, id, "T1", "t1.go")
+	wt2, br2, _ := makeSlotWorktree(t, ctx, paths, repo, id, "T2", "t2.go")
+
+	w1, err := startRun(ctx, client, world.RunSpec{Name: "worker-t1-live", Cwd: wt1, Argv: []string{"sh"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setTerminalStatusAt(t, srv, client, w1, "working", t0)
+
+	st, err := LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	st.Project.RunID = "coord-elsewhere"
+	st.Settings.EnsureBackoffMinutes = 1
+	st.Tasks = []flow.Task{
+		{
+			ID: "T1", Title: "feat: T1 holding single slot", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 200, BaseCommit: base, Branch: br1, Worktree: wt1, RunID: w1,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: w1,
+					State: flow.PhaseWorking, Status: "working", StatusSince: t0, StatusReported: true,
+				},
+				Ready:   []flow.Ready{},
+				Rounds:  []flow.Round{},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: t0.Add(-5 * time.Minute)}},
+			}},
+		},
+		{
+			ID: "T2", Title: "feat: T2 crossing restart backoff", EstimateLines: 50,
+			Attempts: []flow.Attempt{{
+				SizeCap: 200, BaseCommit: base, Branch: br2, Worktree: wt2,
+				Run: &flow.RunRecord{
+					Role: flow.RoleWorker, CLI: "claude", Address: "worker-t2-gone",
+					SessionID: "sess-t2", Resumable: true,
+					State: flow.PhaseEnded, Result: flow.EndExited, EndedAt: t0,
+				},
+				Ready:   []flow.Ready{},
+				Rounds:  []flow.Round{},
+				Accepts: []flow.Accept{},
+				Acts:    []flow.Act{{Key: flow.AskStartWorker, Result: "done", At: t0.Add(-5 * time.Minute)}},
+			}},
+		},
+	}
+	if err := SaveState(paths.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+
+	// Candidate selection sees t0+59s (inside 1m back-off); actTaskLocked sees
+	// t0+61s (past 1m back-off).
+	clock := t0.Add(59 * time.Second)
+	eng.Now = func() time.Time {
+		var pcs [8]uintptr
+		frames := runtime.CallersFrames(pcs[:runtime.Callers(2, pcs[:])])
+		for {
+			f, more := frames.Next()
+			if strings.HasSuffix(f.Function, ".actTaskLocked") {
+				clock = t0.Add(61 * time.Second)
+				break
+			}
+			if !more {
+				break
+			}
+		}
+		return clock
+	}
+
+	eng.passProject(ctx, id, false)
+
+	st, err = LoadState(paths.State(id))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if st.Tasks[1].Attempts[0].RunID != "" {
+		t.Fatalf("T2 launched a second live worker after clock crossed back-off at max_running=1: run_id=%q", st.Tasks[1].Attempts[0].RunID)
+	}
+	if st.Tasks[1].HoldWhy != "no slot is free" {
+		t.Errorf("T2 HoldWhy = %q, want %q (row=%q)", st.Tasks[1].HoldWhy, "no slot is free", st.Tasks[1].LastRow)
 	}
 }

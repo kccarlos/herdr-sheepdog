@@ -235,6 +235,21 @@ func (g *Git) run(ctx context.Context, dir, command string, args []string, env m
 	return r, nil
 }
 
+// Stalled reports whether folder has an open local-git stall episode.
+func (g *Git) Stalled(folder string) bool {
+	if g == nil || folder == "" {
+		return false
+	}
+	repo, err := absolutePath(folder)
+	if err != nil {
+		repo = filepath.Clean(folder)
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	_, active := g.episodes[repo]
+	return active
+}
+
 // TakeNoSpace reports and clears whether a git call on folder hit ENOSPC.
 func (g *Git) TakeNoSpace(folder string) bool {
 	repo, err := absolutePath(folder)

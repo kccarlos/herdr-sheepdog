@@ -202,3 +202,59 @@ func TestGitRepositoryBackoffEpisode(t *testing.T) {
 		t.Fatalf("episode events = %v, want %v", events, want)
 	}
 }
+
+// Trial finding 2 (KB-ENV-4, KB-ENV-5):
+// Git.Stalled reports whether a project folder has an open local-git stall
+// episode: false at first, true after a local git timeout (shared by a
+// worktree via GitRepository, without clearing on read), and false after a
+// later git call answers. Nil-safe.
+func TestGitStalledFollowsEpisode(t *testing.T) {
+	repo, wt := t.TempDir(), t.TempDir()
+	var nilGit *Git
+	if nilGit.Stalled(repo) {
+		t.Fatal("nil *Git.Stalled must return false")
+	}
+
+	srv := hctest.New(t)
+	stalled := true
+	srv.OnExec = func(hc.ExecParams) (hc.ExecResult, error) {
+		if stalled {
+			return hc.ExecResult{TimedOut: true}, nil
+		}
+		code := 0
+		return hc.ExecResult{Code: &code}, nil
+	}
+	now := time.Now()
+	g := NewGit(hc.NewClient(srv.Path), func() time.Time { return now }, nil)
+
+	if g.Stalled(repo) {
+		t.Fatal("expected Stalled(repo) == false before any git timeout")
+	}
+
+	// A local git timeout in a worktree opens the episode on the parent repo.
+	ctx := GitRepository(context.Background(), repo)
+	if _, err := g.Run(ctx, wt, "status"); !GitTimedOut(err) {
+		t.Fatalf("expected local git timeout in worktree, got %v", err)
+	}
+	if !g.Stalled(repo) {
+		t.Fatal("expected Stalled(repo) == true after local git timeout in worktree")
+	}
+	if !g.Stalled(repo) {
+		t.Fatal("Stalled(repo) must not clear the episode on read")
+	}
+
+	// Cooldown expiry alone does not close the episode until a git call answers.
+	now = now.Add(gitBackoff)
+	if !g.Stalled(repo) {
+		t.Fatal("expected Stalled(repo) == true until a git call answers")
+	}
+
+	// A later git answer closes the episode.
+	stalled = false
+	if _, err := g.Run(ctx, wt, "status"); err != nil {
+		t.Fatalf("expected recovery git call to succeed, got %v", err)
+	}
+	if g.Stalled(repo) {
+		t.Fatal("expected Stalled(repo) == false after a git call answered")
+	}
+}
