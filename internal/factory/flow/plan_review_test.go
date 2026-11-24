@@ -11,6 +11,8 @@ import (
 // precedence, and J16's placement directly below J13.
 func TestJ16PlanReviewProjectRows(t *testing.T) {
 	def := DefaultSettings()
+	off := def
+	off.PlanReviewRounds = 0
 	on := def
 	on.PlanReviewRounds = 1
 	idleCoord := &RunRecord{ID: "r1", State: PhaseIdle, StartedAt: now, LastTurnEnd: now, Turn: 1}
@@ -23,6 +25,12 @@ func TestJ16PlanReviewProjectRows(t *testing.T) {
 		return ProjectIn{Project: Project{Started: true, Run: run, PlanReviews: prs}, Tasks: tasks, Settings: s, Now: now, PlanReviewerReady: ready}
 	}
 	tStart, tVerdict := now.Add(-20*time.Minute), now.Add(-10*time.Minute)
+	bound := 2 * time.Duration(on.HeartbeatMinutes) * time.Minute
+	mkFresh := func(tasks []Task, prs ...PlanReview) ProjectIn {
+		in := mk(idleCoord, tasks, on, true, prs...)
+		in.CoordLastWakeAt = now // keep J13 quiet so J16 is tested directly with a live, idle coordinator
+		return in
+	}
 	cases := []struct {
 		name    string
 		in      ProjectIn
@@ -31,13 +39,16 @@ func TestJ16PlanReviewProjectRows(t *testing.T) {
 	}{
 		{"start when candidate ready and coord idle", mk(idleCoord, []Task{unrev}, on, true), "J16", []string{AskStartPlanReviewer}},
 		{"start after prior review accepted", mk(idleCoord, []Task{openTask, unrev}, on, true, PlanReview{N: 1, Tasks: []string{"T0"}, Verdict: VerdictPass, Started: tStart, At: tVerdict, Accepted: tVerdict}), "J16", []string{AskStartPlanReviewer}},
-		{"accept when plan_review_rounds is 0 now", mk(idleCoord, []Task{unrev}, def, true), "J16", []string{AskAcceptPlan}},
+		{"accept when plan_review_rounds is 0 now", mk(idleCoord, []Task{unrev}, off, true), "J16", []string{AskAcceptPlan}},
 		{"accept when no candidate is ready", mk(idleCoord, []Task{unrev}, on, false), "J16", []string{AskAcceptPlan}},
 		{"accept when every finding is closed", mk(idleCoord, []Task{unrev}, on, true, PlanReview{N: 1, Tasks: []string{"T1"}, Verdict: VerdictChanges, Started: tStart, At: tVerdict, Findings: []PlanFinding{{Kind: "shrink", Task: "T1", Why: "broad", Closed: "amended"}}}), "J16", []string{AskAcceptPlan}},
 		{"accept when every held task was dropped", mk(idleCoord, []Task{openTask, droppedHeld}, on, true, PlanReview{N: 1, Tasks: []string{"T1"}, Verdict: VerdictChanges, Started: tStart, At: tVerdict, Findings: []PlanFinding{{Kind: "delete", Task: "T1", Why: "opt", Closed: "dropped"}}}), "J16", []string{AskAcceptPlan}},
 		{"no match while a finding is open", mk(idleCoord, []Task{unrev}, on, true, PlanReview{N: 1, Tasks: []string{"T1"}, Verdict: VerdictChanges, Started: tStart, At: tVerdict, Findings: []PlanFinding{{Kind: "delete", Task: "T1", Why: "opt"}}}), "J14", nil},
+		{"time bound not one pass earlier (live idle coord)", mkFresh([]Task{unrev}, PlanReview{N: 1, Tasks: []string{"T1"}, Verdict: VerdictChanges, Started: now.Add(-bound - time.Minute), At: now.Add(-bound + time.Minute), Findings: []PlanFinding{{Kind: "shrink", Task: "T1", Why: "broad"}}}), "J14", nil},
+		{"time bound at 2x heartbeat_minutes accepts", mkFresh([]Task{unrev}, PlanReview{N: 1, Tasks: []string{"T1"}, Verdict: VerdictChanges, Started: now.Add(-bound - time.Minute), At: now.Add(-bound), Findings: []PlanFinding{{Kind: "shrink", Task: "T1", Why: "broad"}}}), "J16", []string{AskAcceptPlan}},
 		{"no match while a plan reviewer run is in flight", mk(idleCoord, []Task{unrev}, on, true, PlanReview{N: 1, Tasks: []string{"T1"}, Started: tStart, Run: &ReviewRun{Kind: RoundPlan, Round: 1, RunID: "plan-1"}}), "J14", nil},
 		{"J4 finished project beats J16 and starts nothing", mk(idleCoord, []Task{droppedHeld}, on, true), "J4", []string{AskFinalJournal}},
+		{"J4 finished project beats J16 time bound", mkFresh([]Task{droppedHeld}, PlanReview{N: 1, Tasks: []string{"T1"}, Verdict: VerdictChanges, Started: now.Add(-bound - time.Minute), At: now.Add(-bound), Findings: []PlanFinding{{Kind: "delete", Task: "T1", Why: "opt"}}}), "J4", []string{AskFinalJournal}},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -101,11 +112,11 @@ func TestN10UnreviewedReasonAndOrder(t *testing.T) {
 	}
 }
 
-// TestPlanReviewSettingsRangeChangedAndRole checks plan.md 11.1 settings and RolePlanReviewer.
+// TestPlanReviewSettingsRangeChangedAndRole checks plan.md 11.1/11.3 settings and RolePlanReviewer.
 func TestPlanReviewSettingsRangeChangedAndRole(t *testing.T) {
 	def := DefaultSettings()
-	if def.PlanReviewRounds != 0 {
-		t.Fatalf("DefaultSettings().PlanReviewRounds = %d, want 0 (until 11.3, P8)", def.PlanReviewRounds)
+	if def.PlanReviewRounds != 1 {
+		t.Fatalf("DefaultSettings().PlanReviewRounds = %d, want 1 (11.3, P6/P8)", def.PlanReviewRounds)
 	}
 	if slices.ContainsFunc(def.Changed(), func(s string) bool { return strings.HasPrefix(s, "plan_review_rounds") }) {
 		t.Errorf("default Changed() unexpectedly lists plan_review_rounds: %v", def.Changed())
@@ -121,9 +132,9 @@ func TestPlanReviewSettingsRangeChangedAndRole(t *testing.T) {
 		}
 	}
 	s := DefaultSettings()
-	s.PlanReviewRounds = 1
-	if !slices.Contains(s.Changed(), "plan_review_rounds 1") {
-		t.Errorf("Changed() with PlanReviewRounds=1 = %v, want plan_review_rounds 1", s.Changed())
+	s.PlanReviewRounds = 0
+	if !slices.Contains(s.Changed(), "plan_review_rounds 0") {
+		t.Errorf("Changed() with PlanReviewRounds=0 = %v, want plan_review_rounds 0", s.Changed())
 	}
 	if RolePlanReviewer != "plan_reviewer" {
 		t.Fatalf("RolePlanReviewer = %q, want plan_reviewer", RolePlanReviewer)
@@ -165,6 +176,24 @@ func TestJ15PlanReviewProjectRows(t *testing.T) {
 		{"all tasks dropped (beats J4)", "J15", []string{AskStopPlanReviewer}, mk(idle, dropped, nil, time.Minute, RunWorking)},
 		{"beats J3 stopping alert", "J15", []string{AskStopPlanReviewer}, mk(nil, unrev, disk, time.Minute, RunIdle)},
 		{"working under limit stays J14", "J14", nil, mk(idle, unrev, nil, time.Minute, RunWorking)},
+		{"report accepted pass still has terminal", "J15", []string{AskStopPlanReviewer}, ProjectIn{
+			Project:  Project{Started: true, Run: idle, PlanReviews: []PlanReview{{N: 1, Tasks: []string{"T1"}, Verdict: VerdictPass, At: now, Accepted: now, Run: &ReviewRun{Kind: RoundPlan, Round: 1, RunID: "plan-1"}}}},
+			Tasks:    []Task{{ID: "T1", Title: "feat: accepted"}},
+			Settings: on, Now: now, PlanRun: Run{State: RunWorking},
+		}},
+		{"report accepted changes still has terminal", "J15", []string{AskStopPlanReviewer}, ProjectIn{
+			Project:  Project{Started: true, Run: idle, PlanReviews: []PlanReview{{N: 1, Tasks: []string{"T1"}, Verdict: VerdictChanges, At: now, Findings: []PlanFinding{{Kind: "delete", Task: "T1", Why: "opt"}}, Run: &ReviewRun{Kind: RoundPlan, Round: 1, RunID: "plan-1"}}}},
+			Tasks:    unrev, Settings: on, Now: now, PlanRun: Run{State: RunIdle},
+		}},
+		{"report accepted beats J3 stopping alert", "J15", []string{AskStopPlanReviewer}, ProjectIn{
+			Project:  Project{Started: true, Alerts: disk, PlanReviews: []PlanReview{{N: 1, Tasks: []string{"T1"}, Verdict: VerdictPass, At: now, Accepted: now, Run: &ReviewRun{Kind: RoundPlan, Round: 1, RunID: "plan-1"}}}},
+			Tasks:    []Task{{ID: "T1", Title: "feat: accepted"}},
+			Settings: on, Now: now, PlanRun: Run{State: RunWorking},
+		}},
+		{"report accepted with run id cleared stays J14", "J14", nil, ProjectIn{
+			Project:  Project{Started: true, Run: idle, PlanReviews: []PlanReview{{N: 1, Tasks: []string{"T1"}, Verdict: VerdictChanges, At: now, Findings: []PlanFinding{{Kind: "delete", Task: "T1", Why: "opt"}}, Run: &ReviewRun{Kind: RoundPlan, Round: 1}}}},
+			Tasks:    unrev, Settings: on, Now: now,
+		}},
 	} {
 		if r, d := FirstMatch(ProjectRows, c.in); r.ID != c.wantRow || !slices.Equal(d.Asked, c.wantAsk) {
 			t.Errorf("%s: got (%s, asked=%v, why=%q), want (%s, asked=%v)", c.name, r.ID, d.Asked, d.Why, c.wantRow, c.wantAsk)
@@ -179,5 +208,30 @@ func TestJ15PlanReviewProjectRows(t *testing.T) {
 	swapped[i15], swapped[i3] = swapped[i3], swapped[i15]
 	if r, _ := FirstMatch(swapped, mk(nil, unrev, disk, time.Minute, RunIdle)); r.ID != "J3" {
 		t.Errorf("swapped J15/J3: got %s, want J3", r.ID)
+	}
+}
+
+// TestPlanReviewCandidatesFallback checks plan.md 11.3 (P7): when models.plan_reviewer
+// is not set, Candidates(RolePlanReviewer, ...) falls back to the project's reviewer list.
+func TestPlanReviewCandidatesFallback(t *testing.T) {
+	def := DefaultSettings()
+	if got, want := Candidates(RolePlanReviewer, Task{}, def), DefaultModels(def)[RoleReviewer]; !slices.Equal(got, want) {
+		t.Errorf("default fallback = %+v, want %+v", got, want)
+	}
+	codexS := DefaultSettings()
+	codexS.SecondReviewer = "codex"
+	if got, want := Candidates(RolePlanReviewer, Task{}, codexS), DefaultModels(codexS)[RoleReviewer]; !slices.Equal(got, want) {
+		t.Errorf("codex fallback = %+v, want %+v", got, want)
+	}
+	agyRevs := []Candidate{{CLI: "agy", Model: "gemini-4-neon-high", Effort: "high"}, {CLI: "agy", Model: "gemini-4-carbon-medium", Effort: "medium"}}
+	custom := DefaultSettings()
+	custom.Models = map[string][]Candidate{RoleReviewer: agyRevs}
+	if got := Candidates(RolePlanReviewer, Task{}, custom); !slices.Equal(got, agyRevs) {
+		t.Errorf("project reviewer fallback = %+v, want %+v", got, agyRevs)
+	}
+	explicit := []Candidate{{CLI: "claude", Model: "opus", Effort: "high"}}
+	custom.Models[RolePlanReviewer] = explicit
+	if got := Candidates(RolePlanReviewer, Task{}, custom); !slices.Equal(got, explicit) {
+		t.Errorf("explicit plan_reviewer = %+v, want %+v", got, explicit)
 	}
 }
