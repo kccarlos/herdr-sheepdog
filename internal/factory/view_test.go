@@ -1937,6 +1937,19 @@ func TestTaskStepsNoPhantomReviewRoundAfterBarMet(t *testing.T) {
 					Review: &flow.ReviewRun{Round: 2, Kind: flow.RoundFull, Head: "c1", Run: &flow.RunRecord{State: flow.PhaseEnded, Result: flow.EndExited}},
 				}},
 			},
+			{
+				// Live capture (14.8 live check, 06:36:28–06:36:41): round 2's verdict is recorded
+				// while its reviewer run is still idle and not yet stopped by the engine.
+				ID: "T-idle-run", Title: "two passes, round-2 reviewer still idle", LastRow: "N29",
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0", PR: 3, Ready: []flow.Ready{{Head: "c1"}},
+					Rounds: []flow.Round{
+						{N: 1, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictPass},
+						{N: 2, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictPass},
+					},
+					Review: &flow.ReviewRun{Round: 2, Kind: flow.RoundFull, Head: "c1", RunID: "t-rev2", Run: &flow.RunRecord{State: flow.PhaseIdle}},
+				}},
+			},
 		},
 	}
 	for _, tv := range GraphViewOf(st, nil).Tasks {
