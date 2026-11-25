@@ -26,9 +26,9 @@ function matchPart(el, tok) {
   while (r) {
     if (r[0] === '#' && (m = r.match(/^#([\w-]+)/))) { if (el.id !== m[1]) return false; }
     else if (r[0] === '.' && (m = r.match(/^\.([\w-]+)/))) { if (!el.className.split(/\s+/).includes(m[1])) return false; }
-    else if (r[0] === '[' && (m = r.match(/^\[([\w:-]+)(?:=(?:"([^"]*)"|'([^']*)'|([^\]]*)))?\]/))) {
-      const a = m[1].toLowerCase(), w = m[2] ?? m[3] ?? m[4];
-      if (w === undefined ? (a === 'open' ? !el.open : a === 'disabled' ? !el.disabled : a === 'hidden' ? !el.hidden : !el.hasAttribute(a)) : el.getAttribute(a) !== w) return false;
+    else if (r[0] === '[' && (m = r.match(/^\[([\w:-]+)(?:(\^?=)(?:"([^"]*)"|'([^']*)'|([^\]]*)))?\]/))) {
+      const a = m[1].toLowerCase(), op = m[2], w = m[3] ?? m[4] ?? m[5];
+      if (w === undefined ? (a === 'open' ? !el.open : a === 'disabled' ? !el.disabled : a === 'hidden' ? !el.hidden : !el.hasAttribute(a)) : op === '^=' ? !(el.getAttribute(a) || '').startsWith(w) : el.getAttribute(a) !== w) return false;
     } else return false;
     r = r.slice(m[0].length);
   }
