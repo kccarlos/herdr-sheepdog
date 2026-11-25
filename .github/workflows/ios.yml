@@ -41,7 +41,7 @@ env:
   BUILD_ARTIFACT: ios-build.tar.zst
   # Uploaded by the building job when the build fails, so the others stop
   # waiting for it.
-  BUILD_FAILED: ios-build-failed.txt
+  BUILD_FAILED: ios-build-failed-${{ github.run_attempt }}.txt
 
 jobs:
   plan:
@@ -116,6 +116,8 @@ jobs:
       matrix: ${{ fromJSON(needs.plan.outputs.matrix) }}
     env:
       JOB_NAME: ${{ matrix.name }}
+      JOB_TOTAL: ${{ strategy.job-total }}
+      CLAIM_PREFIX: ios-build-claim-${{ github.run_attempt }}-
       # This run's artifacts, through the Actions runtime API with the job
       # token actions/download-artifact itself uses (no repository token);
       # the github-script steps below run it.
@@ -162,8 +164,9 @@ jobs:
           xcodebuild -version
 
       # Who builds: each job that finds no build yet leaves a claim (a tiny
-      # artifact), and the oldest claim wins. Two jobs that claim at the
-      # same moment can both build; the second upload replaces the first.
+      # artifact, scoped to this run attempt), and the oldest claim wins; a lone
+      # matrix job skips claiming and builds. Two jobs that claim at the same
+      # moment can both build; the second upload replaces the first.
       - name: Look for a build
         id: look
         uses: actions/github-script@v9
@@ -174,14 +177,14 @@ jobs:
             core.setOutput('built', String(artifacts.some(a => a.name === process.env.BUILD_ARTIFACT)))
 
       - name: Claim the build
-        if: steps.look.outputs.built != 'true'
-        run: echo "$JOB_NAME" > "$RUNNER_TEMP/ios-build-claim-$JOB_NAME.txt"
+        if: steps.look.outputs.built != 'true' && strategy.job-total > 1
+        run: echo "$JOB_NAME" > "$RUNNER_TEMP/${CLAIM_PREFIX}$JOB_NAME.txt"
 
       - name: Upload the claim
-        if: steps.look.outputs.built != 'true'
+        if: steps.look.outputs.built != 'true' && strategy.job-total > 1
         uses: actions/upload-artifact@v7
         with:
-          path: ${{ runner.temp }}/ios-build-claim-${{ matrix.name }}.txt
+          path: ${{ runner.temp }}/${{ env.CLAIM_PREFIX }}${{ matrix.name }}.txt
           archive: false
           retention-days: 1
 
@@ -191,13 +194,20 @@ jobs:
         uses: actions/github-script@v9
         with:
           script: |
+            if (Number(process.env.JOB_TOTAL) <= 1) { core.info('this job builds'); return core.setOutput('build', 'true') }
             const list = new (Object.getPrototypeOf(async function () {}).constructor)(process.env.LIST_ARTIFACTS)
-            const artifacts = await list()
-            const first = artifacts.filter(a => a.name.startsWith('ios-build-claim-'))
+            const prefix = process.env.CLAIM_PREFIX, mine = `${prefix}${process.env.JOB_NAME}.txt`
+            let artifacts = []
+            for (const end = Date.now() + 60_000; ;) {
+              artifacts = await list()
+              if (artifacts.some(a => a.name === process.env.BUILD_ARTIFACT || a.name === mine) || Date.now() > end) break
+              await new Promise(resolve => setTimeout(resolve, 1000))
+            }
+            const built = artifacts.some(a => a.name === process.env.BUILD_ARTIFACT)
+            const first = artifacts.filter(a => a.name.startsWith(prefix))
               .sort((a, b) => Number(a.database_id) - Number(b.database_id))[0]
-            const mine = `ios-build-claim-${process.env.JOB_NAME}.txt`
-            const build = !artifacts.some(a => a.name === process.env.BUILD_ARTIFACT) && first !== undefined && first.name === mine
-            core.info(build ? 'this job builds' : `${first ? first.name : 'another job'} builds`)
+            const build = !built && (!first || first.name === mine)
+            core.info(build ? 'this job builds' : built ? `${process.env.BUILD_ARTIFACT} already uploaded` : `${first.name} builds`)
             core.setOutput('build', String(build))
 
       # The building job: the checkout, the daemon, the project and the
