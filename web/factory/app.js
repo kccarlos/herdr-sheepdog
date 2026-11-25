@@ -2,7 +2,7 @@
 // views and delegates ask answers, setting proposals and browser pairing to asks.js & settings.js.
 import { esc, isOwnerAsk, renderAskCardsHTML, createAskFlow, browserAskDeps, OK_ICO } from './asks.js';
 import { renderSettingsHTML, proposeSetting, parseModelCandidates } from './settings.js';
-import { renderNewProjectHTML, loadNewProject, checkProject, startProject, EMPTY_CARD_HTML, PLUS_ICO } from './project.js';
+import { renderNewProjectHTML, renderProjectActionsHTML, loadNewProject, checkProject, startProject, stopProject, projectState, EMPTY_CARD_HTML, PLUS_ICO } from './project.js';
 import { renderMarkdown } from '../static/markdown.js';
 import { goalTitle } from './goal.js';
 
@@ -17,17 +17,22 @@ const STAGE = { owner_gate: ['needs your approval', 'blocked', true], owner_answ
 const ORDER = ['owner_gate', 'owner_answer', 'blocked_or_failed', 'ci', 'working', 'waiting_on_dep', 'queued'];
 // A stage this page does not know yet shows under its raw name rather than vanishing.
 const stage = (t) => STAGE[t.stage] || [t.stage || 'unknown', 'idle'];
-let data = null, down = false, lastOK = 0, timer = 0, busy = false, again = false, curNarrow = true, npSeq = 0, justStarted = null, boardNotice = null, boardNoticeTimer = 0;
+let data = null, down = false, lastOK = 0, timer = 0, busy = false, again = false, curNarrow = true, npSeq = 0, paSeq = 0, justStarted = null, boardNotice = null, boardNoticeTimer = 0;
 const started = Date.now(), noticeTimers = new Map();
 const mq = globalThis.matchMedia?.('(max-width: 760px)') || null;
 const askFlow = createAskFlow(browserAskDeps());
 const askUI = { busyId: '', error: '', errorAskId: '', needsPairing: false, pairDone: false, pairMessage: '', pairError: '', pairCode: '', pairingBusy: false, pending: null };
 const setUI = { project: '', rows: null, error: '', busy: '', edits: {}, errors: {}, fixes: {}, notices: {}, editor: null, copied: '' };
 const emptyNP = () => ({ open: false, rows: null, spaces: null, spacesError: false, folder: '', goal: '', notGit: false, goalErr: false, edits: {}, errors: {}, fixes: {}, editor: null, checks: null, hasChecked: false, checking: false, checkError: '', starting: false, startError: '' });
-const npUI = emptyNP();
+const emptyPA = () => ({ mode: '', goal: '', busy: '', error: '', checks: null });
+const npUI = emptyNP(), paUI = emptyPA();
 const pairRow = () => askUI.pending?.kind === 'setting' ? askUI.pending.name : (askUI.pending?.row || '');
 const setState = () => ({ ...setUI, pairRow: pairRow(), askBusyId: askUI.busyId, pairState: askUI });
 const npState = () => ({ ...npUI, projects: data?.projects || [], backProject: data?.p || '', copied: setUI.copied, pairState: askUI });
+const paState = () => ({ ...paUI, copied: setUI.copied, pairState: askUI });
+const paBar = () => document.querySelector('[aria-label="This project"]');
+const paRoot = () => (curNarrow ? $('tasks-top') : $('main'));
+const sortedTasks = () => (data?.graph ? [...data.graph.tasks].sort((a, b) => a.layer - b.layer) : []);
 const npSet = () => ({ ...npUI.edits });
 const clearPair = () => Object.assign(askUI, { needsPairing: false, pairDone: false, pending: null, pairError: '', pairCode: '' });
 const findRow = (n, root = $('settings')) => n && [...root.querySelectorAll('[data-row]')].find((x) => x.dataset.row === n);
@@ -78,6 +83,8 @@ async function poll() {
     if (setUI.project !== p) {
       noticeTimers.forEach(clearTimeout); noticeTimers.clear();
       Object.assign(setUI, { project: p, rows: null, error: '', busy: '', edits: {}, errors: {}, fixes: {}, notices: {}, editor: null, copied: '' });
+      ++paSeq; Object.assign(paUI, emptyPA());
+      if (askUI.pending?.kind === 'project') clearPair();
     }
     let graph = null, log = [], problem = '';
     if (p) {
@@ -118,7 +125,7 @@ async function poll() {
 
 // set replaces an element's HTML only when it changed, then reopens the <details>
 // that were open and puts keyboard focus back on the same control.
-const key = (e) => e.id ? `${e.tagName}#${e.id}` : [e.tagName, e.dataset?.setting || e.dataset?.sugg || e.getAttribute('href') || e.dataset?.askId || e.closest?.('[data-row]')?.dataset.row || e.closest?.('[data-ask-id]')?.dataset.askId || '', e.dataset?.option || e.dataset?.copy || e.getAttribute('aria-label') || (e.dataset?.npCheck && 'np-check') || (e.dataset?.npStart && 'np-start') || e.className || e.parentElement?.className || e.textContent?.slice(0, 24) || ''].join(':');
+const key = (e) => e.id ? `${e.tagName}#${e.id}` : [e.tagName, e.dataset?.setting || e.dataset?.sugg || e.dataset?.pa || e.getAttribute('href') || e.dataset?.askId || e.closest?.('[data-row]')?.dataset.row || e.closest?.('[data-ask-id]')?.dataset.askId || '', e.dataset?.option || e.dataset?.copy || e.getAttribute('aria-label') || (e.dataset?.npCheck && 'np-check') || (e.dataset?.npStart && 'np-start') || e.className || e.parentElement?.className || e.textContent?.slice(0, 24) || ''].join(':');
 function set(el, html) {
   if (el._html === html) return;
   const open = [...el.querySelectorAll('details[open]')].map(key);
@@ -141,7 +148,7 @@ function render() {
   $('skeleton').hidden = !waiting;
   $('board').hidden = waiting;
   if (waiting) return;
-  const tasks = data.graph ? [...data.graph.tasks].sort((a, b) => a.layer - b.layer) : [];
+  const tasks = sortedTasks();
   const t = !npUI.open && data.task && tasks.find((x) => x.ref === data.task), pr = data.projects.find((x) => x.id === data.p);
   const narrow = !t && !npUI.open && Boolean(mq ? mq.matches : globalThis.innerWidth <= 760);
   if (curNarrow !== narrow && $('main').after) {
@@ -155,7 +162,7 @@ function render() {
   $('settings').hidden = npUI.open || !!t || !pr || !!data.problem;
   $('settings').className = setUI.error ? 'card dashed' : 'card';
   if (!$('settings').hidden) set($('settings'), renderSettingsHTML(setUI.rows, data.asks, setState()));
-  set($('projects'), `<h2>projects</h2>${data.projects.length ? data.projects.map(projHTML).join('') + `<div class="ask-opts"><button type="button" class="ask-opt sm" data-new-project="1">${PLUS_ICO}New project</button></div>` : '<p class="muted">None yet.</p>'}`);
+  set($('projects'), `<h2>projects</h2> ${data.projects.length ? data.projects.map(projHTML).join(' ') + ` <div class="ask-opts"><button type="button" class="ask-opt sm" data-new-project="1">${PLUS_ICO}New project</button></div>` : '<p class="muted">None yet.</p>'}`);
   const asks = (data.asks || []).filter(isOwnerAsk);
   set($('asks'), `<div class="head"><h2>asks for you</h2>${asks.length ? `<span>${asks.length} open</span>` : ''}</div>${renderAskCardsHTML(asks, askUI)}`);
   const runs = tasks.filter((x) => x.terminal);
@@ -164,8 +171,8 @@ function render() {
 }
 
 const counts = (c = {}) => Object.entries(c).map(([k, n]) => `${n} ${(STAGE[k] || [k])[0]}`).join(' · ');
-const projHTML = (pr) => `<a class="proj" href="#${enc(pr.id)}"${pr.id === data.p ? ' aria-current="true"' : ''}><span class="proj-title">${esc(goalTitle(pr.goal, pr.id))}</span>` +
-  `<span class="muted">${pr.error ? esc(pr.error) : (pr.running ? 'running' : 'stopped') + (counts(pr.counts) ? ' · ' + esc(counts(pr.counts)) : '')}</span></a>`;
+const projHTML = (pr) => `<a class="proj" href="#${enc(pr.id)}"${pr.id === data.p ? ' aria-current="true"' : ''}><span class="proj-title">${esc(goalTitle(pr.goal, pr.id))}</span> ` +
+  `<span class="muted">${pr.error ? esc(pr.error) : esc(projectState(pr)) + (counts(pr.counts) ? ' · ' + esc(counts(pr.counts)) : '')}</span></a>`;
 
 function boardHTML(tasks, part) {
   const pr = data.projects.find((x) => x.id === data.p), done = tasks.filter((x) => x.stage === 'done');
@@ -174,7 +181,7 @@ function boardHTML(tasks, part) {
   else if (!pr) body = EMPTY_CARD_HTML;
   else {
     const title = goalTitle(pr.goal, pr.id), rawGoal = (pr.goal || '').trim();
-    top += `<p class="goal-title">${esc(title)}</p>` + (rawGoal && rawGoal !== title ? `<details class="goal-full"><summary>full project goal</summary><div class="md-body">${renderMarkdown(pr.goal)}</div></details>` : '');
+    top += `<p class="goal-title">${esc(title)}</p>` + (rawGoal && rawGoal !== title ? `<details class="goal-full"><summary>full project goal</summary><div class="md-body">${renderMarkdown(pr.goal)}</div></details>` : '') + ' ' + renderProjectActionsHTML(pr, paState());
     if (boardNotice?.project === pr.id) body += `<p class="set-ok" role="status">${OK_ICO}<span>${esc(boardNotice.text)}</span></p>`;
     if (!tasks.length) body += `<section class="card" aria-label="No tasks"><h2>no tasks yet</h2><p class="muted">The coordinator has not planned this project yet.</p></section>`;
     const other = [...new Set(tasks.map((x) => x.stage))].filter((s) => s !== 'done' && !ORDER.includes(s));
@@ -209,12 +216,14 @@ const logHTML = (lines, title, empty = 'Nothing logged yet.') => `<section class
 
 function taskHTML(t) {
   const [label, dot] = stage(t), kv = (k, v) => v ? `<div class="kv"><span>${k}</span><span>${esc(v)}</span></div>` : '';
+  const det = [t.last_rule && `rule ${t.last_rule}`, t.terminal && `run ${t.terminal}`, t.layer != null && `layer ${t.layer}`].filter(Boolean).join(' · ');
+  const verdictSub = t.rounds ? `review ${roundsDone(t)}` : (!t.last_rule ? 'No step logged for this task yet.' : '');
   return `<a class="back" href="#${enc(data.p)}">‹ board</a><div class="task-head"><div class="meta"><code>${esc(t.ref)}</code>` +
     `<span class="pill ${dot}"><span class="dot ${dot}" aria-hidden="true"></span>${esc(label)} · ${esc(t.why_waiting || label)}</span>` +
     `${t.terminal ? `<span>run ${esc(t.terminal)}</span>` : ''}</div><h1>${esc(t.title)}</h1></div><div class="cols"><div class="col-main">` +
     `${t.brief && t.brief.trim() ? `<section class="card" aria-label="Brief"><h2>brief</h2><div class="md-body">${renderMarkdown(t.brief)}</div></section>` : ''}` +
-    `<section class="card" aria-label="Verdict"><h2>the ladder says: ${esc(t.last_decision || 'nothing yet')}</h2><span class="muted">` +
-    `${t.last_rule ? `rule ${esc(t.last_rule)}` : 'No step logged for this task yet.'}${t.rounds ? ` · review ${roundsDone(t)}` : ''}</span></section>` +
+    `<section class="card" aria-label="Verdict"><h2>the ladder says: ${esc(t.last_decision || 'nothing yet')}</h2>${verdictSub ? `<span class="small muted">${esc(verdictSub)}</span>` : ''}` +
+    `${det ? `<details class="task-details"><summary>details</summary><p class="small muted">${esc(det)}</p></details>` : ''}</section>` +
     logHTML(data.log.filter((l) => l.task === t.ref), 'recent log', data.log.length ? 'No log lines for this task in the last 100.' : undefined) + `</div><aside><section class="card" aria-label="Who worked on it"><h2>agents</h2>` +
     kv('model', t.model || 'not started') + kv('waits on', t.why_waiting) + kv('after', t.after.join(', ')) + kv('unblocks', t.dependents.join(', ')) +
     kv('layer', String(t.layer)) + '</section></aside></div>';
@@ -266,8 +275,30 @@ async function submitAnswer(askId, option, inRow = '') {
 }
 
 async function openNewProject() {
-  const seq = ++npSeq; justStarted = null; Object.assign(npUI, emptyNP(), { open: true }); if (askUI.pending?.kind === 'start') clearPair(); render();
+  const seq = ++npSeq; justStarted = null; Object.assign(npUI, emptyNP(), { open: true }); if (askUI.pending?.kind === 'start' || askUI.pending?.kind === 'project') clearPair(); render();
   const loaded = await loadNewProject(get); if (seq === npSeq && npUI.open) { Object.assign(npUI, loaded); render(); }
+}
+async function runProjectAction(action, goalOverride) {
+  const pr = data?.projects.find((x) => x.id === data.p);
+  if (!pr) return;
+  const st = projectState(pr), goal = action === 'resume' ? (pr.goal ?? '') : (goalOverride !== undefined ? goalOverride : paUI.goal.trim());
+  if (action === 'newgoal' && !goal) { Object.assign(paUI, { error: 'Write a goal first.', checks: null }); render(); return $('pa-goal')?.focus({ preventScroll: true }); }
+  const seq = ++paSeq; Object.assign(paUI, { busy: action, error: '', checks: null }); if (!askUI.pairDone) clearPair(); render();
+  const res = await (action === 'stop' ? stopProject(askFlow, pr.id) : startProject(askFlow, pr.folder, goal)).catch((e) => ({ ok: false, message: e.message || 'Network error.' }));
+  if (seq !== paSeq) return;
+  paUI.busy = '';
+  if (res.ok) { clearPair(); Object.assign(paUI, emptyPA()); await poll(); return paBar()?.querySelector('button')?.focus({ preventScroll: true }); }
+  if (res.needsPairing) {
+    if (action === 'stop') paUI.mode = '';
+    Object.assign(askUI, { needsPairing: false, pairDone: false, pairMessage: res.message, pending: { kind: 'project', action, project: pr.id, goal: action === 'newgoal' ? goal : undefined } });
+    render(); return paBar()?.querySelector('input[name="code"]')?.focus({ preventScroll: true });
+  }
+  clearPair();
+  if (action === 'stop') paUI.mode = '';
+  if (Array.isArray(res.results)) Object.assign(paUI, { error: `Not started: a start check failed. Fix it, then press ${action === 'resume' ? 'Resume' : (st === 'finished' ? 'Reopen' : 'New goal')} again.`, checks: res.results });
+  else paUI.error = res.message || (action === 'stop' ? 'Could not stop project.' : 'Could not start project.');
+  render();
+  (action === 'newgoal' && !paUI.checks ? $('pa-goal') : paBar()?.querySelector('button'))?.focus({ preventScroll: true });
 }
 async function runCheck() {
   const seq = npSeq; Object.assign(npUI, { checking: true, checkError: '', startError: '', errors: {}, fixes: {} }); if (askUI.pending?.kind === 'start') clearPair(); render();
@@ -299,6 +330,13 @@ async function runStart() {
 }
 
 const syncEdit = (e) => {
+  if (e.target.id === 'pa-goal') {
+    const dirty = Boolean(paUI.error || paUI.checks || askUI.pending?.kind === 'project');
+    Object.assign(paUI, { goal: e.target.value, error: '', checks: null });
+    if (askUI.pending?.kind === 'project') clearPair();
+    if (dirty) render(); else paRoot()._html = boardHTML(sortedTasks(), curNarrow ? 'top' : '');
+    return;
+  }
   const inForm = Boolean(e.target.closest?.('[data-np-form]')), ctrl = e.target.closest?.('[data-setting]');
   if (inForm && (e.target.id === 'np-folder' || e.target.id === 'np-goal')) {
     const isF = e.target.id === 'np-folder', dirtyErr = isF ? (npUI.notGit || npUI.checks || npUI.checkError || npUI.startError || askUI.pending?.kind === 'start') : (npUI.goalErr || npUI.startError);
@@ -340,6 +378,9 @@ const syncEdit = (e) => {
 $('board').addEventListener('input', syncEdit);
 $('board').addEventListener('change', syncEdit);
 $('board').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && paUI.mode === 'stop' && e.target.closest?.('.pa-confirm')) {
+    e.preventDefault(); paUI.mode = ''; render(); return paBar()?.querySelector('button[data-pa="stop"]')?.focus({ preventScroll: true });
+  }
   const ctrl = e.key === 'Enter' && !e.target.closest?.('[data-np-form]') && e.target.closest?.('input[data-setting]'), n = ctrl?.dataset.setting;
   if (ctrl && setUI.edits[n] !== undefined) {
     e.preventDefault();
@@ -351,6 +392,20 @@ $('board').addEventListener('click', (e) => {
   if (e.target.closest('button[data-new-project]')) return openNewProject();
   if (e.target.closest('a[data-np-back]')) { e.preventDefault(); closeNewProject(); return render(); }
   if (npUI.open && e.target.closest('a.proj')) { closeNewProject(); return render(); }
+  const pa = e.target.closest('button[data-pa]');
+  if (pa && !paUI.busy) {
+    const a = pa.dataset.pa;
+    if (a === 'stop' || a === 'newgoal') {
+      if (a === 'newgoal' && paUI.mode === 'newgoal') return $('pa-goal')?.focus({ preventScroll: true });
+      Object.assign(paUI, emptyPA(), { mode: a }); if (askUI.pending?.kind === 'project') clearPair(); render();
+      return (a === 'stop' ? paBar()?.querySelector('button[data-pa="stop-no"]') : $('pa-goal'))?.focus({ preventScroll: true });
+    }
+    if (a === 'stop-no' || a === 'ng-cancel') {
+      Object.assign(paUI, emptyPA()); if (askUI.pending?.kind === 'project') clearPair(); render();
+      return paBar()?.querySelector(`button[data-pa="${a === 'stop-no' ? 'stop' : 'newgoal'}"]`)?.focus({ preventScroll: true });
+    }
+    if (a === 'stop-yes' || a === 'resume' || a === 'ng-go') return runProjectAction(a === 'stop-yes' ? 'stop' : (a === 'resume' ? 'resume' : 'newgoal'));
+  }
   const sugg = e.target.closest('button[data-sugg]');
   if (sugg) { Object.assign(npUI, { folder: sugg.dataset.sugg, notGit: sugg.dataset.suggGit !== '1', checks: null, checkError: '', startError: '' }); if (askUI.pending?.kind === 'start') clearPair(); return render(); }
   if (e.target.closest('button[data-np-check]') && !npUI.checking && !npUI.starting) return runCheck();
@@ -397,10 +452,11 @@ $('board').addEventListener('submit', async (e) => {
   Object.assign(askUI, { pairingBusy: true, pairError: '', pairCode: code }); render();
   const res = await askFlow.pairWithCode(code).catch((err) => ({ ok: false, message: err.message || 'Pairing failed.' }));
   askUI.pairingBusy = false;
-  if (!res.ok) { askUI.pairError = res.message || 'Pairing failed.'; render(); return (askUI.pending?.kind === 'start' ? $('main') : pairRow() ? $('settings') : $('asks')).querySelector('input[name="code"]')?.focus({ preventScroll: true }); }
+  if (!res.ok) { askUI.pairError = res.message || 'Pairing failed.'; render(); return (askUI.pending?.kind === 'start' ? $('main') : askUI.pending?.kind === 'project' ? paBar() : pairRow() ? $('settings') : $('asks'))?.querySelector('input[name="code"]')?.focus({ preventScroll: true }); }
   const pending = askUI.pending;
   Object.assign(askUI, { pairDone: Boolean(pending), pairError: '', pairCode: '' });
   if (pending?.kind === 'start') await runStart();
+  else if (pending?.kind === 'project') await runProjectAction(pending.action, pending.goal);
   else if (pending?.kind === 'setting') await submitSetting(pending.project, pending.name, pending.value);
   else if (pending?.askId) await submitAnswer(pending.askId, pending.option, pending.row || '');
   else { clearPair(); render(); await poll(); }
