@@ -1085,7 +1085,7 @@ Every surface reads a **view**: a pure function of the stored state. The JSON sh
 | ID | Rule |
 |---|---|
 | V1 | A shape the owner's surfaces read is defined once, by the JSON tags of the Go type that the engine returns. No hand-kept copy of the shapes (a fixture file or a contract document) is kept beside the code |
-| V2 | Owner contract v1 (the Python engine's boundary) is superseded. `docs/dev/factory/owner-contract.md` is a pointer to this section, 12.3, 7.1 and section 6. Each refusal case of its old fixture is covered by a Go test or by a knowledge-base row marked later; none was dropped without one |
+| V2 | Owner contract v1 (the Python engine's boundary) is superseded and its former pointer page (`docs/dev/factory/owner-contract.md`) is deleted; this section, 12.3, 7.1 and section 6 are the contract. Each refusal case of its old fixture is covered by a Go test or by a knowledge-base row marked later; none was dropped without one |
 | V3 | A rule table is defined once, by its rows in `internal/factory/flow`. No generated or printed copy is kept beside the code and no test compares one. A reviewer reads a table change as the changed row in the diff; the owner reads the rule that matched in `sheepdog factory log` and the debug view, from `log.jsonl`. The tables in this file describe the rows; where they differ, the code is right |
 
 **Order of building the surfaces (owner decision D14).** The web first: one factory page in the daemon's existing web, beside setup, voice and debug, with the factory section, the ask and override cards, and the log, the same content as the approved boards. The web `/factory` page (`web/factory/*`, `internal/web/factory.go`) is built and serving on `main` (slice 9, #777); the iOS and iPad boards follow.
@@ -1108,7 +1108,7 @@ Sources: [notes/go-surface-notes.md](notes/go-surface-notes.md) (historical pre-
 | `cmd/sheepdog/factory.go` | ~777 | **Built for v2:** `python-*` gone; has `start`, `stop`, `status`, `log`, `plan` (`apply`, `amend`), `task` (`park`, `unpark`, `drop`, `close`, `send-back`, `retry`, `say`), `recap decide`, `report` (`ready`, `review`, `ask`), `ask` (including `--kind override`), `answer`, and `doctor` |
 | `Makefile` `test-factory`, the CI factory job | — | **Gone from `main`** |
 | `factory/` (Python, tests, templates) | — | **Gone from `main`** |
-| `docs/dev/factory/owner-contract.md`, `engine-audit.md`, `baseline.md`; `testdata/factory/owner-contract-v1.json` | — | **Pointer page (`owner-contract.md`, #767); the other three deleted in 8.4 (#770)** (O33). The full texts stay in git history |
+| `docs/dev/factory/owner-contract.md`, `engine-audit.md`, `baseline.md`; `testdata/factory/owner-contract-v1.json` | — | **Gone from `main`** (`engine-audit.md`, `baseline.md`, and the v1 fixture deleted in 8.4 #770; `owner-contract.md` pointer page removed in the docs sweep). The full texts stay in git history |
 
 Still deferred to later slices: `Digest`, `Rules` / `ProposeRule` / `RevokeRule` (delegation; left out of slice 14), `Alerts` to push and voice, and `Touch`. Slice 14 adds `SettingRows`, `ProposeSetting`, `StartSet` and `CheckStart` (10.1 SE1–SE14). `Projects`, `Graph`, `LogLines`, `Asks`, `Start`, `Stop`, `Say`, `MintProof`, `Answer`, `Report`, and `Changes` are built on `main`.
 
@@ -1325,7 +1325,7 @@ The first check produced 181 gaps. Absorbing them all would rebuild the old engi
 | O2 | A third review round happens by itself after two that asked for changes (L13). In the old engine the coordinator granted it. Code is more hands-off; the cost is one automatic round on tasks a coordinator would have stopped. `retro_from_round` set to 2 removes it |
 | O3 | The contract has five alert kinds. `agents_down` is a sixth |
 | O4 | Approved board text says "engine and Python" (FactoryStartShell, FactoryTerminal). With a Go engine that line must change |
-| O5 | **Resolved (D14, slice 9 #777, and O33 #767):** `/factory` is the v1 web board (`web/factory/`), and `docs/dev/factory/owner-contract.md` is now a pointer page to this document |
+| O5 | **Resolved (D14, slice 9 #777, and O33 #767):** `/factory` is the v1 web board (`web/factory/`), and `docs/dev/factory/owner-contract.md` is superseded by this document (deleted in the docs sweep) |
 | O6 | Order is form B's failure mode. The order tests of section 16 are the guard; whether they are enough is judged at each review point of [plan.md](plan.md), with real rows |
 | O7 | The ladder (4.6) treats review, retro, recap and owner as one loop at four levels. The levels are not alike (three retro verdicts, four recap choices). If the special cases grow, split the function per level rather than adding conditions |
 | O8 | The picture of the tables (`transitions.html`, published privately for the owner) was redrawn for form B from the tables of this file. Its "Try it" panel is a simplified illustration, and its interactions were not tested in a browser |

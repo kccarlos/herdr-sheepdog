@@ -1,6 +1,6 @@
 # Prompt arms A0 / A / B / C, 2026-10-06 (evals first, step 4)
 
-Step 4 of "Evals first" ([handover](../handover-2026-10-04.md#evals-first-ceo-2026-10-05--current-priority)):
+Step 4 of "Evals first" (2026-10-06):
 run the #155 arms on the new suite and merge the winner if it wins on the
 north star without a Safe regression. Measurement only.
 

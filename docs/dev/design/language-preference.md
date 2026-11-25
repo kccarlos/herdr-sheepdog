@@ -3,8 +3,7 @@
 The user wants the language and script (for example Simplified vs
 Traditional Chinese) to be a setting, not something the models infer: in
 the 2026-10-04 phone test the voice answered a Simplified speaker in
-Traditional characters. Spec: docs/dev/handover-2026-10-04.md, "Next feature:
-language preference in Settings". Label: **information** (no word lists,
+Traditional characters. Label: **information** (no word lists,
 no code deciding which language an utterance is in or which one to answer
 in).
 
@@ -19,10 +18,10 @@ in).
   "The user's language setting, in order of preference: Chinese
   (Simplified) 简体中文, English. Answer in the language they use; write
   Chinese in Simplified characters."
-- **Slow orchestrator:** a `## Language` section in the state block (after the
+- **Orchestrator:** a `## Language` section in the state block (after the
   window, refreshed on every call, so the cached system text is
   unchanged).
-- **Fast orchestrator:** the line is appended to the voice system instruction at
+- **Voice:** the line is appended to the voice system instruction at
   every connect (Gemini Live and GPT-Live, embedded prompt or override),
   so the next session has it. Gemini Live reads its system instruction
   only at setup, so a change also goes to the running session at once as

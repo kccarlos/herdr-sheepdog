@@ -10,12 +10,12 @@ Nothing else gets investment until these hit their thresholds.
 
 | # | Job | Success, measured from the event log |
 |---|---|---|
-| J1 | "What's going on?" | first word ≤ 2 s, answer ≤ 5 s, ≤ 20 words, the item that needs the shepherd comes first, no repeat question within 60 s |
-| J2 | Approve / deny a worker's prompt | keys sent within 3 s of the bare word; never without a recorded shepherd input |
+| J1 | "What's going on?" | first word ≤ 2 s, answer ≤ 5 s, ≤ 20 words, the item that needs the user comes first, no repeat question within 60 s |
+| J2 | Approve / deny a worker's prompt | keys sent within 3 s of the bare word; never without a recorded user input |
 | J3 | Give an instruction | one confirmation line, ≤ 20 words, spoken once (not twice) |
-| J4 | Hear a finish with its finding | the brain's line is spoken (not "X finished." alone) whenever it has one; needs_user lines always spoken |
-| J5 | "What does that mean?" | answered from `detail` (the plain explanation) without a brain turn (≤ 1 s), or by a brain turn that is *simpler* than the previous line, one concept at a time |
-| J6 | "Stop" | stops what is in flight; never Ctrl-C on "never mind"; nothing killed without the shepherd naming it |
+| J4 | Hear a finish with its finding | the orchestrator's line is spoken (not "X finished." alone) whenever it has one; needs_user lines always spoken |
+| J5 | "What does that mean?" | answered from `detail` (the plain explanation) without an orchestrator turn (≤ 1 s), or by an orchestrator turn that is *simpler* than the previous line, one concept at a time |
+| J6 | "Stop" | stops what is in flight; never Ctrl-C on "never mind"; nothing killed without the user naming it |
 
 ## Scorecard metrics (computed from `<data_dir>/events/*.jsonl`)
 
@@ -26,10 +26,10 @@ re-asked within 60 s); **lost-utterance rate** (`voice.transcript.in`
 final with no tool call and no spoken output within 5 s);
 **brain-line drop rate** (`brain.push_late added:false`, split by
 needs_user); Ctrl-C sends without a stop word; count of "what does that
-mean"-class follow-ups; brain turn duration and prompt tokens. The
-baseline is the 2026-09-23/24 logs.
+mean"-class follow-ups; orchestrator turn duration and prompt tokens.
+Current workday baselines live in [`eval/README.md`](eval/README.md).
 
-> **Superseded (2026-10-04):** the heard-coverage family (unheard-push rate, word and key-term coverage of a spoken push, re-queue counts) judged verbatim reading. Since the dual-brain layer (#122) the fast brain voices briefings in its own words, so the judge asks whether the key facts reached the CEO correctly and in time: the fact-delivery rubric (`facts_current`, `no_hallucination`, unauthorised actions, ack-only, latency) in [`eval/dual-brain-2026-10-04.md`](eval/dual-brain-2026-10-04.md). `voice.push_unheard` is now a GPT-Live-only event.
+> **Superseded (2026-10-04):** the heard-coverage family (unheard-push rate, word and key-term coverage of a spoken push, re-queue counts) judged verbatim reading. Since the dual-brain layer (#122) the voice speaks briefings in its own words, so the judge asks whether the key facts reached the user correctly and in time: the fact-delivery rubric (`facts_current`, `no_hallucination`, unauthorised actions, ack-only, latency) in [`eval/dual-brain-2026-10-04.md`](eval/dual-brain-2026-10-04.md). `voice.push_unheard` is now a GPT-Live-only event.
 
 ## Rules for every change in this iteration
 
@@ -43,7 +43,7 @@ baseline is the 2026-09-23/24 logs.
    why the architecture cannot make the failure unrepresentable
    instead.
 6. No live API calls in tests or CI. Gemini free-tier quota and
-   GPT-Live minutes are for the shepherd's own sessions. Live eval runs
+   GPT-Live minutes are for the user's own sessions. Live eval runs
    (below) use Vertex AI or DeepSeek, never the AI Studio free tier,
    carry a spend budget (`--budget-usd`) and report their estimated
    spend.
@@ -66,18 +66,19 @@ live question, and one live run says little. Three tools answer it
   phrased so yes is good; verdict `yes`, `no` or `wait` (the
   conversation is not finished — the harness may keep listening; a final
   judgement has no wait). A rationale is a second call, only for a no or
-  a low-confidence verdict. Backends: Gemini Flash-Lite on Vertex
-  (`gemini-3.1-flash-lite`, default), local Ollama (`gemma4`, small runs),
-  a scripted fake (tests). In `sheepdog eval --live` the judge decides
+  a low-confidence verdict. Backends: Claude Sonnet (current default per
+  [`eval/README.md`](eval/README.md)), Gemini Flash-Lite on Vertex
+  (`gemini-3.1-flash-lite`), local Ollama (`gemma4`, small runs),
+  and a scripted fake (tests). In `sheepdog eval --live` the judge decides
   the wording checks that offline are skipped
   (`spoken_contains_any_of`, `first_sentence_contains_any_of`,
   `spoken_no_jargon`) plus a case's `expect.judge` items; the structural
   checks stay in code.
 - **Simulated user** (`sheepdog eval sim`, scenarios in
-  `testdata/eval/sim/*.json`). An LLM plays the CEO with a goal and talks
-  in text to the real supervisor and brain over a mock herdr whose
-  workers change on cue (a time, the CEO's Nth turn, what sheepdog sends
-  a worker); announcements reach the simulated CEO as they would the
+  `testdata/eval/sim/*.json`). An LLM plays the user with a goal and talks
+  in text to the real supervisor and orchestrator over a mock herdr whose
+  workers change on cue (a time, the user's Nth turn, what sheepdog sends
+  a worker); announcements reach the simulated user as they would the
   phone. It hangs up with `end_call` or waits with `wait_for_sheepdog`;
   caps on turns, total time and silence end the call otherwise, and the
   end reason is recorded. The judge grades six default items (answered,
@@ -128,8 +129,8 @@ per-turn expectations.
 
 Phase 0 — measure first (done)
 - **WP0a scorecard**: `internal/earmetrics` and `sheepdog scorecard`
-  over the event logs; the baseline is
-  [`scorecard-baseline-2026-09-24.md`](history/scorecard-baseline-2026-09-24.md).
+  over the event logs; current workday baselines live in
+  [`eval/README.md`](eval/README.md).
 - **WP0b eval corpus**: `sheepdog eval extract` turns a log window into
   cases; the five logged failures as cases; paraphrase and
   transcript-noise generators (`eval expand`); the L0 runner over the
@@ -143,7 +144,7 @@ in [`roles.md`](roles.md))
 - **WP2 finish delivery** (#54): a finish waits for the brain's line;
   only a block speaks at once; a late `needs_user` line is always
   spoken.
-- **WP3 the shepherd's words** (#58): every utterance runs on the
+- **WP3 the user's words** (#58): every utterance runs on the
   recorded transcript; the daemon relays an unanswered utterance;
   back-to-back utterances coalesce.
 - **WP4 worker history** (#57): the worker's own session transcript, a
@@ -163,8 +164,8 @@ headset sessions.
 
 ## Appendix: the headset script (WP0c)
 
-Ten minutes, the same every build, with the mock flock or a real one of
-2–3 workers, one of them at an approval prompt. Say each line, wait for
+Ten minutes, the same every build, with mock or real
+workers (2–3), one of them at an approval prompt. Say each line, wait for
 the answer, then continue. Note anything you had to repeat.
 
 1. "What's going on?"

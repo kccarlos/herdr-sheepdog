@@ -317,9 +317,8 @@ implements `mute` only.
 
 ## Silence gate
 
-Near-zero PCM streamed continuously degrades the model session (WP7b,
-`docs/dev/history/e2e-results.md`: turns answered only after 4–35 s, idle pushes
-swallowed), and a hardware-muted or very quiet microphone produces exactly
+Near-zero PCM streamed continuously degrades the model session (WP7b:
+turns answered only after 4–35 s, idle pushes swallowed), and a hardware-muted or very quiet microphone produces exactly
 that. The client therefore gates its capture:
 
 - A frame whose peak is below **8 LSB** (Int16) counts as silent. After
@@ -359,8 +358,7 @@ nor `silence` transitions; the gate resumes its own bookkeeping on unmute.
 
 ## Playback reports
 
-Added for docs/dev/research/voice-frameworks-2026-09-24.md P4/P5 (WP-B,
-WP-C, WP-D). The daemon only knows what it *sent*; Gemini generates
+Added for WP-B, WP-C, WP-D. The daemon only knows what it *sent*; Gemini generates
 ~4× real time, so the model's turn is over seconds before the user
 has heard it. The client therefore reports what its player does:
 

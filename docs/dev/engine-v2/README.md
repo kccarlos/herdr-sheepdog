@@ -1,9 +1,12 @@
 # Factory engine v2
 
 The Go factory engine inside sheepdog (`internal/factory`). Version 1
-(slices 1–8), `agy`, O32 (no quick-reply on factory ask pushes), and slice 9
-(`/factory` web board) are built on `main`; slice 10 (engine-run evidence) is
-parked; slice 12 (the retro round) is next (not yet shipped). The old Python
+(slices 1–8), `agy`, O32 (no quick-reply on factory ask pushes), slice 9
+(`/factory` web board), slice 11 (plan review, #800, #803, #807), slice 12
+(the retro round, #780, #784, #794), and slice 14 (the factory's whole life
+on `/factory`, #801–#819) are merged on `main`; slice 10 (engine-run
+evidence) is parked; the next step is a docs pass then `v0.1.31`, followed
+by slice 13 (coordinator rotation and journal). The old Python
 engine is used only as a historical knowledge base and is not in this
 repository's history on `main`.
 

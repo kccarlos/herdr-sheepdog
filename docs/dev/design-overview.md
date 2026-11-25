@@ -44,7 +44,7 @@ function responses (a channel it cannot mistake for the user), and lets
 it retell them in its own words. Against the previous main (#122,
 tier 2), non-echo pass rose from 46/90 to 61/90 (p ≈ 0.03), unheard
 answers fell from 26/178 to 5/139, and latency p50 went from 5.25 to
-4.48 s ([handover-2026-10-04.md](handover-2026-10-04.md),
+4.48 s ([design/dual-brain.md](design/dual-brain.md),
 [eval/dual-brain-2026-10-04.md](eval/dual-brain-2026-10-04.md)).
 
 One part was walked back. The voice cannot judge how fresh a briefing
@@ -52,9 +52,14 @@ is, so questions about agents go to the orchestrator. With that prompt
 (v5.1, #141), facts cases went from 50 to 61 % and hand-off from 75 to
 90 % ([eval/fast-brain-facts-2026-10-04.md](eval/fast-brain-facts-2026-10-04.md)).
 
-The orchestrator runs on DeepSeek `deepseek-flash` in production; Vertex
-Gemini 3.5 Flash was 10 pp worse on segment Understood at tier 1 (#201).
-Since #219 any OpenAI-compatible provider can be configured.
+The orchestrator supports DeepSeek `deepseek-flash` (default), native
+Anthropic (`claude-opus-5-5`, [anthropic-adapter.md](anthropic-adapter.md)),
+Gemini (AI Studio and Vertex; Vertex Gemini 3.5 Flash was 10 pp worse on
+segment Understood at tier 1, #201), and any OpenAI-compatible provider
+(#219). Alongside voice orchestration, the daemon runs the Go factory
+engine v2 (`internal/factory`, [engine-v2/README.md](engine-v2/README.md))
+to drive unattended multi-task projects over `herdr-core`, git worktrees,
+and GitHub.
 
 ## 2. The harness informs and prevents runaways; judgment stays with the models
 
@@ -62,7 +67,7 @@ Every proposed change is labelled **rail** (stops a runaway or unsafe
 action), **information** (a fact a model cannot see) or **judgment in
 code** (word lists, regexes or thresholds deciding what someone meant).
 No new judgment-in-code rules are added
-([handover-2026-10-04.md](handover-2026-10-04.md)).
+([design/dual-brain.md](design/dual-brain.md)).
 
 What the code does:
 
@@ -112,7 +117,7 @@ generation-0 handle is used. Otherwise the daemon opens a fresh session
 re-seeded from the recap, the last 8 briefings and the roster briefing.
 On the bench scenario `resume-recall-twice`, both facts were recalled in
 5 of 5 runs with the fix and 2 of 3 on main
-([handover-2026-10-04.md](handover-2026-10-04.md)). The same work
+([research/live-resume-context-2026-10-04.md](research/live-resume-context-2026-10-04.md)). The same work
 corrected the notes: the server sends a new handle after every completed
 turn, not only after setup ([gemini-live-notes.md](gemini-live-notes.md),
 §7).
@@ -136,8 +141,7 @@ cluster bootstrap over runs, because segments of one run are not
 independent. 35 runs give ±15–30 pp on run-level rates; about 420
 segments separate arms by 3–5 pp ([eval/README.md](eval/README.md)).
 
-**Calibration** ([eval/calibration/README.md](eval/calibration/README.md),
-[handover-2026-10-04.md](handover-2026-10-04.md)). 30 items gave 126
+**Calibration** ([eval/calibration/README.md](eval/calibration/README.md)). 30 items gave 126
 label pairs. An Opus reference labeller with full source context
 labelled all of them. The owner reviewed only the 31 judge–reference
 disagreements and 10 agreeing spot checks: they sided with Opus on 27 of

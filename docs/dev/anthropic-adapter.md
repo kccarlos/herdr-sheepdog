@@ -1,6 +1,6 @@
 # Design: the Anthropic orchestrator adapter
 
-Status: **implemented, 2026-10-19** (design 2026-10-18, #283). Step 4 of [plan-model-setup.md](plan-model-setup.md#the-anthropic-orchestrator-native-adapter); the plan says why and what. This note fixes how the adapter is built before the code lands. No quality numbers yet: the eval runs once there is a key.
+Status: **implemented, 2026-10-19** (design 2026-10-18, #283). This note records how the native Anthropic adapter is built; eval results are in [eval/anthropic-opus-2026-10-19.md](eval/anthropic-opus-2026-10-19.md).
 
 The adapter is `internal/brain/anthropic.go`: a `MessageModel` (and `Model`, `ModelCatalog`) over the official Go SDK, `github.com/anthropics/anthropic-sdk-go`, not an OpenAI-compatible shim. Provider id `anthropic`, default model `claude-opus-5-5`.
 
