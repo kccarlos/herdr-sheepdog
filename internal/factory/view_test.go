@@ -1722,3 +1722,463 @@ func TestTaskStepsNowMatchesFlowHistoryRowStageAndWaitsOn(t *testing.T) {
 		})
 	})
 }
+
+// --- PR 14.8 review fix-tests (failing until fixed) ---
+
+func TestTaskStepsEndedTaskWithOpenOwnerAsk(t *testing.T) {
+	st := flow.State{
+		Settings: noPlanReviewSettings(),
+		Project:  flow.Project{ID: "p-ask", Started: true},
+		Tasks: []flow.Task{
+			{
+				ID: "T1", Title: "merged with release ask", LastRow: "N1",
+				Done: &flow.Merged{MergedCommit: "m1"},
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0", PR: 7,
+					Ready: []flow.Ready{{Head: "c1"}},
+					Rounds: []flow.Round{
+						{N: 1, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictPass},
+						{N: 2, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictPass},
+					},
+				}},
+			},
+			{
+				ID: "T2", Title: "dropped with delete ask", LastRow: "N1",
+				Dropped:  &flow.Dropped{Why: "obsolete"},
+				Attempts: []flow.Attempt{{BaseCommit: "b0"}},
+			},
+			{
+				ID: "T3", Title: "closed with delete ask", LastRow: "N1",
+				Closed: &flow.Closed{Why: "PR closed"},
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0", PR: 8,
+					Ready:  []flow.Ready{{Head: "c1"}},
+					Rounds: []flow.Round{{N: 1, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictChanges, Majors: 1}},
+				}},
+			},
+			{
+				ID: "T4", Title: "split with gate ask", LastRow: "N1",
+				Split:    &flow.Split{Children: []string{"T4a", "T4b"}},
+				Attempts: []flow.Attempt{{BaseCommit: "b0"}},
+			},
+		},
+		Asks: []flow.Ask{
+			{ID: "a1", Kind: flow.KindRelease, Gated: true, Status: flow.AskStatusOpen, Task: "T1", Question: "Tag v1.2?"},
+			{ID: "a2", Kind: flow.KindDelete, Gated: true, Status: flow.AskStatusOpen, Task: "T2", Question: "Delete old bucket?"},
+			{ID: "a3", Kind: flow.KindDelete, Gated: true, Status: flow.AskStatusOpen, Task: "T3", Question: "Remove preview branch?"},
+			{ID: "a4", Kind: flow.KindGate, Gated: true, Status: flow.AskStatusOpen, Task: "T4", Question: "Approve old gate?"},
+		},
+	}
+	g := GraphViewOf(st, nil)
+	assertStepOrderAndStates(t, "merged_with_ask", taskStepsOf(t, g.Tasks[0]), []testStepView{
+		{Name: "planned", State: "done"},
+		{Name: "implementing", State: "done"},
+		{Name: "review", State: "done", Text: "2 rounds done"},
+		{Name: "CI", State: "done"},
+		{Name: "merged", State: "done", Text: "PR #7"},
+	})
+	assertStepOrderAndStates(t, "dropped_with_ask", taskStepsOf(t, g.Tasks[1]), []testStepView{
+		{Name: "planned", State: "done"},
+		{Name: "implementing", State: "done"},
+		{Name: "dropped", State: "ended", Text: "ended without merging"},
+	})
+	assertStepOrderAndStates(t, "closed_with_ask", taskStepsOf(t, g.Tasks[2]), []testStepView{
+		{Name: "planned", State: "done"},
+		{Name: "implementing", State: "done"},
+		{Name: "review", State: "done", Text: "1 round done"},
+		{Name: "closed", State: "ended", Text: "ended without merging: its PR was closed"},
+	})
+	assertStepOrderAndStates(t, "split_with_ask", taskStepsOf(t, g.Tasks[3]), []testStepView{
+		{Name: "planned", State: "done"},
+		{Name: "implementing", State: "done"},
+		{Name: "split", State: "ended", Text: "ended without merging"},
+	})
+}
+
+func TestTaskStepsPlanReviewMonotonicOrderAfterAccept(t *testing.T) {
+	t0 := time.Date(2026, 11, 24, 9, 0, 0, 0, time.UTC)
+	s := flow.DefaultSettings() // PlanReviewRounds == 1
+	st := flow.State{
+		Settings: s,
+		Project: flow.Project{
+			ID: "p-pr-mono", Started: true,
+			PlanReviews: []flow.PlanReview{{N: 1, Tasks: []string{"T1", "T2"}, Verdict: flow.VerdictPass, Started: t0, At: t0, Accepted: t0}},
+		},
+		Tasks: []flow.Task{
+			{ID: "T1", Title: "queued for slot after plan review", LastRow: "N10"},
+			{ID: "T2", Title: "waiting on T1 after plan review", After: []string{"T1"}, LastRow: "N9"},
+		},
+	}
+	for _, tv := range GraphViewOf(st, nil).Tasks {
+		steps := taskStepsOf(t, tv)
+		seenNow := false
+		for _, step := range steps {
+			if step.State == "now" {
+				seenNow = true
+			} else if seenNow && step.State == "done" {
+				t.Errorf("%s: step %q is %q after a 'now' step; steps=%+v", tv.Ref, step.Name, step.State, steps)
+			}
+		}
+	}
+}
+
+func TestTaskStepsPlanReviewStaysDoneDuringSecondPlanReview(t *testing.T) {
+	t0 := time.Date(2026, 11, 24, 9, 0, 0, 0, time.UTC)
+	s := flow.DefaultSettings()
+	s.PlanReviewRounds = 1
+	g := GraphViewOf(flow.State{
+		Settings: s,
+		Project: flow.Project{
+			ID: "p-pr2", Started: true,
+			PlanReviews: []flow.PlanReview{
+				{N: 1, Tasks: []string{"T1", "T2"}, Verdict: flow.VerdictPass, Started: t0, At: t0, Accepted: t0},
+				{N: 2, Tasks: []string{"T3"}, Started: t0.Add(time.Minute), Run: &flow.ReviewRun{Kind: flow.RoundPlan, Round: 2, RunID: "pr-2"}},
+			},
+		},
+		Tasks: []flow.Task{
+			{ID: "T1", LastRow: "N23", Attempts: []flow.Attempt{{BaseCommit: "b0", RunID: "w-1"}}},
+			{ID: "T2", After: []string{"T1"}, Unreviewed: false, LastRow: "N9"},
+			{ID: "T3", Unreviewed: true, LastRow: "N10"},
+		},
+	}, nil)
+	prStep := taskStepsOf(t, g.Tasks[1])[1]
+	if prStep.Name != "plan review" || prStep.State != "done" {
+		t.Errorf("T2 plan review step regressed during PR #2: got %+v, want {Name:plan review State:done}", prStep)
+	}
+}
+
+func TestTaskStepsStoppedReviewAndRetroRecapText(t *testing.T) {
+	s := noPlanReviewSettings() // ReviewRounds=2, MaxRounds=5
+	s.RetrosPerTask = 0
+	fiveChanges := make([]flow.Round, 5)
+	for i := range fiveChanges {
+		fiveChanges[i] = flow.Round{N: i + 1, Kind: flow.RoundFull, Head: fmt.Sprintf("c%d", i+1), Verdict: flow.VerdictChanges, Majors: 1}
+	}
+	st := flow.State{
+		Settings: s,
+		Project:  flow.Project{ID: "p-cap", Started: true},
+		Tasks: []flow.Task{
+			{
+				ID: "T-cap5-recap", Title: "hit max rounds", LastRow: "N6",
+				Recaps: []flow.Recap{{Trigger: flow.TriggerReview, Allowed: []string{"split", "new", "drop"}}},
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0", PR: 1,
+					Ready:  []flow.Ready{{Head: "c5"}},
+					Rounds: fiveChanges,
+				}},
+			},
+			{
+				ID: "T-mid-recap", Title: "stopped at round 3 recap", LastRow: "N6",
+				Recaps: []flow.Recap{{Trigger: flow.TriggerReview, Allowed: []string{"split", "new", "drop"}}},
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0", PR: 2,
+					Ready:  []flow.Ready{{Head: "c3"}},
+					Rounds: fiveChanges[:3],
+				}},
+			},
+			{
+				ID: "T-retro-recap", Title: "stopped after retro redesign", LastRow: "N6",
+				Retros: []flow.Retro{{Attempt: 1, Round: 4, Cause: "wrong-seam"}},
+				Recaps: []flow.Recap{{Trigger: flow.TriggerReview, Allowed: []string{"split", "new", "drop"}}},
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0", PR: 3, Ready: []flow.Ready{{Head: "c3"}},
+					Rounds: []flow.Round{
+						{N: 1, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictChanges, Majors: 1},
+						{N: 2, Kind: flow.RoundDelta, Head: "c2", Verdict: flow.VerdictChanges, Majors: 1},
+						{N: 3, Kind: flow.RoundDelta, Head: "c3", Verdict: flow.VerdictChanges, Majors: 1},
+						{N: 4, Kind: flow.RoundRetro, Head: "c3", Verdict: flow.VerdictRedesign, Majors: 1},
+					},
+				}},
+			},
+		},
+	}
+	g := GraphViewOf(st, nil)
+
+	capRev := assertSingleNowStep(t, "cap5_recap", taskStepsOf(t, g.Tasks[0]), "review")
+	if strings.Contains(capRev.Text, "review round 6") || strings.HasPrefix(capRev.Text, "review round ") {
+		t.Errorf("T-cap5-recap: stopped review recap must not claim active round 6 (MaxRounds=%d); got %q", s.MaxRounds, capRev.Text)
+	}
+
+	midRev := assertSingleNowStep(t, "mid_recap", taskStepsOf(t, g.Tasks[1]), "review")
+	if strings.HasPrefix(midRev.Text, "review round 4") {
+		t.Errorf("T-mid-recap: stopped review recap with no reviewer running must not claim round 4; got %q", midRev.Text)
+	}
+
+	retroStep := assertSingleNowStep(t, "retro_recap", taskStepsOf(t, g.Tasks[2]), "retro")
+	if retroStep.Text == "a retro reviewer is looking at why review keeps failing" {
+		t.Errorf("T-retro-recap: retro text must not claim retro is running after retro finished and recap opened")
+	}
+}
+
+func TestTaskStepsNoPhantomReviewRoundAfterBarMet(t *testing.T) {
+	s := noPlanReviewSettings() // ReviewRounds=2, MaxRounds=5
+	st := flow.State{
+		Settings: s,
+		Project:  flow.Project{ID: "p-phantom-r3", Started: true},
+		Tasks: []flow.Task{
+			{
+				ID: "T-no-run", Title: "two passes before N42", LastRow: "N29",
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0", PR: 1, Ready: []flow.Ready{{Head: "c1"}},
+					Rounds: []flow.Round{
+						{N: 1, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictPass},
+						{N: 2, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictPass},
+					},
+				}},
+			},
+			{
+				ID: "T-ended-run", Title: "two passes with ended reviewer", LastRow: "N29",
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0", PR: 2, Ready: []flow.Ready{{Head: "c1"}},
+					Rounds: []flow.Round{
+						{N: 1, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictPass},
+						{N: 2, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictPass},
+					},
+					Review: &flow.ReviewRun{Round: 2, Kind: flow.RoundFull, Head: "c1", Run: &flow.RunRecord{State: flow.PhaseEnded, Result: flow.EndExited}},
+				}},
+			},
+		},
+	}
+	for _, tv := range GraphViewOf(st, nil).Tasks {
+		steps := taskStepsOf(t, tv)
+		rev := assertSingleNowStep(t, tv.Ref, steps, "review")
+		if strings.Contains(rev.Text, "round 3") {
+			t.Errorf("%s: task with 2 passing verdicts and no reviewer in flight must not show phantom round 3; got %q", tv.Ref, rev.Text)
+		}
+	}
+}
+
+func TestTaskStepsOverrideDoesNotMarkPassedReviewSkipped(t *testing.T) {
+	s := noPlanReviewSettings() // ReviewRounds=2, MaxRounds=5
+	st := flow.State{
+		Settings: s,
+		Project:  flow.Project{ID: "p-ov-ci", Started: true},
+		Tasks: []flow.Task{
+			{
+				ID: "T-ci-override-n19", LastRow: "N19",
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0", PR: 9, Ready: []flow.Ready{{Head: "c1"}},
+					Rounds: []flow.Round{
+						{N: 1, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictPass},
+						{N: 2, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictPass},
+					},
+					Overrides: []flow.Override{{Head: "c1", ChecksShown: flow.ChecksAbsent}},
+					Accepts:   []flow.Accept{{Head: "c1", By: "override"}},
+				}},
+			},
+			{
+				ID: "T-ci-override-merged", LastRow: "N1", Done: &flow.Merged{MergedCommit: "m1"},
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0", PR: 11, Ready: []flow.Ready{{Head: "c1"}},
+					Rounds: []flow.Round{
+						{N: 1, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictPass},
+						{N: 2, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictPass},
+					},
+					Overrides: []flow.Override{{Head: "c1", ChecksShown: flow.ChecksRed}},
+					Accepts:   []flow.Accept{{Head: "c1", By: "override", Waived: []string{"ci"}}},
+				}},
+			},
+			{
+				ID: "T-stale-override-accept", LastRow: "N1", Done: &flow.Merged{MergedCommit: "m2"},
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0", PR: 10, Ready: []flow.Ready{{Head: "c1"}, {Head: "c2"}},
+					Rounds: []flow.Round{
+						{N: 1, Kind: flow.RoundFull, Head: "c2", Verdict: flow.VerdictPass},
+						{N: 2, Kind: flow.RoundFull, Head: "c2", Verdict: flow.VerdictPass},
+					},
+					Accepts: []flow.Accept{
+						{Head: "c1", By: "override"},
+						{Head: "c2", By: "bar", Rounds: []int{1, 2}},
+					},
+				}},
+			},
+		},
+	}
+	for _, tv := range GraphViewOf(st, nil).Tasks {
+		rev := taskStepsOf(t, tv)[2]
+		if rev.Name != "review" || rev.State != "done" || rev.Text != "2 rounds done" {
+			t.Errorf("%s: review step = %+v, want {Name:review State:done Text:2 rounds done}", tv.Ref, rev)
+		}
+	}
+}
+
+func TestTaskStepsHeldOrAskedKeepsLastRowStep(t *testing.T) {
+	st := flow.State{
+		Settings: noPlanReviewSettings(),
+		Project:  flow.Project{ID: "p-held-row", Started: true},
+		Asks: []flow.Ask{
+			{ID: "a1", Task: "T-impl-ask", Kind: flow.KindRelease, Gated: true, Status: flow.AskStatusOpen, Question: "Delete old table?"},
+			{ID: "a2", Task: "T-conflict-ask", Kind: flow.KindRelease, Gated: true, Status: flow.AskStatusOpen, Question: "Proceed with conflict fix?"},
+		},
+		Tasks: []flow.Task{
+			{
+				ID: "T-impl-ask", LastRow: "N23",
+				Attempts: []flow.Attempt{{BaseCommit: "b0", RunID: "w-1", Ready: []flow.Ready{{Head: "c1"}}}},
+			},
+			{
+				ID: "T-impl-parked", LastRow: "N23", Parked: true,
+				Attempts: []flow.Attempt{{BaseCommit: "b0", Ready: []flow.Ready{{Head: "c1"}}}},
+			},
+			{
+				ID: "T-conflict-ask", LastRow: "N32",
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0", PR: 3, Ready: []flow.Ready{{Head: "c1"}},
+					Rounds: []flow.Round{
+						{N: 1, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictPass},
+						{N: 2, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictPass},
+					},
+				}},
+			},
+		},
+	}
+	g := GraphViewOf(st, nil)
+	assertSingleNowStep(t, "T-impl-ask", taskStepsOf(t, g.Tasks[0]), "implementing")
+	parkedImpl := assertSingleNowStep(t, "T-impl-parked", taskStepsOf(t, g.Tasks[1]), "implementing")
+	if parkedImpl.Text != "parked here, waiting on the coordinator" {
+		t.Errorf("T-impl-parked: text = %q, want %q", parkedImpl.Text, "parked here, waiting on the coordinator")
+	}
+	assertSingleNowStep(t, "T-conflict-ask", taskStepsOf(t, g.Tasks[2]), "implementing")
+
+	// Dependency-blocked unreviewed task at N9 must stay at "planned" when parked (not jump to "plan review").
+	prSettings := flow.DefaultSettings()
+	prSettings.PlanReviewRounds = 1
+	gDep := GraphViewOf(flow.State{
+		Settings: prSettings,
+		Project:  flow.Project{ID: "p-dep-parked", Started: true},
+		Tasks: []flow.Task{
+			{ID: "T0", LastRow: "N23", Attempts: []flow.Attempt{{BaseCommit: "b0", RunID: "w-0"}}},
+			{ID: "T-dep-unrev-parked", After: []string{"T0"}, Unreviewed: true, Parked: true, LastRow: "N9"},
+		},
+	}, nil)
+	parkedDep := assertSingleNowStep(t, "T-dep-unrev-parked", taskStepsOf(t, gDep.Tasks[1]), "planned")
+	if parkedDep.Text != "parked here, waiting on the coordinator" {
+		t.Errorf("T-dep-unrev-parked: text = %q, want %q", parkedDep.Text, "parked here, waiting on the coordinator")
+	}
+}
+
+func TestTaskStepsReviewRoundMatchesWhyWaitingAfterBoundaryOrSendBack(t *testing.T) {
+	st := flow.State{
+		Settings: noPlanReviewSettings(),
+		Project:  flow.Project{ID: "p-rnd", Started: true},
+		Tasks: []flow.Task{
+			{
+				ID: "T-amend", LastRow: "N29",
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0", Boundary: 1, Ready: []flow.Ready{{Head: "c2"}},
+					Rounds: []flow.Round{{N: 1, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictChanges, Majors: 1}},
+					Review: &flow.ReviewRun{RunID: "rev-2", Round: 2, Kind: flow.RoundFull, Head: "c2"},
+				}},
+			},
+			{
+				ID: "T-sendback", LastRow: "N29",
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0", Ready: []flow.Ready{{Head: "c2"}},
+					Rounds: []flow.Round{{N: 1, Kind: flow.RoundSendBack, Head: "c1", Verdict: flow.VerdictChanges, Why: "missing test"}},
+					Review: &flow.ReviewRun{RunID: "rev-2", Round: 2, Kind: flow.RoundFull, Head: "c2"},
+				}},
+			},
+		},
+	}
+	for _, tv := range GraphViewOf(st, nil).Tasks {
+		rev := assertSingleNowStep(t, tv.Ref, taskStepsOf(t, tv), "review")
+		if tv.WhyWaiting != "In review round 2" || !strings.HasPrefix(rev.Text, "review round 2;") {
+			t.Errorf("%s: WhyWaiting=%q, review step text=%q (disagree on round number)", tv.Ref, tv.WhyWaiting, rev.Text)
+		}
+	}
+}
+
+func TestTaskStepsPriorAttemptRetroDoesNotLeakToNewAttempt(t *testing.T) {
+	t0 := time.Date(2026, 11, 24, 9, 0, 0, 0, time.UTC)
+	st := flow.State{
+		Settings: noPlanReviewSettings(),
+		Project:  flow.Project{ID: "p-att2", Started: true},
+		Tasks: []flow.Task{
+			{
+				ID: "T-att2-merged", LastRow: "N1", Done: &flow.Merged{MergedCommit: "m2"},
+				Retros: []flow.Retro{{Attempt: 1, Round: 4, Cause: "wrong-seam", At: t0}},
+				Attempts: []flow.Attempt{
+					{BaseCommit: "b0", Closed: "new attempt"},
+					{
+						BaseCommit: "b0", PR: 2, Ready: []flow.Ready{{Head: "c1"}},
+						Rounds: []flow.Round{
+							{N: 1, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictPass},
+							{N: 2, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictPass},
+						},
+					},
+				},
+			},
+			{
+				ID: "T-att1-closed-queued", LastRow: "N11",
+				Retros: []flow.Retro{{Attempt: 1, Round: 4, Cause: "wrong-seam", At: t0}},
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0", Closed: "new attempt",
+					Rounds: []flow.Round{{N: 4, Kind: flow.RoundRetro, Head: "c3", Verdict: flow.VerdictRedesign, Majors: 1}},
+				}},
+			},
+		},
+	}
+	for _, tv := range GraphViewOf(st, nil).Tasks {
+		steps := taskStepsOf(t, tv)
+		if slices.ContainsFunc(steps, func(s testStepView) bool { return s.Name == "retro" }) {
+			t.Errorf("%s: prior closed attempt's retro leaked into steps: %+v", tv.Ref, steps)
+		}
+	}
+}
+
+func TestTaskStepsImplementingNotSentBackAfterRetroShipOrCoordinatorSendBack(t *testing.T) {
+	t0 := time.Date(2026, 11, 24, 9, 0, 0, 0, time.UTC)
+	st := flow.State{
+		Settings: noPlanReviewSettings(),
+		Project:  flow.Project{ID: "p-not-sent-back", Started: true},
+		Tasks: []flow.Task{
+			{
+				ID: "T-n32-after-retro-ship", LastRow: "N32",
+				Retros: []flow.Retro{{Attempt: 1, Round: 5, Cause: "none", At: t0}},
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0", PR: 1, Ready: []flow.Ready{{Head: "c4"}},
+					Rounds: []flow.Round{
+						{N: 1, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictChanges, Majors: 1},
+						{N: 2, Kind: flow.RoundDelta, Head: "c2", Verdict: flow.VerdictChanges, Majors: 1},
+						{N: 3, Kind: flow.RoundDelta, Head: "c3", Verdict: flow.VerdictChanges, Majors: 1},
+						{N: 4, Kind: flow.RoundRetro, Head: "c3", Verdict: flow.VerdictFix, Majors: 1},
+						{N: 5, Kind: flow.RoundRetro, Head: "c4", Verdict: flow.VerdictShip},
+					},
+				}},
+			},
+			{
+				ID: "T-n16-override-conflict", LastRow: "N16",
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0", PR: 2, Ready: []flow.Ready{{Head: "c1"}},
+					Rounds:    []flow.Round{{N: 1, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictChanges, Majors: 1}},
+					Overrides: []flow.Override{{Head: "c1", ChecksShown: flow.ChecksGreen}},
+				}},
+			},
+			{
+				ID: "T-n22-coord-sendback-after-pass", LastRow: "N22",
+				Attempts: []flow.Attempt{{
+					BaseCommit: "b0", PR: 3, Ready: []flow.Ready{{Head: "c1"}},
+					Rounds: []flow.Round{
+						{N: 1, Kind: flow.RoundFull, Head: "c1", Verdict: flow.VerdictPass},
+						{N: 2, Kind: flow.RoundSendBack, Head: "c1", Verdict: flow.VerdictChanges, Why: "missing test"},
+					},
+				}},
+			},
+		},
+	}
+	g := GraphViewOf(st, nil)
+
+	n32 := assertSingleNowStep(t, "T-n32-after-retro-ship", taskStepsOf(t, g.Tasks[0]), "implementing")
+	if strings.HasPrefix(n32.Text, "sent back") {
+		t.Errorf("N32 after retro VerdictShip falsely shows %q", n32.Text)
+	}
+
+	n16 := assertSingleNowStep(t, "T-n16-override-conflict", taskStepsOf(t, g.Tasks[1]), "implementing")
+	if strings.HasPrefix(n16.Text, "sent back") {
+		t.Errorf("N16 override conflict falsely shows %q", n16.Text)
+	}
+
+	n22 := assertSingleNowStep(t, "T-n22-coord-sendback-after-pass", taskStepsOf(t, g.Tasks[2]), "implementing")
+	if strings.Contains(n22.Text, "sent back from review round 1") {
+		t.Errorf("N22 coordinator send-back after passing round 1 falsely blames review round 1: %q", n22.Text)
+	}
+}

@@ -539,3 +539,37 @@ test('step rendering escapes HTML, tolerates missing steps, works at 360 px, use
   const appSrc = readFileSync(new URL('./app.js', import.meta.url), 'utf8');
   assert.ok(!/\bPOST\b|method\s*:/.test(appSrc), 'app.js must hold no POST');
 });
+
+test('style.css keeps todo step-bar segments visually distinct from hovered board rows', () => {
+  const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
+    sels: m[1].split(',').map((s) => s.trim().replace(/\s+/g, ' ')),
+    body: m[2],
+  }));
+  const lastProp = (list, names) => {
+    let out = '';
+    for (const r of list) {
+      for (const n of names) {
+        for (const m of r.body.matchAll(new RegExp(`(?:^|;)\\s*${n}\\s*:\\s*([^;]+)`, 'gi'))) {
+          out = m[1].trim().replace(/\s+/g, ' ');
+        }
+      }
+    }
+    return out;
+  };
+  const rowHoverRules = rules.filter((r) => r.sels.includes('.row:hover'));
+  const barSpanRules = rules.filter((r) => r.sels.includes('.bar span'));
+  assert.ok(rowHoverRules.length > 0, 'expected .row:hover rule in style.css');
+  assert.ok(barSpanRules.length > 0, 'expected .bar span rule in style.css');
+
+  const hoverBg = lastProp(rowHoverRules, ['background', 'background-color']);
+  const todoBg = lastProp(barSpanRules, ['background', 'background-color']);
+  const todoEdge = lastProp(barSpanRules, ['border', 'outline']);
+  const hoverBarRules = rules.filter((r) => r.sels.some((s) => /^\.row:hover\b.*\.bar\s+span\b/.test(s)));
+  const hasHoverBarOverride = Boolean(lastProp(hoverBarRules, ['background', 'background-color', 'border', 'outline']));
+
+  assert.ok(
+    (hoverBg && todoBg && hoverBg !== todoBg) || Boolean(todoEdge) || hasHoverBarOverride,
+    `todo .bar span (${todoBg || 'none'}) blends into .row:hover (${hoverBg || 'none'}) with no border/outline or hover override`,
+  );
+});
