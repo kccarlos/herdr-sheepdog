@@ -566,3 +566,79 @@ test('log.js exports renderLogHTML and tidy; app.js deletes logHTML and logWhy a
   assert.doesNotMatch(appSrc, /\b(?:const|let|var|function)\s+logWhy\b/, 'app.js must delete logWhy');
   assert.doesNotMatch(appSrc, /\bPOST\b|method\s*:/, 'app.js must still hold no POST');
 });
+
+test('unknown or foreign task in URL hash falls back to board with unfiltered log and working task filter', async (t) => {
+  const lines = [
+    { at: '2026-11-24T13:00:00Z', by: 'engine', task: 'T1', decision: 't1-work', why: 'search box' },
+    { at: '2026-11-24T13:05:00Z', by: 'engine', task: 'T2', decision: 't2-merge', why: 'search index', kind: 'merged' },
+  ];
+  const daemon = fakeDaemon({ logLines: lines });
+  const page = await bootPage(t, daemon, { hash: '#proj-demo/NO_SUCH' });
+  const sec = () => findCard(page.doc, W.heading);
+  const sel = () => findControlByLabel(sec(), page.doc, W.taskLabel, 'select');
+
+  assert.ok(sec(), 'unknown task hash falls back to board with log card');
+  assert.equal(sel().value, '', 'board task filter shows all tasks');
+  assert.ok(
+    sec().textContent.includes('t1-work') && sec().textContent.includes('t2-merge'),
+    'fallback board log with "all tasks" selected must show project lines, not filter by unknown hash task NO_SUCH',
+  );
+
+  daemon.requests.length = 0;
+  sel().value = 'T1';
+  sel().dispatchEvent({ type: 'change', bubbles: true });
+  await page.flush();
+  assert.ok(
+    daemon.requests.some((u) => u.includes('/log') && /[?&]task=T1(?:&|$)/.test(u)),
+    'board task filter must fetch task=T1 even when URL hash had an unknown task',
+  );
+  assert.ok(
+    sec().textContent.includes('t1-work') && !sec().textContent.includes('t2-merge'),
+    'selecting T1 on board must filter to T1 even after unknown hash task',
+  );
+
+  const foreignDaemon = fakeDaemon({ logLines: lines });
+  const foreignPage = await bootPage(t, foreignDaemon, { hash: '#gone-proj/T9' });
+  const foreignSec = findCard(foreignPage.doc, W.heading);
+  assert.ok(foreignSec, 'foreign project hash falls back to board with log card');
+  assert.ok(
+    foreignSec.textContent.includes('t1-work') && foreignSec.textContent.includes('t2-merge'),
+    'fallback board log for foreign project hash must show project lines, not filter by T9',
+  );
+});
+
+test('activating Show them moves keyboard focus to show routine checks checkbox', async (t) => {
+  const lines = [
+    { at: '2026-11-24T14:00:00Z', by: 'engine', task: 'T1', decision: '', why: 'the PR snapshot changed', kind: 'observation' },
+  ];
+  const page = await bootPage(t, fakeDaemon({ logLines: lines }));
+  const sec = () => findCard(page.doc, W.heading);
+  const btn = sec().querySelectorAll('button').find((b) => b.textContent.trim() === W.showThem);
+  assert.ok(btn, 'observation-only log must render Show them button');
+  btn.focus();
+  assert.equal(page.doc.activeElement, btn);
+  btn.click();
+  await page.flush();
+  const chk = findControlByLabel(sec(), page.doc, W.obsLabel, 'input[type="checkbox"]');
+  assert.ok(chk, 'expected show routine checks checkbox after activating Show them');
+  assert.equal(
+    page.doc.activeElement,
+    chk,
+    'activating Show them must move keyboard focus to #log-obs rather than dropping focus',
+  );
+});
+
+test('task view log omits redundant task ref code chip while board log keeps it', async () => {
+  const { renderLogHTML } = await import('./log.js');
+  const sample = [{ at: '2026-11-24T13:22:00Z', by: 'engine', task: 'T4', decision: 'started reviewer', why: 'round 2' }];
+  const taskHTML = renderLogHTML(sample, { forTask: true });
+  assert.ok(
+    !taskHTML.includes('<code>T4</code>'),
+    'FactoryWebTaskLife omits redundant task ref <code> on every line of log for this task',
+  );
+  const boardFilteredHTML = renderLogHTML(sample, { tasks: ['T4'], task: 'T4' });
+  assert.ok(
+    boardFilteredHTML.includes('<code>T4</code>'),
+    'FactoryWebLog keeps task ref <code> on board log lines even when filtered to one task',
+  );
+});
