@@ -1003,8 +1003,9 @@ func TestFinishedProjectReopen(t *testing.T) {
 		})
 		h.finishThroughJ4(coord1)
 
-		if err := h.eng.Start(h.repo, "Goal 1", 2); err != nil {
-			t.Fatal(err)
+		// 14.4 (design.md 6): a same-goal start on a finished project with no held wake is refused.
+		if err := h.eng.Start(h.repo, "Goal 1", 2); err == nil {
+			t.Fatal("same-goal start on a finished project was accepted, want a refusal")
 		}
 		h.now = h.now.Add(15 * time.Second)
 		h.pass()

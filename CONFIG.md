@@ -544,7 +544,7 @@ before a line is written.
 
 ## Factory settings
 
-These factory settings live in each project's `state.json`, not in the config file. A paired browser session can propose changing any setting — numbers, choices, or `models.<role>` (`coordinator`, `worker`, `reviewer`, `retro`, `plan_reviewer`) — for a project (`POST /api/factory/projects/{id}/settings`), opening a gated `rule` ask with a read-back (`Save` / `Keep current`) that takes effect on the next pass once you confirm `Save` (`max_running` can also be set at `sheepdog factory start --max-running N`). They match the fields, defaults, and ranges of `flow.Settings` (`internal/factory/flow/settings.go`). A task's plan must carry `estimate_lines`.
+These factory settings live in each project's `state.json`, not in the config file. A paired browser session can propose changing any setting — numbers, choices, or `models.<role>` (`coordinator`, `worker`, `reviewer`, `retro`, `plan_reviewer`) — for a project (`POST /api/factory/projects/{id}/settings`), opening a gated `rule` ask with a read-back (`Save` / `Keep current`) that takes effect on the next pass once you confirm `Save` (`max_running` can also be set at a project's first start with `sheepdog factory start --max-running N`). They match the fields, defaults, and ranges of `flow.Settings` (`internal/factory/flow/settings.go`). A task's plan must carry `estimate_lines`.
 
 | Setting | Default | Range | Meaning |
 |---|---|---|---|
@@ -579,7 +579,7 @@ These factory settings live in each project's `state.json`, not in the config fi
 | `continue_lines` | `60` | 0–500 | A recap's `continue` sets the cap to the changed lines now plus this. |
 | `task_size_limit` | `400` | 50–2000 | A planned task estimated above this many changed lines is refused: split it first. |
 | `size_cap_factor` | `2` | 1–5 | A task's size cap is this times its `estimate_lines`; past it the task stops at a size recap. |
-| `max_running` | `3` | 1–20 | Maximum concurrent tasks; set at start with `sheepdog factory start --max-running N`. One extra slot beyond `max_running` is available for a task with `priority: "urgent"` or one the owner just answered. |
+| `max_running` | `3` | 1–20 | Maximum concurrent tasks; set at a project's first start with `sheepdog factory start --max-running N` and changed later in the settings panel on `/factory`. One extra slot beyond `max_running` is available for a task with `priority: "urgent"` or one the owner just answered. |
 | `sweep_minutes` | `5` | 1–60 | Minutes between periodic sweeps of stray factory-labelled terminals, leftover worktrees and branches, local base commits ahead of the last-fetched remote tracking ref, and the shared Codex home (also runs once at daemon start). |
 | `pool_floor_percent` | `5` | 0–50 | Minimum percent left required on every provider-supported quota window before starting a coordinator, worker or reviewer on that pool; a pool at or below this floor waits for its reset, and an unreadable reading is unknown and never blocks. |
 | `pool_minutes` | `5` | 1–60 | Minutes a shared CodexBar quota reading per provider stays fresh before the engine reads it again; a reading whose window reset time passes is refreshed on the next pass even inside this interval. |

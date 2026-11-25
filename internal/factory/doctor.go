@@ -70,6 +70,7 @@ type DoctorOptions struct {
 	Home          string
 	TempDir       string
 	DataDir       string
+	Settings      *flow.Settings
 	LookPath      func(string) (string, error)
 	RunCommand    CommandFunc
 	VolumeTimeout time.Duration

@@ -1,6 +1,7 @@
 package web
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 )
 
 // Factory is the factory engine's surface: read-only views, owner commands
@@ -34,6 +36,12 @@ type factoryAsker interface {
 type factorySettings interface {
 	SettingRows(project string) ([]flow.SettingRow, error)
 	ProposeSetting(project, name, value, deviceID string) (flow.Ask, error)
+}
+
+// factoryOwner is the optional half of Factory backing ticketed page check/start/stop routes.
+type factoryOwner interface {
+	CheckStart(folder string, set map[string]string) ([]onboard.Result, error)
+	StartSet(folder, goal string, set map[string]string) error
 }
 
 // handleFactory serves POST /api/factory/{start,stop,report}. A start or stop
@@ -205,19 +213,83 @@ func (s *Server) handleFactorySettings(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleFactoryOwner(kind string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		dev, reply := deviceOf(r), func(code int, v any) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(code)
+			_ = json.NewEncoder(w).Encode(v)
+		}
+		if kind != "check" && (dev == "" || dev == localDevice) {
+			reply(http.StatusForbidden, map[string]string{"code": "proof_required", "error": "proof_required"})
+			return
+		}
+		fo, ok := s.deps.Factory.(factoryOwner)
+		if !ok || s.deps.Factory == nil {
+			writeError(w, http.StatusServiceUnavailable, "factory is not available")
+			return
+		}
+		var req struct {
+			Folder, Goal, Project, Token string
+			Set                          map[string]string
+		}
+		if err := readJSON(r, &req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		res, err, se, sce, sse, ref := []onboard.Result(nil), error(nil), (*factory.SettingError)(nil), (*factory.StartChecksError)(nil), (*factory.StoredSettingsError)(nil), (*factory.Refusal)(nil)
+		switch {
+		case req.Token != "":
+			err = s.deps.Factory.Report(req.Token, kind, nil)
+		case kind == "check":
+			res, err = fo.CheckStart(req.Folder, req.Set)
+		case kind == "start":
+			err = fo.StartSet(req.Folder, req.Goal, req.Set)
+		default:
+			err = s.deps.Factory.Stop(req.Project)
+		}
+		switch {
+		case err == nil && kind == "check":
+			reply(http.StatusOK, map[string]any{"results": checksOf(res)})
+		case err == nil:
+			s.log.Log(logSource, "web.factory.project_"+kind, "", map[string]any{"folder": strings.TrimSpace(req.Folder), "project": strings.TrimSpace(req.Project), "device_id": dev})
+			reply(http.StatusOK, map[string]any{"ok": true, "device_id": dev})
+		case errors.As(err, &se):
+			reply(http.StatusBadRequest, map[string]string{"name": se.Name, "message": se.Message, "error": se.Message})
+		case errors.As(err, &sce):
+			reply(http.StatusBadRequest, map[string]any{"error": sce.Error(), "results": checksOf(sce.Results)})
+		case errors.As(err, &sse):
+			reply(http.StatusBadRequest, map[string]string{"error": "Not started: a setting is not allowed. Change it in settings below."})
+		case errors.As(err, &ref):
+			reply(refusalStatus(ref.Code), map[string]string{"code": ref.Code, "error": ref.Why})
+		default:
+			reply(http.StatusBadRequest, map[string]string{"error": err.Error()})
+		}
+	}
+}
+
+func refusalStatus(code string) int {
+	return cmp.Or(map[string]int{"not_found": http.StatusNotFound, flow.RefuseClosed: http.StatusConflict, "proof_required": http.StatusForbidden, "proof_rejected": http.StatusForbidden}[code], http.StatusBadRequest)
+}
+
 func writeFactoryRefusal(w http.ResponseWriter, err error) {
 	var ref *factory.Refusal
 	if !errors.As(err, &ref) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	status := map[string]int{"not_found": http.StatusNotFound, flow.RefuseClosed: http.StatusConflict, "proof_required": http.StatusForbidden, "proof_rejected": http.StatusForbidden}[ref.Code]
-	if status == 0 {
-		status = http.StatusBadRequest
-	}
 	body := map[string]string{"code": ref.Code, "error": ref.Why}
 	if ref.Fix != "" {
 		body["fix"] = ref.Fix
 	}
-	writeJSON(w, status, body)
+	writeJSON(w, refusalStatus(ref.Code), body)
+}
+
+// checksOf is the page's form of the start checks (the setup wizard's Check).
+func checksOf(rs []onboard.Result) []onboard.Check {
+	out := make([]onboard.Check, 0, len(rs))
+	for _, r := range rs {
+		out = append(out, onboard.CheckOf(r))
+	}
+	return out
 }

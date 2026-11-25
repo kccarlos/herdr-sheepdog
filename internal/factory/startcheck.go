@@ -138,6 +138,9 @@ func checkStartCLIs(ctx context.Context, o DoctorOptions, r startRepo, inHC bool
 			s, _ = LoadState(Paths{DataDir: o.DataDir}.State(id))
 		}
 	}
+	if o.Settings != nil {
+		s.Settings = *o.Settings
+	}
 	used := map[string]bool{}
 	for _, c := range projectCandidates(s) {
 		used[c.CLI] = true
