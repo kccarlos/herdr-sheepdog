@@ -701,3 +701,138 @@ test('narrow layout places the project bar before asks for you, escapes HTML in 
   assert.ok(alertEl && !alertEl.innerHTML.includes('<img') && alertEl.textContent.includes('<img src=x onerror=alert(1)>'), 'refusal HTML must be escaped');
   assert.ok(!/\bPOST\b|method\s*:/.test(readFileSync(new URL('./app.js', import.meta.url), 'utf8')), 'app.js must hold no POST');
 });
+
+test('clicking Resume while the new-goal form is open closes the form and shows any refusal under Resume', async (t) => {
+  const daemon = fakeDaemon({
+    projects: [mkProj({ state: 'stopped', running: false, live: false })],
+    paired: true,
+    onStart: () => ({ status: 400, body: { error: W.refSet } }),
+  });
+  const page = await bootPage(t, daemon);
+  btn(projectBar(page.doc), W.newGoal).click(); await page.flush();
+  assert.ok(page.doc.getElementById('pa-goal'));
+
+  btn(projectBar(page.doc), W.resume).click(); await page.flush();
+  const bar = projectBar(page.doc);
+  assert.equal(bar.querySelector('textarea'), null, 'clicking Resume must close the abandoned new-goal form');
+  assert.equal(bar.querySelector('#pa-goal-err'), null, 'Resume refusal must not attach to #pa-goal');
+  assert.equal(bar.querySelector('[role="alert"]')?.textContent.trim(), W.refSet);
+});
+
+test('start-check refusal on New goal or Reopen focuses the submit button (not Resume or Stop) and pressing the named bar button retries', async (t) => {
+  const results = [{ name: 'start claude', status: 'fail', detail: 'claude is not signed in', fix: 'run: claude auth login' }];
+
+  // Stopped -> New goal: focus stays on Start with this goal (not Resume), and pressing New goal retries.
+  let failStop = true;
+  const stopDaemon = fakeDaemon({
+    projects: [mkProj({ folder: '/Users/dev/code/notes', goal: 'Old goal', state: 'stopped', running: false, live: false })],
+    paired: true,
+    onStart: () => (failStop ? { status: 400, body: { error: 'start checks failed', results } } : null),
+  });
+  const stopPage = await bootPage(t, stopDaemon);
+  btn(projectBar(stopPage.doc), W.newGoal).click(); await stopPage.flush();
+  const taStop = goalTextarea(projectBar(stopPage.doc), stopPage.doc);
+  taStop.value = 'New goal after login'; taStop.dispatchEvent({ type: 'input', bubbles: true }); await stopPage.flush();
+  btn(projectBar(stopPage.doc), W.ngGoStop).click(); await stopPage.flush();
+
+  const stopBar = projectBar(stopPage.doc);
+  assert.notEqual(stopPage.doc.activeElement, btn(stopBar, W.resume), 'focus must not jump onto Resume (old goal)');
+  assert.equal(stopPage.doc.activeElement, btn(stopBar, W.ngGoStop), 'focus must stay on Start with this goal');
+
+  failStop = false;
+  btn(stopBar, W.newGoal).click(); await stopPage.flush();
+  assert.equal(stopDaemon.started.length, 2, 'pressing New goal again as ac.refused instructs must retry start');
+  assert.equal(stopDaemon.started[1].goal, 'New goal after login');
+
+  // Finished + live -> Reopen: focus stays on Reopen with this goal (not Stop), and pressing Reopen retries.
+  let failFin = true;
+  const finDaemon = fakeDaemon({
+    projects: [mkProj({ folder: '/Users/dev/code/notes', goal: 'Old finished goal', state: 'finished', running: true, live: true })],
+    paired: true,
+    onStart: () => (failFin ? { status: 400, body: { error: 'start checks failed', results } } : null),
+  });
+  const finPage = await bootPage(t, finDaemon);
+  btn(projectBar(finPage.doc), W.reopen).click(); await finPage.flush();
+  const taFin = goalTextarea(projectBar(finPage.doc), finPage.doc);
+  taFin.value = 'Reopen after login'; taFin.dispatchEvent({ type: 'input', bubbles: true }); await finPage.flush();
+  btn(projectBar(finPage.doc), W.ngGoFin).click(); await finPage.flush();
+
+  const finBar = projectBar(finPage.doc);
+  assert.notEqual(finPage.doc.activeElement, btn(finBar, W.stop), 'focus must not jump onto Stop on finished+live reopen refusal');
+  assert.equal(finPage.doc.activeElement, btn(finBar, W.ngGoFin), 'focus must stay on Reopen with this goal');
+
+  failFin = false;
+  btn(finBar, W.reopen).click(); await finPage.flush();
+  assert.equal(finDaemon.started.length, 2, 'pressing Reopen again as ac.refused instructs must retry start');
+  assert.equal(finDaemon.started[1].goal, 'Reopen after login');
+});
+
+test('external project state transitions across polls clear stale start refusals and hidden stop confirms', async (t) => {
+  const results = [{ name: 'start claude', status: 'fail', detail: 'claude is not signed in', fix: 'run: claude auth login' }];
+  const daemon = fakeDaemon({
+    projects: [mkProj({ id: 'proj-demo', state: 'stopped', running: false, live: false })],
+    paired: true,
+    onStart: () => ({ status: 400, body: { error: 'start checks failed', results } }),
+  });
+  const page = await bootPage(t, daemon);
+
+  btn(projectBar(page.doc), W.resume).click(); await page.flush();
+  assert.equal(projectBar(page.doc).querySelector('[role="alert"]')?.textContent.trim(), W.refResume);
+  daemon.projects[0].state = 'running'; daemon.projects[0].running = true; daemon.projects[0].live = true;
+  await page.pollNow();
+  assert.equal(projectBar(page.doc).querySelector('[role="alert"]'), null, 'running project must not keep showing a stale Not started refusal');
+  assert.equal(projectBar(page.doc).querySelector('section[aria-label="start checks"]'), null);
+
+  daemon.projects[0].state = 'finished'; daemon.projects[0].live = true;
+  await page.pollNow();
+  btn(projectBar(page.doc), W.stop).click(); await page.flush();
+  assert.ok(projectBar(page.doc).querySelector('[role="group"]'));
+  daemon.projects[0].live = false;
+  await page.pollNow();
+  assert.equal(projectBar(page.doc).querySelector('[role="group"]'), null);
+  daemon.projects[0].state = 'running'; daemon.projects[0].live = true;
+  await page.pollNow();
+  assert.equal(projectBar(page.doc).querySelector('[role="group"]'), null, 'hidden stop confirm must not reappear unprompted');
+});
+
+test('Escape inside stop confirm is ignored while Stop is in flight', async (t) => {
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const daemon = fakeDaemon({
+    projects: [mkProj({ state: 'running', running: true, live: true })],
+    paired: true,
+  });
+  const origFetch = daemon.fetch;
+  daemon.fetch = async (p, i) => { if (p === '/api/factory/projects/stop') await gate; return origFetch(p, i); };
+
+  const page = await bootPage(t, daemon);
+  btn(projectBar(page.doc), W.stop).click(); await page.flush();
+  const group = projectBar(page.doc).querySelector('[role="group"]');
+  assert.ok(group, 'expected stop confirm group');
+  try {
+    btn(group, W.stopYes).click();
+    const confirm = projectBar(page.doc).querySelector('.pa-confirm');
+    assert.ok(confirm, 'stop confirm must stay visible while Stop is in flight');
+    confirm.dispatchEvent({ type: 'keydown', key: 'Escape', bubbles: true });
+    assert.ok(projectBar(page.doc).querySelector('.pa-confirm'), 'Escape must not dismiss stop confirm while Stop is in flight');
+  } finally {
+    release();
+  }
+  await page.flush();
+});
+
+test('renderProjectActionsHTML handles prototype-key project.state safely', async () => {
+  const { renderProjectActionsHTML } = await import('./project.js');
+  const html = renderProjectActionsHTML({ id: 'p1', state: 'toString' }, { mode: 'newgoal' });
+  assert.doesNotMatch(html, /function toString/);
+  assert.match(html, /class="dot idle"/);
+  assert.match(html, />Give it this goal</);
+});
+
+test('style.css sets font-size: 13px on .pill so the project bar state pill matches the accepted board', () => {
+  const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+  const pillRule = css.match(/(?:^|[\n}])\s*\.pill\s*\{([^}]*)\}/);
+  assert.ok(pillRule, 'style.css must define .pill');
+  assert.match(pillRule[1], /font-size\s*:\s*13px\b/, '.pill must set font-size: 13px so it does not inherit 15px body size in .pa-st');
+});
+
