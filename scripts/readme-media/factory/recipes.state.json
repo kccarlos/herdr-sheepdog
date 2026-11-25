@@ -8,6 +8,9 @@
     "started": false,
     "finished": true
   },
+  "settings": {
+    "second_reviewer": "codex"
+  },
   "tasks": [
     {
       "id": "T1",
@@ -36,7 +39,7 @@
               "n": 1,
               "kind": "full",
               "head": "44556677889900aabbccddeeff00112233445566",
-              "reviewer": { "cli": "claude", "model": "sonnet", "effort": "high" },
+              "reviewer": { "cli": "claude", "model": "opus", "effort": "medium" },
               "verdict": "changes",
               "majors": 1,
               "report_path": "/tmp/sheepdog-demo/data/factory/projects/recipes/reports/T1-r1.md"
@@ -45,7 +48,7 @@
               "n": 2,
               "kind": "delta",
               "head": "6677889900aabbccddeeff001122334455667788",
-              "reviewer": { "cli": "claude", "model": "sonnet", "effort": "high" },
+              "reviewer": { "cli": "claude", "model": "opus", "effort": "medium" },
               "verdict": "pass",
               "majors": 0,
               "report_path": "/tmp/sheepdog-demo/data/factory/projects/recipes/reports/T1-r2.md"
@@ -54,7 +57,7 @@
               "n": 3,
               "kind": "full",
               "head": "6677889900aabbccddeeff001122334455667788",
-              "reviewer": { "cli": "claude", "model": "opus", "effort": "high" },
+              "reviewer": { "cli": "codex", "model": "gpt-6.2-sol", "effort": "medium" },
               "verdict": "pass",
               "majors": 0,
               "report_path": "/tmp/sheepdog-demo/data/factory/projects/recipes/reports/T1-r3.md"

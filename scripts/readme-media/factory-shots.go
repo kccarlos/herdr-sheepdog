@@ -2,9 +2,9 @@
 
 // factory-shots captures README/guide screenshots of the /factory page from a
 // private demo daemon (scripts/readme-media/factory-shots.sh). It starts a
-// headless Chromium with a throwaway profile, visits each view at 1280 px wide
-// (plus the dependency graph at 500 px), crops each shot to content, verifies
-// no private /Users paths appear on screen, and saves PNGs into -out.
+// headless Chromium with a throwaway profile, visits each view at 1280 px wide,
+// crops each shot to content, verifies no private /Users paths appear on
+// screen, and saves PNGs into -out.
 //
 //	go run scripts/readme-media/factory-shots.go -browser <binary> -url http://127.0.0.1:17820/factory -out assets/readme/factory
 package main
@@ -361,19 +361,10 @@ func main() {
 	setScheme("dark")
 	capture("graph-dark", pageClip(1280, ".gbox"))
 
-	// 5. Notes board with GRAPH at 500 px wide (light)
+	// 5. Notes board list view with step bars (light, 1280 px, done collapsed)
 	setScheme("light")
-	setViewport(500, 1000)
-	evalStr(`window.dispatchEvent(new Event('resize'))`)
-	wait(`document.querySelector('.gbox') && document.querySelector('[data-ghint]') && !document.querySelector('[data-ghint]').hidden`)
-	capture("graph-narrow", pageClip(500, ".gbox"))
-
-	// 6. Notes board list view with step bars (light, 1280 px)
-	setViewport(1280, 1200)
-	evalStr(`window.dispatchEvent(new Event('resize'))`)
 	evalStr(`document.querySelector('button[data-view="list"]').click()`)
 	wait(`document.querySelectorAll('.sbar').length >= 10 && document.querySelector('details.done') !== null`)
-	evalStr(`document.querySelector('details.done').open = true`)
 	agentsTxt := evalStr(`document.getElementById('agents').innerText || ''`)
 	if strings.Contains(agentsTxt, "Project is stopped") || !strings.Contains(agentsTxt, "3 running") ||
 		!strings.Contains(agentsTxt, "opus") || !strings.Contains(agentsTxt, "sonnet") {
@@ -381,7 +372,7 @@ func main() {
 	}
 	capture("board-list", pageClip(1280, "details.done"))
 
-	// 7. Settings panel (light, 1280 px viewport, cropped around #settings)
+	// 6. Settings panel (light, 1280 px viewport, cropped around #settings)
 	wait(`document.querySelectorAll('#settings .srow').length >= 5`)
 	capture("settings", `(() => {
 		const el = document.getElementById('settings');
@@ -395,17 +386,17 @@ func main() {
 		});
 	})()`)
 
-	// 8. Task view: steps list + its log (#notes/T5, light, 1280 px)
+	// 7. Task view: steps list + its log (#notes/T5, light, 1280 px)
 	evalStr(`location.hash = '#notes/T5'`)
 	wait(`document.querySelector('ol.steps') !== null && document.querySelectorAll('ol.log li.ll').length >= 3`)
 	capture("task-view", pageClip(1280, ".page"))
 
-	// 9. Recipes log (#recipes, light, 1280 px)
+	// 8. Recipes log (#recipes, light, 1280 px)
 	evalStr(`location.hash = '#recipes'`)
 	wait(`document.querySelector('h1') && document.querySelectorAll('ol.log li.ll').length >= 10`)
 	capture("recipes-log", pageClip(1280, "#main"))
 
-	// 10. New-project form with start checks (light, 1280 px)
+	// 9. New-project form with start checks (light, 1280 px)
 	evalStr(`location.hash = ''`)
 	wait(`document.querySelector('button[data-new-project]') !== null`)
 	evalStr(`document.querySelector('button[data-new-project]').click()`)

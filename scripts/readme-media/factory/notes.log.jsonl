@@ -10,9 +10,9 @@
 {"seq":41,"at":"2026-11-23T12:23:00Z","project":"notes","by":"engine","task":"T5","rule":"N23","asked":["start_worker"],"decision":"started worker","why":"claude sonnet"}
 {"seq":42,"at":"2026-11-23T12:35:00Z","project":"notes","by":"engine","task":"T5","rule":"N23","decision":"","why":"the worker is working"}
 {"seq":44,"at":"2026-11-23T12:54:00Z","project":"notes","by":"worker","task":"T5","rule":"ready","decision":"reported ready","why":"at 15a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4 (PR #18)"}
-{"seq":46,"at":"2026-11-23T12:55:00Z","project":"notes","by":"engine","task":"T5","rule":"N29","asked":["start_reviewer@1@15a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4"],"decision":"started review round 1","why":"claude sonnet"}
-{"seq":48,"at":"2026-11-23T13:12:00Z","project":"notes","by":"reviewer","task":"T5","rule":"review","decision":"round 1: pass","why":"claude sonnet — autosave debounce and offline retry verified"}
-{"seq":49,"at":"2026-11-23T13:13:00Z","project":"notes","by":"engine","task":"T5","rule":"N29","asked":["start_reviewer@2@15a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4"],"decision":"started review round 2","why":"claude opus — second review at 15a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4"}
+{"seq":46,"at":"2026-11-23T12:55:00Z","project":"notes","by":"engine","task":"T5","rule":"N29","asked":["start_reviewer@1@15a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4"],"decision":"started review round 1","why":"claude opus"}
+{"seq":48,"at":"2026-11-23T13:12:00Z","project":"notes","by":"reviewer","task":"T5","rule":"review","decision":"round 1: pass","why":"claude opus — autosave debounce and offline retry verified"}
+{"seq":49,"at":"2026-11-23T13:13:00Z","project":"notes","by":"engine","task":"T5","rule":"N29","asked":["start_reviewer@2@15a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4"],"decision":"started review round 2","why":"claude opus (fresh session) — second review at 15a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4"}
 {"seq":51,"at":"2026-11-23T13:20:00Z","project":"notes","by":"engine","task":"T6","rule":"N23","asked":["start_worker"],"decision":"started worker","why":"claude sonnet"}
 {"seq":52,"at":"2026-11-23T13:34:00Z","project":"notes","by":"coordinator","task":"T9","rule":"N4","decision":"closed task","why":"PR #17 was closed without merging"}
 {"seq":53,"at":"2026-11-23T13:45:00Z","project":"notes","by":"reviewer","task":"T10","rule":"review","decision":"round 1: changes (2 majors)","why":"debounce resets on blur and empty query clears active tag filter"}

@@ -56,7 +56,7 @@
               "n": 1,
               "kind": "full",
               "head": "11b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e",
-              "reviewer": { "cli": "claude", "model": "sonnet", "effort": "high" },
+              "reviewer": { "cli": "claude", "model": "opus", "effort": "medium" },
               "verdict": "pass",
               "majors": 0,
               "report_path": "/tmp/sheepdog-demo/data/factory/projects/notes/reports/T1-r1.md"
@@ -98,7 +98,7 @@
               "n": 1,
               "kind": "full",
               "head": "22c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f",
-              "reviewer": { "cli": "claude", "model": "sonnet", "effort": "high" },
+              "reviewer": { "cli": "claude", "model": "opus", "effort": "medium" },
               "verdict": "pass",
               "majors": 0,
               "report_path": "/tmp/sheepdog-demo/data/factory/projects/notes/reports/T2-r1.md"
@@ -140,7 +140,7 @@
               "n": 1,
               "kind": "full",
               "head": "33d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a",
-              "reviewer": { "cli": "claude", "model": "sonnet", "effort": "high" },
+              "reviewer": { "cli": "claude", "model": "opus", "effort": "medium" },
               "verdict": "pass",
               "majors": 0,
               "report_path": "/tmp/sheepdog-demo/data/factory/projects/notes/reports/T3-r1.md"
@@ -183,7 +183,7 @@
               "n": 1,
               "kind": "full",
               "head": "44e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b",
-              "reviewer": { "cli": "claude", "model": "sonnet", "effort": "high" },
+              "reviewer": { "cli": "claude", "model": "opus", "effort": "medium" },
               "verdict": "pass",
               "majors": 0,
               "report_path": "/tmp/sheepdog-demo/data/factory/projects/notes/reports/T4-r1.md"
@@ -225,7 +225,7 @@
               "n": 1,
               "kind": "full",
               "head": "15a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4",
-              "reviewer": { "cli": "claude", "model": "sonnet", "effort": "high" },
+              "reviewer": { "cli": "claude", "model": "opus", "effort": "medium" },
               "verdict": "pass",
               "majors": 0,
               "report_path": "/tmp/sheepdog-demo/data/factory/projects/notes/reports/T5-r1.md"
@@ -306,7 +306,7 @@
               "n": 1,
               "kind": "full",
               "head": "77f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c",
-              "reviewer": { "cli": "claude", "model": "sonnet", "effort": "high" },
+              "reviewer": { "cli": "claude", "model": "opus", "effort": "medium" },
               "verdict": "pass",
               "majors": 0,
               "report_path": "/tmp/sheepdog-demo/data/factory/projects/notes/reports/T7-r1.md"
@@ -349,7 +349,7 @@
               "n": 1,
               "kind": "full",
               "head": "880718293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d",
-              "reviewer": { "cli": "claude", "model": "sonnet", "effort": "high" },
+              "reviewer": { "cli": "claude", "model": "opus", "effort": "medium" },
               "verdict": "pass",
               "majors": 0,
               "report_path": "/tmp/sheepdog-demo/data/factory/projects/notes/reports/T8-r1.md"
@@ -392,7 +392,7 @@
               "n": 1,
               "kind": "full",
               "head": "9918293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d9e",
-              "reviewer": { "cli": "claude", "model": "sonnet", "effort": "high" },
+              "reviewer": { "cli": "claude", "model": "opus", "effort": "medium" },
               "verdict": "changes",
               "majors": 1,
               "report_path": "/tmp/sheepdog-demo/data/factory/projects/notes/reports/T9-r1.md"
@@ -433,7 +433,7 @@
               "n": 1,
               "kind": "full",
               "head": "26b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5",
-              "reviewer": { "cli": "claude", "model": "sonnet", "effort": "high" },
+              "reviewer": { "cli": "claude", "model": "opus", "effort": "medium" },
               "verdict": "changes",
               "majors": 2,
               "report_path": "/tmp/sheepdog-demo/data/factory/projects/notes/reports/T10-r1.md"
@@ -487,7 +487,7 @@
               "n": 1,
               "kind": "full",
               "head": "37c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6",
-              "reviewer": { "cli": "claude", "model": "sonnet", "effort": "high" },
+              "reviewer": { "cli": "claude", "model": "opus", "effort": "medium" },
               "verdict": "pass",
               "majors": 0,
               "report_path": "/tmp/sheepdog-demo/data/factory/projects/notes/reports/T13-r1.md"
