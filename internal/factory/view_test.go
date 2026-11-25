@@ -5,9 +5,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -772,5 +778,376 @@ func TestGraphViewTaskBrief(t *testing.T) {
 	t2 := tasks[1].(map[string]any)
 	if got, hasBrief := t2["brief"]; hasBrief {
 		t.Errorf("T2 JSON unexpectedly marshaled brief = %v (want omitted when empty); raw=%s", got, raw)
+	}
+}
+
+type logEntryWire struct {
+	At       time.Time `json:"at"`
+	By       string    `json:"by"`
+	Task     string    `json:"task"`
+	Decision string    `json:"decision"`
+	Why      string    `json:"why"`
+	Kind     string    `json:"kind"`
+}
+
+func decodeLogEntries(t *testing.T, entries []LogEntry) ([]logEntryWire, []map[string]any) {
+	t.Helper()
+	raw, err := json.Marshal(entries)
+	if err != nil {
+		t.Fatalf("marshal LogEntry slice: %v", err)
+	}
+	var wire []logEntryWire
+	var objs []map[string]any
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatalf("unmarshal logEntryWire: %v", err)
+	}
+	if err := json.Unmarshal(raw, &objs); err != nil {
+		t.Fatalf("unmarshal raw objects: %v", err)
+	}
+	return wire, objs
+}
+
+// callLogView invokes LogView regardless of whether PR 14.7 keeps the 2-arg
+// signature or adds observations (bool or ...bool) / task parameters.
+func callLogView(t *testing.T, lines []LogLine, n int, observations bool) ([]LogEntry, bool) {
+	t.Helper()
+	fv := reflect.ValueOf(LogView)
+	ft := fv.Type()
+	switch {
+	case ft.NumIn() == 2 && !ft.IsVariadic():
+		out := fv.Call([]reflect.Value{reflect.ValueOf(lines), reflect.ValueOf(n)})
+		return out[0].Interface().([]LogEntry), !observations
+	case ft.NumIn() == 3:
+		out := fv.Call([]reflect.Value{reflect.ValueOf(lines), reflect.ValueOf(n), reflect.ValueOf(observations)})
+		return out[0].Interface().([]LogEntry), true
+	case ft.NumIn() == 4:
+		out := fv.Call([]reflect.Value{reflect.ValueOf(lines), reflect.ValueOf(n), reflect.ValueOf(""), reflect.ValueOf(observations)})
+		return out[0].Interface().([]LogEntry), true
+	default:
+		t.Fatalf("unexpected LogView signature: %s", ft)
+		return nil, false
+	}
+}
+
+// TestLogEntryKindTableAndPrecedence pins plan.md PR 14.7's typed-field kind
+// table (first match wins, @-suffix stripped, no text guessing, no rule leak),
+// using real log line shapes from factory_log.golden and PR 14.1 settings logs.
+func TestLogEntryKindTableAndPrecedence(t *testing.T) {
+	t.Parallel()
+	t0 := time.Date(2026, 11, 19, 10, 0, 0, 0, time.UTC)
+	h := strings.Repeat("3f9c", 10)
+	cases := []struct {
+		name string
+		line LogLine
+		want string
+	}{
+		// Row 1: observation (empty decision) — wins over by=owner and any asked.
+		{"observation_pr_snapshot", LogLine{Seq: 1, At: t0, By: "engine", Task: "T1", Rule: "pr_snapshot", Why: "the PR snapshot changed"}, "observation"},
+		{"observation_precedes_owner_and_asked", LogLine{Seq: 2, At: t0, By: "owner", Task: "T1", Rule: "N2", Asked: []string{flow.AskMarkDone}, Decision: "", Why: "empty decision wins"}, "observation"},
+
+		// Row 2: yours (by == owner) — wins over asked.
+		{"yours_start", LogLine{Seq: 3, At: t0, By: "owner", Rule: "start", Decision: "started", Why: "Add Greet."}, "yours"},
+		{"yours_setting_save", LogLine{Seq: 4, At: t0, By: "owner", Rule: "A3", Decision: "saved max_running 2 (was 1)", Why: "answered Save"}, "yours"},
+		{"yours_precedes_asked", LogLine{Seq: 5, At: t0, By: "owner", Task: "T1", Rule: "A3", Asked: []string{flow.AskNotifyOwner, flow.AskMarkDone}, Decision: "answered Save", Why: "owner wins"}, "yours"},
+
+		// Row 3: merged (asked holds mark_done, with or without @suffix) — wins over asked_you/needs_decision.
+		{"merged_n2_golden", LogLine{Seq: 6, At: t0, By: "engine", Task: "T1", Rule: "N2", Asked: []string{flow.AskMarkDone}, Decision: "done: PR #7 merged as " + h, Why: "the PR is merged"}, "merged"},
+		{"merged_with_extra_ask_and_suffix", LogLine{Seq: 7, At: t0, By: "engine", Task: "T1", Rule: "N2", Asked: []string{flow.AskWake + "@merged_outside_bar", flow.AskMarkDone + "@" + h}, Decision: "done", Why: "merged"}, "merged"},
+		{"merged_precedes_asked_you", LogLine{Seq: 8, At: t0, By: "engine", Task: "T1", Rule: "N2", Asked: []string{flow.AskNotifyOwner, flow.AskMarkDone}, Decision: "done", Why: "precedence"}, "merged"},
+
+		// Row 4: asked_you (notify_owner, open_gate_ask, open_n24_ask, open_owner_no_recap).
+		{"asked_you_setting_proposal", LogLine{Seq: 9, At: t0, By: "engine", Rule: "A2", Asked: []string{flow.AskNotifyOwner}, Decision: "opened ask", Why: "This project: max running 2 (now 1). Save?"}, "asked_you"},
+		{"asked_you_gate", LogLine{Seq: 10, At: t0, By: "engine", Task: "T1", Rule: "N31", Asked: []string{flow.AskOpenGate + "@" + h}, Decision: "opened gate ask", Why: "design gate"}, "asked_you"},
+		{"asked_you_n24", LogLine{Seq: 11, At: t0, By: "engine", Task: "T1", Rule: "N24", Asked: []string{flow.AskOpenN24 + "@1"}, Decision: "opened owner ask", Why: "review stalled"}, "asked_you"},
+		{"asked_you_owner_no_recap", LogLine{Seq: 12, At: t0, By: "engine", Task: "T1", Rule: "N31", Asked: []string{flow.AskOwnerNoRecap + "@" + h}, Decision: "opened recap", Why: "owner said no"}, "asked_you"},
+		{"asked_you_precedes_needs_decision", LogLine{Seq: 13, At: t0, By: "engine", Task: "T1", Rule: "N31", Asked: []string{flow.AskOpenRecap + "@review", flow.AskOpenGate + "@" + h}, Decision: "opened ask", Why: "precedence"}, "asked_you"},
+
+		// Row 5: needs_decision (open_recap, open_size_recap, open_ci_recap, open_time_recap, fail_update_branch).
+		{"needs_decision_open_recap", LogLine{Seq: 14, At: t0, By: "engine", Task: "T1", Rule: "N28", Asked: []string{flow.AskOpenRecap + "@review"}, Decision: "opened recap", Why: "max rounds"}, "needs_decision"},
+		{"needs_decision_size_recap", LogLine{Seq: 15, At: t0, By: "engine", Task: "T1", Rule: "N12", Asked: []string{flow.AskSizeRecap + "@" + h}, Decision: "opened size recap", Why: "212 lines, cap 160"}, "needs_decision"},
+		{"needs_decision_ci_recap", LogLine{Seq: 16, At: t0, By: "engine", Task: "T1", Rule: "N13", Asked: []string{flow.AskCIRecap + "@" + h}, Decision: "opened ci recap", Why: "ci stalled"}, "needs_decision"},
+		{"needs_decision_time_recap", LogLine{Seq: 17, At: t0, By: "engine", Task: "T1", Rule: "N14", Asked: []string{flow.AskTimeRecap + "@1"}, Decision: "opened time recap", Why: "build hours"}, "needs_decision"},
+		{"needs_decision_fail_update", LogLine{Seq: 18, At: t0, By: "engine", Task: "T1", Rule: "N40", Asked: []string{flow.AskFailUpdate + "@" + h}, Decision: "could not bring the branch up to date", Why: "merge conflict"}, "needs_decision"},
+
+		// Plain lines (no kind; never guessed from text).
+		{"plain_j7_golden", LogLine{Seq: 19, At: t0, By: "engine", Rule: "J7", Asked: []string{"coordinator:t-1"}, Decision: "started coordinator", Why: "project started with no coordinator run"}, ""},
+		{"plain_n42_golden", LogLine{Seq: 20, At: t0, By: "engine", Task: "T1", Rule: "N42", Asked: []string{flow.AskAccept + "@" + h, flow.AskMerge + "@" + h}, Decision: "accepted " + h + "; asked GitHub to merge PR #7", Why: "passed, green and mergeable"}, ""},
+		{"plain_n1_golden", LogLine{Seq: 21, At: t0, By: "engine", Task: "T1", Rule: "N1", Asked: []string{flow.AskCleanup}, Decision: "stopped runs; deleted branch", Why: "ended"}, ""},
+		{"plain_no_text_guess_merged", LogLine{Seq: 22, At: t0, By: "engine", Task: "T1", Rule: "N33", Asked: []string{flow.AskRerunCI + "@" + h}, Decision: "merged PR #7 failed and asked you", Why: "the PR snapshot changed"}, ""},
+		{"plain_coordinator_action", LogLine{Seq: 23, At: t0, By: flow.RoleCoordinator, Task: "T1", Rule: "plan", Decision: "planned 4 tasks", Why: "in 2 layers"}, ""},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			obs := tc.want == "observation"
+			entries, supported := callLogView(t, []LogLine{tc.line}, 10, obs)
+			if !supported {
+				t.Fatalf("LogView does not accept observations=true yet (plan.md 14.7)")
+			}
+			if len(entries) != 1 {
+				t.Fatalf("LogView returned %d entries, want 1", len(entries))
+			}
+			wire, objs := decodeLogEntries(t, entries)
+			if wire[0].Kind != tc.want {
+				t.Errorf("Kind = %q, want %q (raw=%v)", wire[0].Kind, tc.want, objs[0])
+			}
+			for _, forbidden := range []string{"rule", "asked", "input", "facts", "seq", "project"} {
+				if _, ok := objs[0][forbidden]; ok {
+					t.Errorf("LogEntry JSON leaked forbidden field %q: %v", forbidden, objs[0])
+				}
+			}
+		})
+	}
+}
+
+// TestEveryFlowAskConstantClassifiedForLogKind checks plan.md PR 14.7: every
+// Ask… action constant in internal/factory/flow must be either mapped to a
+// non-empty LogEntry.Kind or listed here as plain on purpose, so a new row
+// cannot be silently unmarked.
+func TestEveryFlowAskConstantClassifiedForLogKind(t *testing.T) {
+	t.Parallel()
+	plainOnPurpose := map[string]bool{
+		flow.AskDeliverAnswer:     true,
+		flow.AskOverrideResult:    true,
+		flow.AskStartCoordinator:  true,
+		flow.AskStopCoordinator:   true,
+		flow.AskFinalJournal:      true,
+		flow.AskCoordGoOn:         true,
+		flow.AskCoordDialogStuck:  true,
+		flow.AskDeliverWakes:      true,
+		flow.AskHeartbeat:         true,
+		flow.AskStartPlanReviewer: true,
+		flow.AskStopPlanReviewer:  true,
+		flow.AskAcceptPlan:        true,
+		flow.AskRetry:             true,
+		flow.AskNewAttempt:        true,
+		flow.AskStartWorker:       true,
+		flow.AskStartReview:       true,
+		flow.AskNudgeReview:       true,
+		flow.AskStopReview:        true,
+		flow.AskStartRetro:        true,
+		flow.AskNudgeRetro:        true,
+		flow.AskStopRetro:         true,
+		flow.AskTellFindings:      true,
+		flow.AskTellStop:          true,
+		flow.AskTellDiverged:      true,
+		flow.AskTellConflict:      true,
+		flow.AskMergeOnly:         true,
+		flow.AskPushPR:            true,
+		flow.AskRerunCI:           true,
+		flow.AskTellCI:            true,
+		flow.AskTellBaseRed:       true,
+		flow.AskDispatchCI:        true,
+		flow.AskUpdateBranch:      true,
+		flow.AskAccept:            true,
+		flow.AskMerge:             true,
+		flow.AskSpendOverride:     true,
+		flow.AskCleanup:           true,
+		flow.AskWake:              true,
+		flow.AskStopRuns:          true,
+	}
+
+	files, err := filepath.Glob(filepath.Join("flow", "*.go"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	fset := token.NewFileSet()
+	discovered := map[string]string{} // const name -> string value
+	for _, file := range files {
+		if strings.HasSuffix(file, "_test.go") {
+			continue
+		}
+		parsed, err := parser.ParseFile(fset, file, nil, 0)
+		if err != nil {
+			t.Fatalf("parse %s: %v", file, err)
+		}
+		for _, decl := range parsed.Decls {
+			gd, ok := decl.(*ast.GenDecl)
+			if !ok || gd.Tok != token.CONST {
+				continue
+			}
+			for _, spec := range gd.Specs {
+				vs := spec.(*ast.ValueSpec)
+				for i, ident := range vs.Names {
+					name := ident.Name
+					if !strings.HasPrefix(name, "Ask") || strings.HasPrefix(name, "AskStatus") || strings.HasPrefix(name, "AskedBy") {
+						continue
+					}
+					if i >= len(vs.Values) {
+						t.Fatalf("%s: const %s has no literal value", file, name)
+					}
+					lit, ok := vs.Values[i].(*ast.BasicLit)
+					if !ok || lit.Kind != token.STRING {
+						t.Fatalf("%s: const %s is not a string literal", file, name)
+					}
+					val, err := strconv.Unquote(lit.Value)
+					if err != nil {
+						t.Fatalf("%s: unquote %s: %v", file, name, err)
+					}
+					discovered[name] = val
+				}
+			}
+		}
+	}
+	if len(discovered) < 40 {
+		t.Fatalf("discovered only %d Ask* constants in flow, expected >= 40", len(discovered))
+	}
+
+	t0 := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	seenVal := map[string]bool{}
+	for name, val := range discovered {
+		seenVal[val] = true
+		entries, _ := callLogView(t, []LogLine{{Seq: 1, At: t0, By: "engine", Task: "T1", Decision: "step", Asked: []string{val}}}, 10, false)
+		if len(entries) != 1 {
+			t.Fatalf("flow.%s (%q): LogView returned %d entries, want 1", name, val, len(entries))
+		}
+		wire, _ := decodeLogEntries(t, entries)
+		inPlain := plainOnPurpose[val]
+		if wire[0].Kind == "" && !inPlain {
+			t.Errorf("flow.%s (%q) is in neither the log kind map nor plainOnPurpose", name, val)
+		}
+		if wire[0].Kind != "" && inPlain {
+			t.Errorf("flow.%s (%q) mapped to kind %q but is also in plainOnPurpose", name, val, wire[0].Kind)
+		}
+	}
+	for val := range plainOnPurpose {
+		if !seenVal[val] {
+			t.Errorf("plainOnPurpose entry %q does not match any Ask* constant in flow", val)
+		}
+	}
+}
+
+// TestLogViewAndEngineLogLinesObservationsAndTaskFilter checks plan.md PR 14.7:
+// newest n lines without observations (n counts lines the owner sees), with
+// observations, observation-only logs, and Engine.LogLines(project, n, task, observations)
+// returning an older task's lines past 100 newer lines of another task.
+func TestLogViewAndEngineLogLinesObservationsAndTaskFilter(t *testing.T) {
+	t.Parallel()
+	t0 := time.Date(2026, 11, 24, 10, 0, 0, 0, time.UTC)
+	var lines []LogLine
+	var seq int64
+	add := func(by, task, rule string, asked []string, dec, why string) {
+		seq++
+		lines = append(lines, LogLine{
+			Seq: seq, At: t0.Add(time.Duration(seq) * time.Second), Project: "proj-log",
+			By: by, Task: task, Rule: rule, Asked: asked, Decision: dec, Why: why,
+		})
+	}
+	add("owner", "", "start", nil, "started", "build log")
+	add("engine", "T1", "N23", []string{flow.AskStartWorker}, "started worker", "claude sonnet")
+	add("engine", "T1", "pr_snapshot", nil, "", "the PR snapshot changed")
+	add("engine", "T1", "N12", []string{flow.AskSizeRecap + "@c1"}, "opened size recap", "212 lines, cap 160")
+	add("engine", "T1", "N2", []string{flow.AskMarkDone}, "done: PR #7 merged", "the PR is merged")
+	add("engine", "T1", "pr_snapshot", nil, "", "the PR snapshot changed")
+	for i := 1; i <= 55; i++ {
+		add("engine", "T2", "N23", []string{flow.AskStartWorker}, fmt.Sprintf("t2-step-%d", i), "working")
+		add("engine", "T2", "pr_snapshot", nil, "", "the PR snapshot changed")
+	}
+	// Two trailing observations so default n=2 must still return 2 visible decisions.
+	add("engine", "T2", "pr_snapshot", nil, "", "the PR snapshot changed")
+
+	// 1. LogView without observations: n=2 counts visible lines, not trailing observations.
+	noObs, _ := callLogView(t, lines, 2, false)
+	wireNoObs, _ := decodeLogEntries(t, noObs)
+	if len(wireNoObs) != 2 || wireNoObs[0].Decision != "t2-step-54" || wireNoObs[1].Decision != "t2-step-55" {
+		t.Errorf("LogView(n=2, obs=false) = %+v, want [t2-step-54, t2-step-55]", wireNoObs)
+	}
+	// 2. LogView with observations=true: n=2 returns the two trailing observation lines.
+	withObs, obsSupported := callLogView(t, lines, 2, true)
+	if !obsSupported {
+		t.Errorf("LogView does not accept observations=true yet (plan.md 14.7)")
+	} else {
+		wireObs, _ := decodeLogEntries(t, withObs)
+		if len(wireObs) != 2 || wireObs[0].Kind != "observation" || wireObs[1].Kind != "observation" {
+			t.Errorf("LogView(n=2, obs=true) = %+v, want 2 observation lines", wireObs)
+		}
+	}
+	// 3. Observation-only slice returns empty when observations=false.
+	onlyObs := []LogLine{
+		{Seq: 1, At: t0, By: "engine", Task: "T1", Rule: "pr_snapshot", Why: "the PR snapshot changed"},
+		{Seq: 2, At: t0.Add(time.Second), By: "engine", Task: "T1", Rule: "pr_snapshot", Why: "the checks rollup changed"},
+	}
+	if got, _ := callLogView(t, onlyObs, 50, false); len(got) != 0 {
+		t.Errorf("LogView(onlyObs, obs=false) len = %d, want 0", len(got))
+	}
+
+	// 4. Engine.LogLines(project, n, task, observations).
+	paths := Paths{DataDir: t.TempDir()}
+	if err := SaveState(paths.State("proj-log"), flow.State{
+		Seq: seq, Settings: flow.DefaultSettings(),
+		Project: flow.Project{ID: "proj-log", Folder: "/tmp/log", Goal: "build log", Started: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range lines {
+		if err := AppendLog(paths.Log("proj-log"), l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := SaveState(paths.State("proj-obs"), flow.State{
+		Seq: 2, Settings: flow.DefaultSettings(),
+		Project: flow.Project{ID: "proj-obs", Folder: "/tmp/obs", Goal: "only obs", Started: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range onlyObs {
+		if err := AppendLog(paths.Log("proj-obs"), l); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	eng := newGitTestEngine(t, paths, nil)
+	type logLines4 interface {
+		LogLines(project string, n int, task string, observations bool) ([]LogEntry, error)
+	}
+	ll, ok := any(eng).(logLines4)
+	if !ok {
+		t.Fatalf("Engine.LogLines(project, n, task, observations) method signature is missing (plan.md 14.7)")
+	}
+
+	// Task filter recovers T1's lines even though >100 T2 lines follow them.
+	t1Vis, err := ll.LogLines("proj-log", 100, "T1", false)
+	if err != nil {
+		t.Fatalf("LogLines(T1, obs=false): %v", err)
+	}
+	wT1Vis, _ := decodeLogEntries(t, t1Vis)
+	if len(wT1Vis) != 3 || wT1Vis[0].Decision != "started worker" || wT1Vis[1].Kind != "needs_decision" || wT1Vis[2].Kind != "merged" {
+		t.Errorf("LogLines(T1, obs=false) = %+v, want 3 visible T1 lines [plain, needs_decision, merged]", wT1Vis)
+	}
+	for _, e := range wT1Vis {
+		if e.Task != "T1" || e.Kind == "observation" {
+			t.Errorf("LogLines(T1, obs=false) leaked entry %+v", e)
+		}
+	}
+
+	// Task filter with observations=true includes T1's 2 pr_snapshot lines too.
+	t1All, err := ll.LogLines("proj-log", 100, "T1", true)
+	if err != nil {
+		t.Fatalf("LogLines(T1, obs=true): %v", err)
+	}
+	wT1All, _ := decodeLogEntries(t, t1All)
+	if len(wT1All) != 5 || wT1All[1].Kind != "observation" || wT1All[4].Kind != "observation" {
+		t.Errorf("LogLines(T1, obs=true) = %+v, want 5 T1 lines with 2 observations", wT1All)
+	}
+
+	// Task filter honours n.
+	t1One, err := ll.LogLines("proj-log", 1, "T1", false)
+	if err != nil {
+		t.Fatalf("LogLines(T1, n=1, obs=false): %v", err)
+	}
+	wT1One, _ := decodeLogEntries(t, t1One)
+	if len(wT1One) != 1 || wT1One[0].Kind != "merged" {
+		t.Errorf("LogLines(T1, n=1, obs=false) = %+v, want newest 1 visible T1 line (merged)", wT1One)
+	}
+
+	// Observation-only project: empty without observations, full with observations=true.
+	if got, err := ll.LogLines("proj-obs", 50, "", false); err != nil || len(got) != 0 {
+		t.Errorf("LogLines(proj-obs, obs=false) = (%d, %v), want (0, nil)", len(got), err)
+	}
+	if got, err := ll.LogLines("proj-obs", 50, "", true); err != nil || len(got) != 2 {
+		t.Errorf("LogLines(proj-obs, obs=true) = (%d, %v), want (2, nil)", len(got), err)
+	}
+	if _, err := ll.LogLines("missing", 10, "T1", false); !errors.Is(err, ErrProjectNotFound) {
+		t.Errorf("LogLines(missing) err = %v, want ErrProjectNotFound", err)
 	}
 }
