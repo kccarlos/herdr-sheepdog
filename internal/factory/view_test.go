@@ -2229,3 +2229,33 @@ func TestTaskStepsPlanReviewBeforePlannedOrder(t *testing.T) {
 		}
 	}
 }
+
+// A task planned before plan review was turned on (not unreviewed, no plan review covers it)
+// must keep the steps in order: plan review is never "todo" before a done or now step.
+func TestTaskStepsNeverReviewedTaskKeepsOrder(t *testing.T) {
+	s := flow.DefaultSettings()
+	s.PlanReviewRounds = 1
+	st := flow.State{
+		Settings: s,
+		Project:  flow.Project{ID: "p-never-reviewed", Started: true},
+		Tasks: []flow.Task{{
+			ID: "T1", Title: "planned before plan review existed", LastRow: "N23",
+			Attempts: []flow.Attempt{{BaseCommit: "b0", RunID: "w1", Run: &flow.RunRecord{State: flow.PhaseWorking}}},
+		}},
+	}
+	for _, tv := range GraphViewOf(st, nil).Tasks {
+		steps := taskStepsOf(t, tv)
+		seenNow := false
+		for _, step := range steps {
+			if step.State == "now" {
+				seenNow = true
+			}
+			if !seenNow && step.State == "todo" {
+				t.Errorf("%s: step %q is todo before the now step; steps=%+v", tv.Ref, step.Name, steps)
+			}
+		}
+		if !seenNow {
+			t.Errorf("%s: no now step; steps=%+v", tv.Ref, steps)
+		}
+	}
+}
