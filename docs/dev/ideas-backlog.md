@@ -14,7 +14,6 @@ Duplicates across the three `shepherdr` passes are merged; capabilities Sheepdog
 | 8 | Tag `/ws` audio frames, `flush`, and `flushed` with a monotonic `run_id` epoch and cap the iOS mic uplink queue (`drop_oldest` for PCM, priority lane for controls). | Prevents stale audio blurting after double barge-in and ensures Sheepdog hears `"Stop!"` immediately after a Wi-Fi-to-cellular stall. | `sglang-omni` | S | Version-gate the frame header or pair with `turn_start {run_id}` so browser `/voice` stays compatible. |
 | 9 | Retract answered/expired notifications on macOS and iOS, suppress alerts when the `herdr-app` panel is focused, and sync app badge counts + `/voice` tab title. | Answering by voice immediately clears stale approval banners on phone and Mac, and badges match actual waiting agents. | `shepherdr` | M | On iOS, sum waiting counts across paired computers locally so one daemon's badge update does not overwrite another's. |
 | 10 | Pace outbound server PCM (`max_output_lead_ms ~ 1s`) with instant server buffer purge on barge-in. | Eliminates cellular WebSocket backpressure drops on long replies, bounds cut error to `<1s`, and preserves unread audio across phone-to-browser handoff. | `sglang-omni` | M | Keep lead above iOS target buffer (`1.0s` Gemini, `2.2s` GPT-Live) so playback never starves. |
-| 15 | Decompose `voice_ms` into client `uplink_lag_ms`, `gate_tail_ms`, and `provider_eou_ms`, and add CI checks for surface enum parity and repo personal-data leaks. | Pinpoints whether voice lag is cellular network, gate wait, or cloud provider, and catches surface drift or leaked local paths in CI. | `sglang-omni` + `shepherdr` | S | Keep the parity test scoped to protocol enums (`kind`, event types, problem codes) rather than UI layout internals. |
 
 ## Shipped
 
@@ -26,6 +25,7 @@ Duplicates across the three `shepherdr` passes are merged; capabilities Sheepdog
 | 12 | Persist the `herdr-app` panel draft and outbox across mod auto-reloads, allow queuing a line while busy, and offer an opt-in `keys.json` focus shortcut + `?` sheet. | Shipped. |
 | 13 | Bring browser `/voice` to parity: 1.5s wake-ping on unlock, clickable approval buttons, `1`–`9` shortcuts, and build-change reload when idle. | Shipped (Web Push removed; native notifications cover iOS/macOS). |
 | 14 | Run workers and `investigate` sub-agents at `utility` OS priority / higher OOM score, and block ticketless loopback requests carrying `X-Forwarded-*` or active Tailscale Funnel. | Shipped (`internal/procprio`, `internal/web`). |
+| 15 | Decompose `voice_ms` into client `uplink_lag_ms`, `gate_tail_ms`, and `provider_eou_ms`, and add CI checks for surface enum parity and repo personal-data leaks. | Shipped (`internal/observe`, `internal/scorecard`, `internal/docscheck`). |
 
 ## Worth Designing (High Value, Larger UX or Protocol Surface)
 

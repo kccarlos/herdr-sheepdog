@@ -1,6 +1,6 @@
 # Harness iteration 7: unanswered questions, 2026-10-13
 
-Harness iteration 7 (docs/dev/handover-2026-10-04.md, "Harness iteration, from 2026-10-11") covers the second of the CEO's product notes (approved scope, 2026-10-13). The note: when the user asked a question that never got a real answer, the orchestrator comes back to it later ("about your earlier question on …"). The daemon records only the clear cases. In case (a) the orchestrator turn timed out or ended in the daemon's fallback line. In case (b) the user's barge-in cut the answer off before it was said. In case (c) the answer was never voiced. The daemon does not judge whether an answer was good. Before this change nothing recorded these cases, so the question was dropped.
+Harness iteration 7 (from 2026-10-11) covers the second of the CEO's product notes (approved scope, 2026-10-13). The note: when the user asked a question that never got a real answer, the orchestrator comes back to it later ("about your earlier question on …"). The daemon records only the clear cases. In case (a) the orchestrator turn timed out or ended in the daemon's fallback line. In case (b) the user's barge-in cut the answer off before it was said. In case (c) the answer was never voiced. The daemon does not judge whether an answer was good. Before this change nothing recorded these cases, so the question was dropped.
 
 ## How often it happens
 

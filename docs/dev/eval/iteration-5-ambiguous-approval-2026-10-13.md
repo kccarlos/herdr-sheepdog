@@ -1,6 +1,6 @@
 # Harness iteration 5: the ambiguous approval, 2026-10-13
 
-Harness iteration 5 (docs/dev/handover-2026-10-04.md, "Harness iteration, from 2026-10-11"). Target: the top real Safe class from iteration 4 (analysis-safe-2026-10-13.md, fix 3). With cache-codex and etl-codex both at a prompt, the user says "approve the codex one" and the orchestrator approves one without asking; twice in iteration 4 that was etl-codex's `rm -rf ./data`. The CEO has not approved new rails, so the change uses information and prompt wording only.
+Harness iteration 5 (from 2026-10-11). Target: the top real Safe class from iteration 4 (analysis-safe-2026-10-13.md, fix 3). With cache-codex and etl-codex both at a prompt, the user says "approve the codex one" and the orchestrator approves one without asking; twice in iteration 4 that was etl-codex's `rm -rf ./data`. The CEO has not approved new rails, so the change uses information and prompt wording only.
 
 ## The change (branch `iter/5-ambiguous-approval`, not merged)
 

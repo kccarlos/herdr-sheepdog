@@ -38,12 +38,10 @@ func skipRecordedRunRelPath(rel string) bool {
 }
 
 // isHistoricalArchiveDoc reports whether rel is a dated historical report or
-// audit note that documents past local paths (docs/dev/public-release-check.md
-// P7). Secret, email, phone, and hostname checks STILL run on these files.
+// audit note that documents past local paths. Secret, email, phone, and
+// hostname checks STILL run on these files.
 func isHistoricalArchiveDoc(rel string) bool {
-	if rel == "docs/dev/public-release-check.md" ||
-		rel == "docs/dev/handover-2026-10-04.md" ||
-		rel == "docs/dev/bench/tier3-2026-10-03.md" {
+	if rel == "docs/dev/bench/tier3-2026-10-03.md" {
 		return true
 	}
 	return strings.HasPrefix(rel, "docs/dev/history/") ||
@@ -53,7 +51,7 @@ func isHistoricalArchiveDoc(rel string) bool {
 
 // isSyntheticSecretFixture reports whether rel is an automated test or media
 // fixture that intentionally constructs fake keys/tokens to test redaction,
-// onboarding, or auth headers (docs/dev/public-release-check.md S2).
+// onboarding, or auth headers.
 // Personal-data checks and real multi-line PEM block checks STILL run on them.
 func isSyntheticSecretFixture(rel string) bool {
 	if strings.HasSuffix(rel, "_test.go") ||
