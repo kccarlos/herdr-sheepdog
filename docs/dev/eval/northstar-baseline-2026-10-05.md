@@ -1,6 +1,6 @@
 # North star on the 2026-10-05 results
 
-Step 2 of "Evals first" in [handover-2026-10-04.md](../handover-2026-10-04.md):
+Step 2 of "Evals first" (2026-10-05):
 the north-star block and the programmatic checks
 ([docs/dev/bench/README.md](../bench/README.md#north-star-and-programmatic-checks-internalnorthstar)),
 computed offline from the recorded results with `sheepdog bench

@@ -1,8 +1,8 @@
 # iPhone app
 
-**Sheepdog for herdr puts the microphone, the speaker and the lock screen in your pocket.**
+**Sheepdog puts the microphone, the speaker and the lock screen in your pocket.**
 
-**Sheepdog for herdr** is the phone side of sheepdog: the microphone, the
+**Sheepdog** is the phone side of sheepdog: the microphone, the
 speaker and the screen. The daemon on your computer owns the models and
 the agents. The app talks only to your own daemon (and to Apple for
 notifications, if you set up push). It needs iOS 26 or newer, and runs on
@@ -12,7 +12,7 @@ Also on your Mac: [the herdr-app panel and Sheepdog.app](desktop.md).
 
 ## Install
 
-- **TestFlight:** [join the beta](https://testflight.apple.com/join/bjCaFYgK). Install the TestFlight app first, then open the link. The App Store name is "Sheepdog for herdr"; the home-screen label is "Sheepdog".
+- **TestFlight:** [join the beta](https://testflight.apple.com/join/bjCaFYgK). Install the TestFlight app first, then open the link. The App Store name is "Sheepdog: Voice for AI Agents"; the home-screen label is "Sheepdog".
 - **Build it yourself:** the source is in [`ios/`](../ios/README.md) in this
   repository, with the steps (XcodeGen, Xcode, your own Apple team).
 

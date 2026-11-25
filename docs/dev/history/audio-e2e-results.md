@@ -55,7 +55,7 @@ side, fixed below.
 
 ## GPT-Live input pacing (2026-09-25): output now runs at real time
 
-**Hypothesis** (`docs/dev/research/voice-frameworks-2026-09-24.md` P1): the
+**Hypothesis:** the
 daemon's keep-alive sent one 40 ms tick of silence only when two ticks
 had passed since the last send, so while the client's gate was closed —
 exactly while the model replies — GPT-Live's input timeline advanced at

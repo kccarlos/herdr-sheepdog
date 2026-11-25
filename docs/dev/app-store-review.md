@@ -66,7 +66,7 @@ fix column says what to change. "PR n" refers to the PR list in section 3.
 |---|---|---|---|
 | 2.1(a): the app is complete, with no placeholder content and working URLs | pass | The first-run screen explains what the app needs and offers the demo ([launch-review.md](../../ios/docs/dev/launch-review.md) P0 1). The demo's Settings show no empty daemon pages (P1 7). The URLs in `ios/Sources/SheepdogKit/SetupHelp.swift:10-15` resolve: the repository is public (`gh repo view`: PUBLIC). | None. Check every URL again on the submission day. |
 | 2.1(a): if the app has a login, give a demo account, or a demo mode with Apple's prior approval | pass | There is no login or account. Pairing is a QR code from the user's own computer. The built-in demo needs no network (`ios/Sources/SheepdogKit/DemoDaemon.swift`, `DemoWorld.swift`). | Reviewer notes (section 4) walk through the demo. Because there is no account, the demo-account rule does not apply. |
-| 2.1(a): the reviewer must be able to see the real features | CEO (video) | Real use needs a sheepdog daemon on a Mac or Linux computer that runs herdr. The launch video in the README is a synthetic cut ([launch-video.md](launch-video.md)). | Decided: the CEO records it. A 1 to 2 minute screen recording on a real iPhone: scan the pairing code, start a voice session, approve a prompt, open an agent window and a shell. Link it in the reviewer notes (an unlisted video, or a GitHub release asset). Offering reviewers a reachable test daemon is possible but exposes a real computer. Not recommended. |
+| 2.1(a): the reviewer must be able to see the real features | CEO (video) | Real use needs a sheepdog daemon on a Mac or Linux computer that runs herdr. The launch video in the README is a synthetic cut ([scripts/readme-media/launch/README.md](../../scripts/readme-media/launch/README.md)). | Decided: the CEO records it. A 1 to 2 minute screen recording on a real iPhone: scan the pairing code, start a voice session, approve a prompt, open an agent window and a shell. Link it in the reviewer notes (an unlisted video, or a GitHub release asset). Offering reviewers a reachable test daemon is possible but exposes a real computer. Not recommended. |
 | 2.1(a): no crashes on device; built with the release SDK | pass | `ios.yml` runs the unit and UI tests on Xcode 27.1 (`.github/workflows/ios.yml:158`). Xcode Cloud archives with "Latest Release" ([xcode-cloud.md](../../ios/docs/dev/xcode-cloud.md)). | Before submitting, install the exact TestFlight build on one iPhone and one iPad and walk the reviewer notes. |
 | SDK minimum: built with Xcode 26 or later and the iOS 26 SDK (since 2026-04-28) | pass | Xcode 27.1 locally and in CI. The deployment target is iOS 26.0 (`ios/project.yml:4-6`). | None. |
 | 2.3.1, 2.3.7: accurate metadata; name of 30 characters or fewer; no trademark stuffing; the subtitle does not reference other apps | decided | Name `Sheepdog: Voice for AI Agents` (29), subtitle `Manage coding agents by voice` (29). The App Store Connect record is still named "Sheepdog for herdr" (read with `asc apps list`). | The CEO renames the record (a mutation). Keep Claude, Codex, Gemini and herdr out of the keywords. |
@@ -137,7 +137,7 @@ Fix PRs, in order of rejection risk. Status as of 2026-10-26.
 | 4 | `fix(ios): purpose strings name the AI step` | done (#417) | 3 (part) |
 | 5 | `feat(ios): ask before voice and screens go to AI services` | done (#433) | 3 |
 | 6 | `fix(ios): demo asks for the microphone on first use` | done (#434) | 13 |
-| 7 | Screenshots (section 8) | left | 2.3.3 |
+| 7 | Screenshots (section 8) | script merged (`ios/scripts/appstore-shots.sh`); capture & upload left (CEO) | 2.3.3 |
 | 8 | Enter the metadata (section 7) in App Store Connect | left (CEO) | 2.3.1 |
 
 PR 5 is a one-time consent screen before the first real pairing or voice session, never in
@@ -161,7 +161,7 @@ App Store Connect, not in this repository.
 
 Nothing here has been done. Each step is a change in App Store Connect that only the CEO makes.
 
-1. Wait until the screenshots have merged (PR 5 #433 AI consent and PR 6 #434 demo microphone are done;
+1. Run `ios/scripts/appstore-shots.sh` to capture the three screenshot sets (PR 5 #433 AI consent, PR 6 #434 demo microphone, and the screenshot script are done;
    `MARKETING_VERSION` in `ios/project.yml` is `0.2.12`).
 2. Business: declare EU trader status with your real name, address, phone and email, and
    verify them. They are shown on the product page and are never put in the repository.
@@ -187,58 +187,8 @@ Nothing here has been done. Each step is a change in App Store Connect that only
 
 ## 4. Reviewer notes (draft for App Review Information ▸ Notes)
 
-Limit: 4,000 characters. This draft has about 3,500.
-
-> No sign-in is needed. The app has no accounts.
->
-> WHAT IT IS. Sheepdog is a voice remote for sheepdog, a free open-source program that people
-> run on their own Mac or Linux computer to supervise coding agents (Claude Code, Codex and
-> others) in the herdr terminal: https://github.com/kccarlos/herdr-sheepdog. The app talks only
-> to that program on the user's own computer. We run no server for it, except an optional relay
-> that forwards end-to-end encrypted notifications to APNs.
->
-> HOW TO REVIEW WITHOUT A COMPUTER. Tap "Try the demo" on the first screen. The demo runs
-> entirely on the device, with no network. Four scripted agents work on a sample project. After
-> about 15 seconds, codex-payments asks for approval: tap "Yes, proceed". Open Agents for the
-> list, tap an agent and "Open window" to see its (scripted) terminal, and tap a suggested
-> question such as "What's going on?" to hear a spoken answer. iOS may ask for the microphone
-> and speech recognition (on-device only). Both are optional; tap or type instead. "Leave"
-> returns to setup. A recording of real use with a computer: <VIDEO LINK>.
->
-> AI SERVICES AND CONSENT. In real use, the user's own computer sends the voice and the
-> conversation to the AI services the user configured there with their own API keys (Google
-> Gemini or OpenAI for the voice; Google Gemini, DeepSeek, Anthropic, an OpenAI-compatible
-> service or a local model for answers). Before the first real connection, the app shows a
-> consent screen that names these services. Nothing is sent until the user taps Agree, and
-> Settings > Privacy withdraws consent. The demo uses no AI service and sends nothing.
->
-> THE SHELL AND AGENT WINDOWS. An agent window shows the terminal of a coding agent on the
-> user's own computer. "New shell" opens a terminal there. The app sends keystrokes and draws the
-> text, like an SSH client. Nothing is downloaded or run on the iPhone, and the app's features
-> do not change. The user can turn the shell off on their computer.
->
-> NETWORK SECURITY (ATS). NSAllowsArbitraryLoads is on because the app connects to the user's
-> own computer at a private IP address (home Wi-Fi or Tailscale), whose certificate is
-> self-signed. ATS cannot pin a self-signed certificate on an IP address, so the app checks the
-> certificate itself against the fingerprint in the pairing QR code, and rejects any other
-> certificate. The app refuses plain HTTP to any address except this device (127.0.0.1, used in
-> development). It never loads web content.
->
-> BACKGROUND AUDIO. A voice session is live two-way audio with the user's computer, like a
-> call. The audio mode keeps it going with the screen locked, if the user leaves "Keep listening
-> with the screen locked" on in Settings. The microphone indicator shows while it listens, and
-> Stop or the Live Activity ends it.
->
-> NOTIFICATIONS AND LIVE ACTIVITY. The app asks for notification permission only after it
-> connects to a computer that can send notifications, never in the demo. Notifications are
-> encrypted end to end with a key only the phone and the user's computer hold. "Time sensitive"
-> is used only when an agent is waiting for the user's approval. The Live Activity shows the
-> voice session and the agents waiting. The user's computer updates it, and it ends with the
-> session.
->
-> PERMISSIONS. Microphone: the voice session (demo: spoken questions). Speech recognition: demo
-> only, on device. Camera: scanning the pairing code, or a photo the user attaches for an agent.
-> Local network: reaching the user's computer. All are optional.
+The canonical reviewer notes draft (limit 4,000 characters, ~3,500 characters) now lives in
+[ios/docs/app-review-notes.md](../../ios/docs/app-review-notes.md). Fill `<VIDEO LINK>` before pasting.
 
 ## 5. App Privacy (nutrition label) draft
 

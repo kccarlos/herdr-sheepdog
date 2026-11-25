@@ -100,8 +100,7 @@ touches the daemon's API.
 
 - [docs/dev/architecture.md](docs/dev/architecture.md): how the code works.
 - [docs/dev/xcode-cloud.md](docs/dev/xcode-cloud.md): TestFlight releases,
-  which only Xcode Cloud archives (tags `ios-v*`; it runs no tests), and
-  [the monorepo switch](../docs/dev/xcode-cloud-monorepo.md).
+  which only Xcode Cloud archives (tags `ios-v*`; it runs no tests).
 - Contributing, security reports and agent rules are shared with the
   daemon: [CONTRIBUTING.md](../CONTRIBUTING.md#the-iphone-app-ios),
   [SECURITY.md](../SECURITY.md), [AGENTS.md](../AGENTS.md#the-iphone-app-ios).

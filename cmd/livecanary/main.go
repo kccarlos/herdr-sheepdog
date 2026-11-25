@@ -1,6 +1,6 @@
 // Command livecanary is a standalone platform canary for Gemini Live
 // context retention across session resumptions (work item "Gemini Live
-// context retention across resumes", docs/dev/handover-2026-10-04.md).
+// context retention across resumes").
 //
 // It speaks eight facts to a Live session set up like the daemon's (same
 // voice, compression trigger 16k / target 4k, resumption handle, tools),

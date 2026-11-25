@@ -1,6 +1,6 @@
 # Judge bake-off, 2026-10-06
 
-Queue item 1 of the night of 2026-10-06 (docs/dev/handover-2026-10-04.md):
+Queue item 1 of the night of 2026-10-06:
 ground truth for the calibration set, the CEO's rubric notes, a bake-off
 of judge models against that ground truth, the winner as the default
 judge, and the workday baseline rescored with it. Measurement and eval

@@ -17,8 +17,7 @@ asked for approval), Claude Code 2.1.275 (`--permission-mode default
 --model haiku`, alias `search-cc`). The voice client was a Go WebSocket
 client (no microphone): `testdata/audio/question.wav` streamed as 20 ms
 frames plus 4 s of trailing silence for the audio trials, `{"type":"text"}`
-utterances otherwise. The full narrative, latencies and bugs are in
-`docs/dev/history/e2e-results.md`.
+utterances otherwise.
 
 Four daemon runs (line ranges are 1-based line numbers in the JSONL):
 
