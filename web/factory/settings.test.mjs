@@ -213,7 +213,7 @@ function fakeDaemon({ rows = baseRows(), asks = [], paired = false, settingsStat
 }
 const realSet = globalThis.setTimeout, realClr = globalThis.clearTimeout, realCrypto = globalThis.crypto;
 let bootSeq = 0, activeCleanup = null;
-async function bootPage(t, daemon, { width = 1200, settle = true } = {}) {
+async function bootPage(t, daemon, { width = 1200, settle = true, hash = '' } = {}) {
   if (activeCleanup) await activeCleanup();
   const doc = createDoc(readFileSync(new URL('./index.html', import.meta.url), 'utf8')), idb = createIDB();
   const keys = ['document', 'window', 'location', 'indexedDB', 'fetch', 'crypto', 'addEventListener', 'removeEventListener', 'scrollTo', 'innerWidth', 'matchMedia'];
@@ -228,7 +228,7 @@ async function bootPage(t, daemon, { width = 1200, settle = true } = {}) {
   globalThis.setTimeout = (fn, ms, ...a) => disposed ? ++seq : (+ms >= 500 ? (timers.set(++seq, { fn: () => fn(...a), ms: +ms }), seq) : realSet(() => { if (!disposed) fn(...a); }, ms));
   globalThis.clearTimeout = (id) => { timers.delete(id) || realClr(id); };
   const setP = (k, v) => Object.defineProperty(globalThis, k, { value: v, configurable: true, writable: true });
-  for (const [k, v] of [['document', doc], ['window', globalThis], ['indexedDB', idb], ['crypto', { subtle, getRandomValues: (a) => realCrypto.getRandomValues(a), randomUUID: () => realCrypto.randomUUID() }], ['scrollTo', () => {}], ['innerWidth', curW], ['location', { hash: '', href: 'http://127.0.0.1:7777/factory' }],
+  for (const [k, v] of [['document', doc], ['window', globalThis], ['indexedDB', idb], ['crypto', { subtle, getRandomValues: (a) => realCrypto.getRandomValues(a), randomUUID: () => realCrypto.randomUUID() }], ['scrollTo', () => {}], ['innerWidth', curW], ['location', { hash, href: 'http://127.0.0.1:7777/factory' + hash }],
     ['fetch', (p, i) => disposed ? Promise.reject(new Error('disposed')) : (settle ? track(daemon.fetch(p, i)) : daemon.fetch(p, i))],
     ['addEventListener', (ev, fn) => (winLs.get(ev) || winLs.set(ev, []).get(ev)).push(fn)], ['removeEventListener', (ev, fn) => { const l = winLs.get(ev); if (l) winLs.set(ev, l.filter((x) => x !== fn)); }]]) setP(k, v);
   setP('matchMedia', (q) => {
@@ -421,7 +421,8 @@ test('answering a setting ask on another project does not show a cancelled notic
   const daemon = wrapDaemon(base, async (p, i) => p === '/api/factory/projects'
     ? { ok: true, status: 200, json: async () => ({ protocol: 1, projects: [{ id: 'proj-demo', goal: 'Stopped proj', running: false, counts: {} }, { id: 'proj-other', goal: 'Other proj', running: true, counts: {} }] }) }
     : base.fetch(p, i));
-  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  // 14.10: with two projects an empty address opens the overview, so open proj-demo's board.
+  const page = await bootPage(t, daemon, { hash: '#proj-demo' }), sec = findCard(page.doc, 'settings');
   daemon.openAsks[0].status = 'answered';
   await page.pollNow();
   assert.doesNotMatch(rowOf(sec, 'review rounds', page.doc).box.textContent, /project finished before you answered/);

@@ -34,7 +34,7 @@ export function renderAskCardsHTML(asks, state = {}) {
       return `<button type="button" class="ask-opt${rec ? ' rec' : ''}" data-ask-id="${esc(a.id)}" data-option="${esc(opt)}" aria-label="${esc(rec ? `${opt} (Recommended)` : opt)}"${busy ? ' disabled' : ''}>${esc(opt)}${rec ? ' <span class="rec-tag">Recommended</span>' : ''}</button>`;
     }).join('');
     const err = state.error && (!state.errorAskId || state.errorAskId === a.id) ? `<p class="ask-err" role="alert">${ERR_ICO}<span>${esc(state.error)}</span></p>` : '';
-    return `<article class="ask-card" data-ask-id="${esc(a.id)}" aria-label="${esc(a.question)}">${meta ? `<div class="meta">${meta}</div>` : ''}<p class="ask-q">${esc(a.question)}</p>${cmd}<div class="ask-opts" role="group" aria-label="Answer options">${opts}</div>${err}${inCard && state.pending?.askId === a.id ? pairBoxHTML(state) : ''}</article>`;
+    return `<article class="ask-card" tabindex="-1" data-ask-id="${esc(a.id)}" aria-label="${esc(a.question)}">${meta ? `<div class="meta">${meta}</div>` : ''}<p class="ask-q">${esc(a.question)}</p>${cmd}<div class="ask-opts" role="group" aria-label="Answer options">${opts}</div>${err}${inCard && state.pending?.askId === a.id ? pairBoxHTML(state) : ''}</article>`;
   }).join('') : '<p class="muted">No open asks right now.</p>';
   return state.needsPairing && !inCard ? html + pairBoxHTML(state) : html;
 }

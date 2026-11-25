@@ -1,12 +1,13 @@
 // The factory page (design.md 12.1, the FactoryWeb* boards): polls the factory
 // views and delegates ask answers, setting proposals and browser pairing to asks.js & settings.js.
-import { esc, isOwnerAsk, renderAskCardsHTML, createAskFlow, browserAskDeps, OK_ICO } from './asks.js';
+import { esc, renderAskCardsHTML, createAskFlow, browserAskDeps, OK_ICO } from './asks.js';
 import { renderSettingsHTML, proposeSetting, parseModelCandidates } from './settings.js';
 import { renderNewProjectHTML, renderProjectActionsHTML, loadNewProject, checkProject, startProject, stopProject, projectState, EMPTY_CARD_HTML, PLUS_ICO } from './project.js';
 import { renderMarkdown } from '../static/markdown.js';
 import { goalTitle } from './goal.js';
 import { renderGraphSection, syncGraphBox, highlightGraph } from './graph.js';
 import { renderLogHTML } from './log.js';
+import { needsByProject, projectName, renderOverviewHTML, renderNeedsYouHTML } from './overview.js';
 
 const POLL_MS = 3000, GIVE_UP_MS = 8000, NOTICE_MS = 5000;
 const $ = (id) => document.getElementById(id);
@@ -19,7 +20,7 @@ const STAGE = { owner_gate: ['needs your approval', 'blocked', true], owner_answ
 const ORDER = ['owner_gate', 'owner_answer', 'blocked_or_failed', 'ci', 'working', 'waiting_on_dep', 'queued'];
 // A stage this page does not know yet shows under its raw name rather than vanishing.
 const stage = (t) => STAGE[t.stage] || [t.stage || 'unknown', 'idle'];
-let data = null, down = false, lastOK = 0, timer = 0, busy = false, again = false, curNarrow = true, npSeq = 0, paSeq = 0, justStarted = null, boardNotice = null, boardNoticeTimer = 0;
+let data = null, down = false, lastOK = 0, timer = 0, busy = false, again = false, curNarrow = true, npSeq = 0, paSeq = 0, justStarted = null, boardNotice = null, boardNoticeTimer = 0, needsOpen = false, pendingAskFocus = null;
 let taskView = (() => { try { return globalThis.sessionStorage?.getItem('factory-view') === 'graph' ? 'graph' : 'list'; } catch { return 'list'; } })();
 const started = Date.now(), noticeTimers = new Map();
 const mq = globalThis.matchMedia?.('(max-width: 760px)') || null;
@@ -46,6 +47,11 @@ const setNotice = (n, txt) => {
   noticeTimers.set(n, setTimeout(() => { delete setUI.notices[n]; noticeTimers.delete(n); if (data) render(); }, NOTICE_MS));
 };
 const closeNewProject = () => { ++npSeq; npUI.open = false; if (askUI.pending?.kind === 'start') clearPair(); };
+const projAsks = (d = data) => (d?.p ? needsByProject(d.asks, d.projects).get(d.p) || [] : []);
+const focusAskCard = (id) => {
+  const card = [...$('asks').querySelectorAll('article.ask-card')].find((c) => c.dataset.askId === id);
+  if (card) { card.scrollIntoView?.({ block: 'nearest' }); card.focus({ preventScroll: true }); }
+};
 
 async function get(url, retried = false) {
   const r = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(2 * POLL_MS) });
@@ -75,7 +81,7 @@ async function poll() {
   try {
     const [{ projects = [] }, { asks = [] }] = await Promise.all([get('/api/factory/projects'), get('/api/factory/asks')]);
     const sp = justStarted && (projects.find((x) => !justStarted.ids.has(x.id)) || projects.find((x) => x.folder === justStarted.folder));
-    const p = sp ? sp.id : (projects.some((x) => x.id === want) ? want : (projects[0]?.id || ''));
+    const p = sp ? sp.id : (projects.some((x) => x.id === want) ? want : (projects.length === 1 ? projects[0].id : ''));
     if (sp || !again) justStarted = null;
     if (sp) {
       clearTimeout(boardNoticeTimer);
@@ -124,7 +130,7 @@ async function poll() {
     if (prevPr && projectState(prevPr) !== st) { paUI.error = ''; paUI.checks = null; }
     if (askUI.pending?.kind === 'project' && ((askUI.pending.action === 'stop' && !canStop) || (askUI.pending.action === 'resume' && st !== 'stopped'))) clearPair();
   }
-  if (setUI.editor && (next?.asks || []).some((a) => a.status === 'open' && a.set?.name === setUI.editor.row && (!a.project || a.project === next.p))) setUI.editor = null;
+  if (setUI.editor && projAsks(next).some((a) => a.set?.name === setUI.editor.row)) setUI.editor = null;
   if (!off) lastOK = Date.now();
   render();
   if (setP && !off) {
@@ -133,8 +139,9 @@ async function poll() {
     else if (sr.http || !setUI.rows) { setUI.error = sr.error; if (sr.needsPairing) Object.assign(askUI, { needsPairing: true, pairMessage: sr.pairMessage || '' }); }
     else down = true;
     if (prevPr && nextPr && projectState(prevPr) === 'running' && (nextPr.state ? nextPr.state === 'finished' : !nextPr.running)) {
-      for (const a of prev.asks || []) if (a.status === 'open' && a.set && (!a.project || a.project === next.p) && !setUI.notices[a.set.name]
-        && !next.asks.some((x) => x.id === a.id || (x.status === 'open' && x.project === next.p && x.set?.name === a.set.name))
+      const nextPAsks = projAsks(next);
+      for (const a of projAsks(prev)) if (a.set && !setUI.notices[a.set.name]
+        && !nextPAsks.some((x) => x.id === a.id || x.set?.name === a.set.name)
         && (setUI.rows || []).find((r) => r.name === a.set.name)?.value !== a.set.value) {
         setNotice(a.set.name, 'Not saved: the project finished before you answered, so this change was cancelled. You can make it again.');
       }
@@ -148,7 +155,7 @@ async function poll() {
 
 // set replaces an element's HTML only when it changed, then reopens the <details>
 // that were open and puts keyboard focus back on the same control.
-const key = (e) => e.id ? `${e.tagName}#${e.id}` : e.dataset?.view ? `${e.tagName}:view:${e.dataset.view}` : e.dataset?.ref ? `${e.tagName}:ref:${e.dataset.ref}` : [e.tagName, e.dataset?.setting || e.dataset?.sugg || e.dataset?.pa || e.getAttribute('href') || e.dataset?.askId || e.closest?.('[data-row]')?.dataset.row || e.closest?.('[data-ask-id]')?.dataset.askId || '', e.dataset?.option || e.dataset?.copy || e.getAttribute('aria-label') || (e.dataset?.npCheck && 'np-check') || (e.dataset?.npStart && 'np-start') || e.className || e.parentElement?.className || e.textContent?.slice(0, 24) || ''].join(':');
+const key = (e) => e.id ? `${e.tagName}#${e.id}` : e.dataset?.view ? `${e.tagName}:view:${e.dataset.view}` : e.dataset?.ref ? `${e.tagName}:ref:${e.dataset.ref}` : e.dataset?.askId && !e.dataset?.option ? `${e.tagName}:ask:${e.dataset.askId}` : [e.tagName, e.dataset?.setting || e.dataset?.sugg || e.dataset?.pa || e.getAttribute('href') || e.dataset?.askId || e.closest?.('[data-row]')?.dataset.row || e.closest?.('[data-ask-id]')?.dataset.askId || '', e.dataset?.option || e.dataset?.copy || e.getAttribute('aria-label') || (e.dataset?.npCheck && 'np-check') || (e.dataset?.npStart && 'np-start') || e.className || e.parentElement?.className || e.textContent?.slice(0, 24) || ''].join(':');
 function set(el, html) {
   if (el._html === html) return;
   const open = [...el.querySelectorAll('details[open]')].map(key);
@@ -156,8 +163,32 @@ function set(el, html) {
   const focus = active && key(active), sel = active ? [active.selectionStart, active.selectionEnd] : null;
   el.innerHTML = html; el._html = html;
   for (const d of el.querySelectorAll('details')) d.open = open.includes(key(d));
-  const hit = focus && [...el.querySelectorAll('a, button, summary, input, select, textarea')].find((x) => key(x) === focus);
+  const hit = focus && [...el.querySelectorAll('a, button, summary, input, select, textarea, [tabindex]')].find((x) => key(x) === focus);
   if (hit) { hit.focus({ preventScroll: true }); if (sel && sel[0] != null && hit.setSelectionRange) { try { hit.setSelectionRange(sel[0], sel[1]); } catch {} } }
+}
+
+function syncNeeds(html) {
+  const host = $('needs-you');
+  if (host._html === html) return;
+  const curBtn = host.querySelector('#ni-btn');
+  if (!html || !curBtn || !host.appendChild) return set(host, html);
+  const active = host.contains(document.activeElement) ? document.activeElement : null, focus = active && key(active);
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  const nextBtn = tmp.querySelector('#ni-btn'), nextList = tmp.querySelector('.ni-list');
+  if (!nextBtn) return set(host, html);
+  curBtn.setAttribute('aria-expanded', nextBtn.getAttribute('aria-expanded'));
+  curBtn.setAttribute('aria-label', nextBtn.getAttribute('aria-label'));
+  if (curBtn.textContent !== nextBtn.textContent) {
+    while (curBtn.childNodes.length) curBtn.removeChild(curBtn.childNodes[0]);
+    for (const n of [...nextBtn.childNodes]) curBtn.appendChild(n);
+  }
+  host.querySelector('.ni-list')?.remove();
+  if (nextList) host.appendChild(nextList);
+  host._html = html;
+  const hit = focus && focus !== key(curBtn) && [...host.querySelectorAll('a, button')].find((x) => key(x) === focus);
+  if (hit) hit.focus({ preventScroll: true });
+  else if (active && !host.contains(active)) curBtn.focus({ preventScroll: true });
 }
 
 function render() {
@@ -171,21 +202,27 @@ function render() {
   $('skeleton').hidden = !waiting;
   $('board').hidden = waiting;
   if (waiting) return;
-  const tasks = sortedTasks();
+  const needs = needsByProject(data.asks, data.projects), hasNeeds = needs.size > 0;
+  const wasInNeeds = $('needs-you').contains(document.activeElement);
+  if (!hasNeeds) needsOpen = false;
+  syncNeeds(renderNeedsYouHTML(data.projects, needs, needsOpen));
+  const tasks = sortedTasks(), many = data.projects.length >= 2;
   const t = !npUI.open && data.task && tasks.find((x) => x.ref === data.task), pr = data.projects.find((x) => x.id === data.p);
-  const graphOn = !npUI.open && !t && Boolean(pr) && !data.problem && tasks.length >= 2 && taskView === 'graph';
+  const overview = !npUI.open && many && !pr && !data.problem;
+  const hideSide = !!t || (many && !pr);
+  const graphOn = !npUI.open && !t && !overview && Boolean(pr) && !data.problem && tasks.length >= 2 && taskView === 'graph';
   $('board').className = graphOn ? 'cols graph-view' : 'cols';
-  const narrow = !t && !npUI.open && Boolean(mq ? mq.matches : globalThis.innerWidth <= 760);
+  const narrow = !t && !npUI.open && !overview && !hideSide && Boolean(mq ? mq.matches : globalThis.innerWidth <= 760);
   if (curNarrow !== narrow && $('main').after) {
     if (narrow) { $('main').before($('asks')); $('projects').after($('settings')); }
     else { $('main').after($('settings')); $('projects').after($('asks')); }
     curNarrow = narrow;
   }
-  $('aside').hidden = !!t; $('asks').hidden = !!t; $('tasks-top').hidden = !narrow;
+  $('aside').hidden = hideSide; $('asks').hidden = hideSide; $('tasks-top').hidden = !narrow;
   set($('tasks-top'), narrow ? boardHTML(tasks, 'top') : '');
   const prevBox = graphOn ? $('main').querySelector('.gbox') : null;
   const gScroll = prevBox ? prevBox.scrollLeft : 0, gBoxFocus = Boolean(prevBox && document.activeElement === prevBox);
-  set($('main'), npUI.open ? renderNewProjectHTML(npUI.rows, npState()) : (t ? taskHTML(t) : boardHTML(tasks, narrow ? 'body' : '')));
+  set($('main'), npUI.open ? renderNewProjectHTML(npUI.rows, npState()) : (t ? taskHTML(t) : (overview ? renderOverviewHTML(data.projects, needs) : boardHTML(tasks, narrow ? 'body' : ''))));
   if (graphOn) {
     syncGraphBox($('main'));
     const box = $('main').querySelector('.gbox');
@@ -194,15 +231,21 @@ function render() {
     const a = document.activeElement?.closest?.('a.gnode');
     if (a && $('main').contains(a)) highlightGraph(a.closest('svg'), a.dataset.ref, true);
   }
+  const pAsks = data.p ? (needs.get(data.p) || []) : [];
   $('settings').hidden = npUI.open || !!t || !pr || !!data.problem;
   $('settings').className = setUI.error ? 'card dashed' : 'card';
-  if (!$('settings').hidden) set($('settings'), renderSettingsHTML(setUI.rows, data.asks, setState()));
+  if (!$('settings').hidden) set($('settings'), renderSettingsHTML(setUI.rows, pAsks, setState()));
+  $('projects').hidden = many;
   set($('projects'), `<h2>projects</h2> ${data.projects.length ? data.projects.map(projHTML).join(' ') + ` <div class="ask-opts"><button type="button" class="ask-opt sm" data-new-project="1">${PLUS_ICO}New project</button></div>` : '<p class="muted">None yet.</p>'}`);
-  const asks = (data.asks || []).filter(isOwnerAsk);
-  set($('asks'), `<div class="head"><h2>asks for you</h2>${asks.length ? `<span>${asks.length} open</span>` : ''}</div>${renderAskCardsHTML(asks, askUI)}`);
+  set($('asks'), `<div class="head"><h2>asks for you</h2>${pAsks.length ? `<span>${pAsks.length} open</span>` : ''}</div>${renderAskCardsHTML(pAsks, askUI)}`);
   const runs = tasks.filter((x) => x.terminal);
   set($('agents'), `<div class="head"><h2>agents</h2><span>${runs.length} running</span></div>` + (runs.map((x) =>
     `<div class="agent"><span class="dot ${stage(x)[1]}" aria-hidden="true"></span><span><code>${esc(x.ref)}</code> ${esc(x.model || 'worker')} · ${esc(x.why_waiting || stage(x)[0])}</span></div>`).join('') || '<p class="muted">No workers running.</p>'));
+  if (pendingAskFocus && data.p === pendingAskFocus.project && !npUI.open && !t && !$('asks').hidden) {
+    const id = pendingAskFocus.askId; pendingAskFocus = null; focusAskCard(id);
+  } else if (wasInNeeds && !hasNeeds) {
+    ((!$('tasks-top').hidden && $('tasks-top').querySelector('a, button')) || $('main').querySelector('a, button, input, select, textarea, summary') || $('board').querySelector('a, button, input, select, textarea, summary'))?.focus({ preventScroll: true });
+  }
 }
 
 const counts = (c = {}) => Object.entries(c).map(([k, n]) => `${n} ${(STAGE[k] || [k])[0]}`).join(' · ');
@@ -210,15 +253,17 @@ const projHTML = (pr) => `<a class="proj" href="#${enc(pr.id)}"${pr.id === data.
   `<span class="muted">${pr.error ? esc(pr.error) : esc(projectState(pr)) + (counts(pr.counts) ? ' · ' + esc(counts(pr.counts)) : '')}</span></a>`;
 
 function boardHTML(tasks, part) {
-  const pr = data.projects.find((x) => x.id === data.p), done = tasks.filter((x) => x.stage === 'done');
+  const many = data.projects.length >= 2, pr = data.projects.find((x) => x.id === data.p), done = tasks.filter((x) => x.stage === 'done');
   const showGraph = Boolean(pr) && !data.problem && tasks.length >= 2 && taskView === 'graph';
   const sw = pr && !data.problem && tasks.length >= 2 ? `<div class="seg" role="group" aria-label="show tasks as"><button type="button" class="${showGraph ? '' : 'on'}" data-view="list" aria-pressed="${!showGraph}">list</button><button type="button" class="${showGraph ? 'on' : ''}" data-view="graph" aria-pressed="${showGraph}">graph</button></div>` : '';
-  let top = `<div class="head"><h1>tasks</h1>${pr ? `<div class="head-r"><span>${done.length} of ${tasks.length} done</span>${sw}</div>` : ''}</div>`, body = '';
+  const back = many && (pr || data.problem) ? '<a class="back" href="#">‹ all projects</a>' : '';
+  let top = `${back}<div class="head"><h1>tasks</h1>${pr && !data.problem ? `<div class="head-r"><span>${done.length} of ${tasks.length} done</span>${sw}</div>` : ''}</div>`, body = '';
   if (data.problem) body = `<section class="card" role="status"><h2>can't show the factory</h2><p class="muted">${esc(data.problem)}</p></section>`;
   else if (!pr) body = EMPTY_CARD_HTML;
   else {
     const title = goalTitle(pr.goal, pr.id), rawGoal = (pr.goal || '').trim();
-    top += `<p class="goal-title">${esc(title)}</p>` + (rawGoal && rawGoal !== title ? `<details class="goal-full"><summary>full project goal</summary><div class="md-body">${renderMarkdown(pr.goal)}</div></details>` : '') + ' ' + renderProjectActionsHTML(pr, paState());
+    const goalHead = many ? `<div class="goal-head"><span class="mono muted small">${esc(projectName(pr))}</span><p class="goal-title">${esc(title)}</p></div>` : `<p class="goal-title">${esc(title)}</p>`;
+    top += goalHead + (rawGoal && rawGoal !== title ? `<details class="goal-full"><summary>full project goal</summary><div class="md-body">${renderMarkdown(pr.goal)}</div></details>` : '') + ' ' + renderProjectActionsHTML(pr, paState());
     if (boardNotice?.project === pr.id) body += `<p class="set-ok" role="status">${OK_ICO}<span>${esc(boardNotice.text)}</span></p>`;
     if (!tasks.length) body += `<section class="card" aria-label="No tasks"><h2>no tasks yet</h2><p class="muted">The coordinator has not planned this project yet.</p></section>`;
     else if (showGraph) body += renderGraphSection(tasks, pr.id);
@@ -421,7 +466,7 @@ const syncEdit = (e) => {
     if (row && ctrl.value === row.value) delete ui.edits[n]; else ui.edits[n] = ctrl.value;
     delete ui.errors[n]; delete ui.fixes[n];
     if (!inForm) { clearTimeout(noticeTimers.get(n)); noticeTimers.delete(n); delete setUI.notices[n]; }
-    const root = inForm ? $('main') : $('settings'), html = inForm ? renderNewProjectHTML(npUI.rows, npState()) : renderSettingsHTML(setUI.rows, data.asks, setState()), tmp = document.createElement('div');
+    const root = inForm ? $('main') : $('settings'), html = inForm ? renderNewProjectHTML(npUI.rows, npState()) : renderSettingsHTML(setUI.rows, projAsks(), setState()), tmp = document.createElement('div');
     tmp.innerHTML = html;
     const srow = ctrl.closest('[data-row]'), nextRow = [...tmp.querySelectorAll('[data-row]')].find((x) => x.dataset.row === n);
     const top = srow?.querySelector('.srow-top'), nextTop = nextRow?.querySelector('.srow-top'), nextCtrl = nextTop?.querySelector('[data-setting]');
@@ -445,7 +490,7 @@ const syncEdit = (e) => {
     srow?.querySelectorAll('.set-in.bad').forEach((x) => x.classList.remove('bad')); li?.querySelector('[data-cand-up]')?.setAttribute('aria-label', `Move ${tag} up`); li?.querySelector('[data-cand-rm]')?.setAttribute('aria-label', `Remove ${tag}`);
     if (al) al.innerHTML = '';
     if (inForm) $('main')._html = renderNewProjectHTML(npUI.rows, npState());
-    else $('settings')._html = renderSettingsHTML(setUI.rows, data.asks, setState());
+    else $('settings')._html = renderSettingsHTML(setUI.rows, projAsks(), setState());
   } else if (e.target.name === 'code') askUI.pairCode = e.target.value;
 };
 $('board').addEventListener('input', syncEdit);
@@ -457,7 +502,7 @@ $('board').addEventListener('keydown', (e) => {
   const ctrl = e.key === 'Enter' && !e.target.closest?.('[data-np-form]') && e.target.closest?.('input[data-setting]'), n = ctrl ? ctrl.dataset.setting : undefined;
   if (ctrl && setUI.edits[n] !== undefined) {
     e.preventDefault();
-    if (!setUI.busy && !(data?.asks || []).some((a) => a.status === 'open' && a.set?.name === n && (!a.project || a.project === data.p)) && (!ctrl.reportValidity || ctrl.reportValidity())) submitSetting(data.p, n, ctrl.value);
+    if (!setUI.busy && !projAsks().some((a) => a.set?.name === n) && (!ctrl.reportValidity || ctrl.reportValidity())) submitSetting(data.p, n, ctrl.value);
   }
 });
 const openModelCands = (r, raw) => parseModelCandidates(raw, r.clis[0]).map((c) => ({ ...c, cli: r.clis.includes(c.cli) ? c.cli : r.clis[0] }));
@@ -466,7 +511,7 @@ $('board').addEventListener('click', (e) => {
   const vw = e.target.closest('button[data-view]');
   if (vw) { taskView = vw.dataset.view === 'graph' ? 'graph' : 'list'; try { globalThis.sessionStorage?.setItem('factory-view', taskView); } catch {} return render(); }
   if (e.target.closest('button[data-new-project]')) return openNewProject();
-  if (e.target.closest('a[data-np-back]')) { e.preventDefault(); closeNewProject(); return render(); }
+  if (e.target.closest('a[data-np-back]')) { e.preventDefault(); closeNewProject(); if (data?.projects.length >= 2 && data.p) location.hash = ''; else render(); return; }
   if (npUI.open && e.target.closest('a.proj')) { closeNewProject(); return render(); }
   const pa = e.target.closest('button[data-pa]');
   if (pa && !paUI.busy) {
@@ -545,6 +590,25 @@ for (const ev of ['focusout', 'mouseout']) $('board').addEventListener(ev, onGra
 if (mq?.addEventListener) mq.addEventListener('change', () => data && render());
 addEventListener('resize', () => { if (!data) return; if (!mq?.addEventListener) render(); else syncGraphBox($('main')); });
 if (globalThis.ResizeObserver) new ResizeObserver(() => data && syncGraphBox($('main'))).observe($('main'));
+$('needs-you').addEventListener('click', (e) => {
+  if (e.target.closest('button[data-ni-toggle]')) { needsOpen = !needsOpen; return render(); }
+  const link = e.target.closest('a[data-ask-id]');
+  if (!link) return;
+  const askId = link.dataset.askId, proj = link.dataset.niProj;
+  const onBoard = data?.p === proj && !npUI.open && !(data.task && sortedTasks().some((x) => x.ref === data.task));
+  needsOpen = false;
+  if (onBoard) { e.preventDefault(); render(); return focusAskCard(askId); }
+  pendingAskFocus = { project: proj, askId };
+  if (npUI.open && location.hash === '#' + enc(proj)) { e.preventDefault(); closeNewProject(); }
+  render();
+});
+$('needs-you').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && needsOpen) { e.preventDefault(); needsOpen = false; render(); $('ni-btn')?.focus({ preventScroll: true }); }
+});
 $('retry').addEventListener('click', poll);
-addEventListener('hashchange', () => { if (npUI.open) closeNewProject(); scrollTo(0, 0); poll(); });
+addEventListener('hashchange', () => {
+  if (npUI.open) closeNewProject();
+  if (pendingAskFocus && route()[0] !== pendingAskFocus.project) pendingAskFocus = null;
+  scrollTo(0, 0); poll();
+});
 poll();

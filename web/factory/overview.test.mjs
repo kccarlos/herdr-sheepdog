@@ -256,7 +256,7 @@ function createDoc(html) {
     addEventListener(t, fn) { (this._ls.get(t) || this._ls.set(t, []).get(t)).push(fn); },
     removeEventListener(t, fn) { const l = this._ls.get(t); if (l) this._ls.set(t, l.filter((x) => x !== fn)); },
   };
-  doc.root = new El('document', doc); doc.root._nodes = parseHTML(html, doc, null); return doc;
+  doc.root = new El('document', doc); doc.root._nodes = parseHTML(html, doc, doc.root); return doc;
 }
 
 function createIDB() {
