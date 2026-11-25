@@ -570,3 +570,92 @@ test('network error after initial load keeps last-known settings instead of wipi
   await page.pollNow();
   assert.ok(!sec.textContent.includes(W.cant), 'offline poll must keep last-known settings');
 });
+
+// --- PR 14.3: models per role candidate editor and error states ---
+const modelsRows = () => [
+  { name: 'models.worker', label: 'worker models', value: 'claude/sonnet/medium', default: 'claude/sonnet/medium', top: true, clis: ['claude', 'codex', 'agy'], models: { agy: ['gemini-4-carbon', 'gemini-4-neon', 'gemini-4-hydrogen', 'gemini-3.8-flash'] } },
+  { name: 'models.reviewer', label: 'reviewer models', value: 'claude/opus/medium, claude/sonnet/medium', default: 'claude/opus/medium, claude/sonnet/medium', top: true, clis: ['claude', 'codex', 'agy'] },
+  { name: 'models.retro', label: 'retro models', value: 'claude/opus/high', default: 'claude/opus/high', top: true, clis: ['claude', 'agy'] },
+  { name: 'models.plan_reviewer', label: 'plan reviewer models', value: '', default: '', top: true, clis: ['claude', 'agy'] },
+  ...baseRows(),
+];
+
+test('models rows render above all-settings fold with Edit, candidate editor controls, Move up, Back to default and read-back Save', async (t) => {
+  const src = readFileSync(new URL('./settings.js', import.meta.url), 'utf8');
+  assert.doesNotMatch(src, /models\.(?:coordinator|worker|reviewer|retro|plan_reviewer)/, 'settings.js must not hard-code any models.<role> name');
+  const daemon = fakeDaemon({
+    rows: modelsRows(), paired: true,
+    onPropose(body, rows, openAsks) {
+      if (!body.name.startsWith('models.')) return null;
+      const row = rows.find((r) => r.name === body.name), fmt = (v) => v.split(',').map((s) => s.trim()).join(' then ');
+      const ask = { id: 'ask-mod-1', project: 'proj-demo', kind: 'rule', gated: true, asked_by: 'engine', status: 'open', question: `This project: ${row.label} ${fmt(body.value)} (now ${fmt(row.value)}). Save?`, options: ['Save', 'Keep current'], recommend: 'Save', set: { name: row.name, value: body.value, was: row.value } };
+      openAsks.push(ask); return { status: 200, body: { ok: true, ask } };
+    },
+  });
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings'), fold = sec.querySelector('details');
+  const wRow = () => sec.querySelector('[data-row="models.worker"]');
+  assert.ok(wRow() && !fold.contains(wRow()), 'models.worker must render above the all settings fold');
+  assert.ok(!sec.textContent.includes('models.worker') && !sec.textContent.includes('models.plan_reviewer'), 'raw setting keys must not appear');
+  const editBtn = wRow().querySelector('button[aria-label="Edit worker models"]');
+  assert.ok(editBtn && editBtn.textContent.trim() === 'Edit', 'closed models row must offer Edit button');
+  editBtn.click(); await page.flush();
+  assert.ok(wRow().textContent.includes('The CLI, model and effort each role uses. In order: the engine uses the first one it can start. A retro reviewer looks at a task whose reviews keep failing.'));
+  assert.equal(wRow().querySelectorAll('button').find((b) => b.textContent.trim() === 'Remove'), undefined, 'Remove must hide when one candidate is left');
+  assert.equal(wRow().querySelectorAll('button').find((b) => b.textContent.trim() === 'Move up'), undefined, 'Move up must hide on first candidate');
+  wRow().querySelectorAll('button').find((b) => b.textContent.trim() === 'Add a model').click(); await page.flush();
+  const selects = wRow().querySelectorAll('select'), inputs = wRow().querySelectorAll('input');
+  assert.ok(selects.length >= 4 && inputs.length === 2, 'adding a model must render second CLI, model and effort controls');
+  selects[2].value = 'agy'; selects[2].dispatchEvent({ type: 'change', bubbles: true }); await page.flush();
+  const m2 = wRow().querySelectorAll('input')[1];
+  m2.value = 'gemini-4-neon'; m2.dispatchEvent({ type: 'input', bubbles: true }); await page.flush();
+  assert.ok(wRow().textContent.includes('Model names agy offers on this account: gemini-4-carbon · gemini-4-neon · gemini-4-hydrogen · gemini-3.8-flash. The field also takes a typed name.'));
+  wRow().querySelector('button[aria-label="Move agy gemini-4-neon up"]').click(); await page.flush();
+  wRow().querySelector('button[aria-label="Fill in the default worker models"]').click(); await page.flush();
+  assert.equal(daemon.proposed.length, 0, 'Back to the default fills editor and sends nothing until Change');
+  wRow().querySelectorAll('button').find((b) => b.textContent.trim() === 'Add a model').click(); await page.flush();
+  const s2 = wRow().querySelectorAll('select'); s2[2].value = 'agy'; s2[2].dispatchEvent({ type: 'change', bubbles: true }); await page.flush();
+  const in2 = wRow().querySelectorAll('input')[1]; in2.value = 'gemini-4-neon'; in2.dispatchEvent({ type: 'input', bubbles: true }); await page.flush();
+  wRow().querySelector('button[aria-label="Move agy gemini-4-neon up"]').click(); await page.flush();
+  wRow().querySelector('button[aria-label="Change worker models"]').click(); await page.flush();
+  assert.equal(daemon.proposed.length, 1);
+  assert.equal(daemon.proposed[0].name, 'models.worker');
+  assert.match(daemon.proposed[0].value, /^agy\/gemini-4-neon\/medium,\s*claude\/sonnet\/medium$/);
+  assert.ok(wRow().textContent.includes('This project: worker models agy/gemini-4-neon/medium then claude/sonnet/medium (now claude/sonnet/medium). Save?'));
+  wRow().querySelector('button[aria-label="Save (Recommended)"]').click(); await page.flush();
+  assert.ok(wRow().querySelector('[role="status"]')?.textContent.includes('Saved. The next agent started for this role uses it. Running agents keep their model.'));
+  await page.pollNow();
+  assert.ok(wRow().querySelector('[role="status"]')?.textContent.includes('Saved. The next agent started for this role uses it. Running agents keep their model.'));
+});
+
+test('candidate editor offers only row.clis, refuses empty model, shows unknown-list hint and keeps editor open on launch refusals', async (t) => {
+  let replyErr = null;
+  const daemon = fakeDaemon({ rows: modelsRows(), paired: true, onPropose: () => replyErr });
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  // Retro row offers only claude and agy (not codex).
+  const retro = () => sec.querySelector('[data-row="models.retro"]');
+  const retroEdit = retro().querySelector('button[aria-label="Edit retro models"]');
+  assert.ok(retroEdit, 'retro models row must offer Edit button');
+  retroEdit.click(); await page.flush();
+  const cliOpts = retro().querySelector('select').querySelectorAll('option').map((o) => o.getAttribute('value'));
+  assert.deepEqual(cliOpts, ['claude', 'agy'], 'CLI list must come only from row.clis');
+  assert.ok(retro().textContent.includes('sheepdog cannot list the models claude offers. This name is checked when an agent starts.'));
+  assert.equal(retro().querySelector('[role="alert"]'), null, 'unknown model list is a hint, never an alert');
+  // Empty model field refuses locally with mo.r.empty and sends no POST.
+  const mIn = retro().querySelector('input'); mIn.value = ''; mIn.dispatchEvent({ type: 'input', bubbles: true }); await page.flush();
+  retro().querySelector('button[aria-label="Change retro models"]').click(); await page.flush();
+  assert.equal(retro().querySelector('[role="alert"]')?.textContent.trim(), 'Type a model name.');
+  assert.equal(daemon.proposed.length, 0);
+  // Three launch refusal states keep the editor open with role="alert" and fix text.
+  mIn.value = 'gemini-4-neo'; mIn.dispatchEvent({ type: 'input', bubbles: true }); await page.flush();
+  for (const tc of [
+    { body: { code: 'not_launchable', error: 'agy is not installed', fix: 'install Antigravity CLI (agy), then run agy without arguments and sign in' }, want: ['agy is not installed', 'install Antigravity CLI (agy)'] },
+    { body: { code: 'not_launchable', error: 'codex is not signed in', fix: 'run: codex login' }, want: ['codex is not signed in', 'codex login'] },
+    { body: { code: 'not_launchable', error: 'agy does not offer gemini-4-neo. It offers: gemini-4-carbon, gemini-4-neon, gemini-4-hydrogen, gemini-3.8-flash.' }, want: ['agy does not offer gemini-4-neo. It offers: gemini-4-carbon, gemini-4-neon, gemini-4-hydrogen, gemini-3.8-flash.'] },
+  ]) {
+    replyErr = { status: 400, body: tc.body };
+    retro().querySelector('button[aria-label="Change retro models"]').click(); await page.flush();
+    assert.ok(retro().querySelector('input'), 'editor must stay open after refusal');
+    for (const s of tc.want) assert.ok(retro().textContent.includes(s), `missing "${s}" in refusal UI`);
+    assert.ok(retro().querySelector('[role="alert"]')?.textContent.includes(tc.want[0]));
+  }
+});
