@@ -1341,6 +1341,30 @@
    "h": 3083,
    "title": "Factory web, life cycle — the task graph, 360 px wide",
    "expand": "fill"
+  },
+  "FactoryWebOverview.dc.html": {
+   "x": 17520,
+   "y": 35062,
+   "w": 1440,
+   "h": 2778,
+   "title": "Factory web, life cycle — project overview and the needs-you indicator, light",
+   "expand": "fill"
+  },
+  "FactoryWebOverviewDark.dc.html": {
+   "x": 17520,
+   "y": 40011,
+   "w": 1440,
+   "h": 2778,
+   "title": "Factory web, life cycle — project overview and the needs-you indicator, dark",
+   "expand": "fill"
+  },
+  "FactoryWebOverview360.dc.html": {
+   "x": 17520,
+   "y": 44960,
+   "w": 360,
+   "h": 5824,
+   "title": "Factory web, life cycle — project overview and the needs-you indicator, 360 px wide",
+   "expand": "fill"
   }
  },
  "createdOnFiles": {
@@ -1698,7 +1722,10 @@
   "FactoryWebLog360.dc.html",
   "FactoryWebGraph.dc.html",
   "FactoryWebGraphDark.dc.html",
-  "FactoryWebGraph360.dc.html"
+  "FactoryWebGraph360.dc.html",
+  "FactoryWebOverview.dc.html",
+  "FactoryWebOverviewDark.dc.html",
+  "FactoryWebOverview360.dc.html"
  ],
  "pages": [
   {

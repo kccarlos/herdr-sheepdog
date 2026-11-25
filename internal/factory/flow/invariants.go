@@ -26,11 +26,11 @@ func CheckInvariants(snap InvariantSnapshot) []InvariantViolation {
 	add := func(id, subj, format string, args ...any) {
 		out = append(out, InvariantViolation{id, subj, fmt.Sprintf(format, args...)})
 	}
-	pr, _ := FirstMatch(ProjectRows, ProjectIn{Project: p, Tasks: s.Tasks, Settings: s.Settings, Now: snap.Now})
+	pr, pd := FirstMatch(CoordRows, ProjectIn{Project: p, Tasks: s.Tasks, Settings: s.Settings, Now: snap.Now})
 	coordAlive := RunLive(p.RunID, p.Run)
-	// I2 cannot fire under the current rule table (J3/J5/J6/J7/J10 cover it); it guards future rule changes.
-	if p.Started && (!AllTasksEnded(s.Tasks) || p.NewGoal) && !coordAlive && pr.ID != "J3" && pr.ID != "J5" && pr.ID != "J6" && pr.ID != "J7" {
-		add("I2", "project", "project should have a coordinator (matched %s, no live run or J3/J5/J6/J7 reason)", pr.ID)
+	// I2 cannot fire under CoordRows (J3/J5/J6 holds and AskStartCoordinator cover !coordAlive); it guards future rule changes.
+	if p.Started && (!AllTasksEnded(s.Tasks) || p.NewGoal) && !coordAlive && !slices.Contains(pd.Asked, AskStartCoordinator) && pr.ID != "J3" && pr.ID != "J5" && pr.ID != "J6" {
+		add("I2", "project", "project should have a coordinator (matched %s, no live run, pending start, or J3/J5/J6 reason)", pr.ID)
 	}
 	if coordAlive && p.Folder != "" {
 		writers[filepath.Clean(p.Folder)] = append(writers[filepath.Clean(p.Folder)], "coordinator")

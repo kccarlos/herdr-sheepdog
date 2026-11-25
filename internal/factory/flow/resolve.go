@@ -128,7 +128,9 @@ func (c Candidate) SameModel(other Candidate) bool {
 // Candidates returns the effective order, with legacy defaults for unset roles.
 func Candidates(role string, task Task, settings Settings) []Candidate {
 	project := settings.Models[role]
-	if len(project) == 0 {
+	if len(project) == 0 && role == RolePlanReviewer {
+		project = Candidates(RoleReviewer, Task{}, settings)
+	} else if len(project) == 0 {
 		project = DefaultModels(settings)[role]
 	}
 	return slices.Concat(task.Request[role], project)

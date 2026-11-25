@@ -55,6 +55,7 @@ func TestSchedulingDepsAndCap(t *testing.T) {
 	if st.Settings.MaxRunning != 2 {
 		t.Fatalf("MaxRunning = %d, want 2", st.Settings.MaxRunning)
 	}
+	st.Settings.PlanReviewRounds = 0
 	st.Project.RunID = "coord-1"
 	st.Project.RunTokenHash = tokenHash("tok-coord")
 	if err := SaveState(paths.State(id), st); err != nil {
@@ -147,6 +148,7 @@ func TestFailedNewAttemptDoesNotTakeSlot(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, _ := LoadState(paths.State(id))
+	st.Settings.PlanReviewRounds = 0
 	st.Project.RunID, st.Project.RunTokenHash = "coord-1", tokenHash("tok-coord")
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
@@ -198,6 +200,7 @@ func TestDeadWorkersFreeSlots(t *testing.T) {
 	}
 	eng.passProject(ctx, id, false) // J7 starts coordinator
 	st, _ := LoadState(paths.State(id))
+	st.Settings.PlanReviewRounds = 0
 	st.Project.RunTokenHash = tokenHash("tok-coord")
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
@@ -246,6 +249,7 @@ func TestDroppedDepWakesAndAmendUnblocks(t *testing.T) {
 	eng.passProject(ctx, id, false) // J7 starts coordinator
 	st, _ := LoadState(paths.State(id))
 	coord := st.Project.RunID
+	st.Settings.PlanReviewRounds = 0
 	st.Project.RunTokenHash = tokenHash("tok-coord")
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
@@ -323,6 +327,7 @@ func TestWaitReasonLoggedOncePerChange(t *testing.T) {
 		t.Fatal(err)
 	}
 	st, _ := LoadState(paths.State(id))
+	st.Settings.PlanReviewRounds = 0
 	st.Project.RunID, st.Project.RunTokenHash = "coord-1", tokenHash("tok-coord")
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
@@ -390,6 +395,7 @@ func TestIdleWorkerHoldsSlot(t *testing.T) {
 	}
 	eng.passProject(ctx, id, false) // J7 starts coordinator
 	st, _ := LoadState(paths.State(id))
+	st.Settings.PlanReviewRounds = 0
 	st.Project.RunTokenHash = tokenHash("tok-coord")
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
@@ -432,6 +438,7 @@ func TestReviewerGoneKeepsSlotWhileWorkerRuns(t *testing.T) {
 	}
 	eng.passProject(ctx, id, false) // J7 starts coordinator
 	st, _ := LoadState(paths.State(id))
+	st.Settings.PlanReviewRounds = 0
 	st.Project.RunTokenHash = tokenHash("tok-coord")
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
@@ -495,6 +502,7 @@ func TestWorkerRunStateReadOncePerPass(t *testing.T) {
 	}
 	eng.passProject(ctx, id, false) // J7 starts coordinator
 	st, _ := LoadState(paths.State(id))
+	st.Settings.PlanReviewRounds = 0
 	st.Project.RunTokenHash = tokenHash("tok-coord")
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)

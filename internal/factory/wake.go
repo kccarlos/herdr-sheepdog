@@ -156,13 +156,21 @@ func coordSummary(s flow.State, bin string, heartbeat bool) string {
 			ls = append(ls, fmt.Sprintf("- %s (%s): %s — %s\n", t.ID, st, cmp.Or(t.LastRow, "-"), cmp.Or(why, st)))
 		}
 	}
+	planLine := ""
+	if pf := flow.OpenPlanFindings(s.Project); len(pf) > 0 {
+		items := make([]string, len(pf))
+		for i, f := range pf {
+			items[i] = f.Kind + ": " + f.Task + " " + f.Why
+		}
+		planLine = fmt.Sprintf("Open plan findings (%d): %s.\n", len(pf), strings.Join(items, "; "))
+	}
 	changed := cmp.Or(strings.Join(s.Settings.Changed(), ", "), "none")
 	if heartbeat {
 		body := map[bool]string{true: fmt.Sprintf("No plan applied yet. Goal: %s\n", s.Project.Goal), false: fmt.Sprintf("Tasks: %d open, %d ended.\n%s", open, len(s.Tasks)-open, strings.Join(ls, ""))}[len(s.Tasks) == 0]
-		return fmt.Sprintf("Wake: heartbeat (no wake for %dm).\n%sSettings that differ from their default: %s.", s.Settings.HeartbeatMinutes, body, changed)
+		return fmt.Sprintf("Wake: heartbeat (no wake for %dm).\n%s%sSettings that differ from their default: %s.", s.Settings.HeartbeatMinutes, body, planLine, changed)
 	}
-	return fmt.Sprintf("Handoff from the store (replacement coordinator; held wakes follow once idle):\nLive workers: %s.\n%sSettings that differ from their default: %s.\n\n%s",
-		cmp.Or(strings.Join(ws, ", "), "none"), strings.Join(ls, ""), changed, coordinatorPrompt(coordinatorTemplate, s.Project, bin))
+	return fmt.Sprintf("Handoff from the store (replacement coordinator; held wakes follow once idle):\nLive workers: %s.\n%s%sSettings that differ from their default: %s.\n\n%s",
+		cmp.Or(strings.Join(ws, ", "), "none"), strings.Join(ls, ""), planLine, changed, coordinatorPrompt(coordinatorTemplate, s.Project, bin))
 }
 
 // deliverWakesLocked is J12: when the coordinator run is idle, one bounded batch

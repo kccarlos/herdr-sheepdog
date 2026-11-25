@@ -157,6 +157,7 @@ func newCodexRoles(t *testing.T, models map[string][]flow.Candidate, signedIn bo
 	c.id = c.eng.projectDirs()[0].Name()
 	c.home = filepath.Join(c.paths.DataDir, "factory", "codex-home")
 	c.edit(func(s *flow.State) { s.Settings.Models = models })
+	c.edit(func(s *flow.State) { s.Settings.PlanReviewRounds = 0 })
 	return c
 }
 

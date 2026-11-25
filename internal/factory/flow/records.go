@@ -5,6 +5,7 @@ package flow
 
 import (
 	"encoding/json"
+	"fmt"
 	"maps"
 	"slices"
 	"strings"
@@ -33,6 +34,31 @@ const (
 
 // PlanFindingKinds is the fixed finding-kind set for plan reviews (prompts.md 3.2, 5.2).
 var PlanFindingKinds = []string{"delete", "shrink", "merge", "split", "design-first"}
+
+// Plan-finding close reasons (design.md 3, 11.7).
+const (
+	PlanClosedDropped, PlanClosedAmended     = "dropped", "amended"
+	PlanClosedRejected, PlanClosedUnanswered = "rejected", "unanswered"
+)
+
+// ParsePlanFindings parses <kind>: <task> <why> lines for tasks under review (design.md 7.2).
+func ParsePlanFindings(raw string, tasks []string) (out []PlanFinding, _ error) {
+	for line := range strings.Lines(raw) {
+		kind, rest, ok := strings.Cut(strings.TrimLeft(line, " \t"), ":")
+		if !ok || !slices.Contains(PlanFindingKinds, kind) {
+			continue
+		}
+		task, why, _ := strings.Cut(CleanText(rest), " ")
+		if task == "" || why == "" {
+			return nil, fmt.Errorf("finding %q must be %s: <task> <why>", CleanText(line), kind)
+		}
+		if !slices.Contains(tasks, task) {
+			return nil, fmt.Errorf("finding names task %q outside this plan review (%s)", task, strings.Join(tasks, ", "))
+		}
+		out = append(out, PlanFinding{Kind: kind, Task: task, Why: CapRunes(why, MaxActErrRunes)})
+	}
+	return out, nil
+}
 
 // PlanFinding is one finding on a planned task inside a PlanReview (design.md 3, 11.7).
 type PlanFinding struct {

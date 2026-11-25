@@ -727,11 +727,10 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 	if n := len(s.Project.PlanReviews); (n == 0 || !s.Project.PlanReviews[n-1].Accepted.IsZero()) && slices.ContainsFunc(s.Tasks, func(t flow.Task) bool { return !flow.Ended(t) && t.Unreviewed }) {
 		prReady, prWhy = e.planReviewerReady(ctx, *s)
 	}
-	match := func() (flow.Row[flow.ProjectIn], flow.Decision) {
-		return flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now, CoordFallbackReady: e.passCoordFallback, PlanReviewerReady: prReady, PlanRun: append(planRun, flow.Run{})[0]})
+	match := func(rows []flow.Row[flow.ProjectIn]) (flow.Row[flow.ProjectIn], flow.Decision) {
+		return flow.FirstMatch(rows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now, CoordFallbackReady: e.passCoordFallback, PlanReviewerReady: prReady, PlanRun: append(planRun, flow.Run{})[0]})
 	}
-	r, d := match()
-	if len(d.Asked) > 0 && d.Asked[0] == flow.AskCoordDialogStuck {
+	if r, d := match(flow.CoordRows); len(d.Asked) > 0 && d.Asked[0] == flow.AskCoordDialogStuck {
 		s.Project.CoordDialogStucks++
 		s.Project.Acts = append(s.Project.Acts, flow.Act{Key: flow.CoordStuckKey(s.Project.Run), Result: "done", At: now})
 		if s.Project.CoordDialogStucks >= 2 {
@@ -745,7 +744,15 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 		if !e.cleanLocked(id) {
 			return
 		}
-		r, d = match()
+	}
+	r, d := match(flow.ProjectRows)
+	if r.ID == "J4" && len(flow.OpenPlanFindings(s.Project)) == 0 {
+		if n := len(s.Project.PlanReviews); n > 0 && s.Project.PlanReviews[n-1].Verdict != "" && s.Project.PlanReviews[n-1].Accepted.IsZero() {
+			e.acceptPlanLocked(id, s, "J16", []string{flow.AskAcceptPlan}, "accept held plan", now)
+			if !e.cleanLocked(id) {
+				return
+			}
+		}
 	}
 	if r.ID == "J6" || (r.ID == "J4" && !flow.RunLive(s.Project.RunID, s.Project.Run)) {
 		if capWhy, capped := flow.CoordHourlyCap(s.Project, s.Settings, now); r.ID == "J6" && capped {
@@ -818,6 +825,17 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 			e.logError("factory.hc_error", id, err)
 			return
 		}
+		if pr.Verdict != "" {
+			next := *s
+			next.Project.PlanReviews = slices.Clone(s.Project.PlanReviews)
+			rev := *pr.Run
+			stopReviewRec(&rev, next.Settings, now)
+			next.Project.PlanReviews[len(next.Project.PlanReviews)-1].Run = &rev
+			if e.commitLogLocked(id, &next, LogLine{By: "engine", Rule: r.ID, Asked: d.Asked, Decision: "stopped plan reviewer", Why: d.Why}) {
+				*s = next
+			}
+			return
+		}
 		e.acceptPlanLocked(id, s, r.ID, d.Asked, d.Why, now)
 	case flow.AskAcceptPlan:
 		e.acceptPlanLocked(id, s, r.ID, d.Asked, cmp.Or(prWhy, d.Why), now)
@@ -868,6 +886,19 @@ func (e *Engine) acceptPlanLocked(id string, s *flow.State, rule string, asked [
 		if pr.Verdict == "" {
 			why, dec = cmp.Or(why, "plan reviewer unavailable"), "plan accepted unreviewed (unavailable)"
 			pr.Verdict, pr.Why, pr.At = flow.VerdictUnavailable, why, now
+		} else if len(pr.Findings) > 0 {
+			pr.Findings = slices.Clone(pr.Findings)
+			counts := map[string]int{}
+			for i := range pr.Findings {
+				if pr.Findings[i].Closed == "" {
+					pr.Findings[i].Closed = flow.PlanClosedUnanswered
+				}
+				counts[pr.Findings[i].Closed]++
+			}
+			why = fmt.Sprintf("findings: %d dropped, %d amended, %d rejected", counts[flow.PlanClosedDropped], counts[flow.PlanClosedAmended], counts[flow.PlanClosedRejected])
+			if n := counts[flow.PlanClosedUnanswered]; n > 0 {
+				why += fmt.Sprintf(", %d unanswered", n)
+			}
 		}
 		pr.Accepted = now
 		for i := range next.Tasks {
@@ -1171,7 +1202,7 @@ func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State,
 	adopt, bin := s.Project.Run == nil || s.Project.Run.State != flow.PhaseEnded, cmp.Or(e.Bin, "sheepdog")
 	if !adopt {
 		stopped := e.stopCoordWithBackoffLocked(ctx, id, s, now, true)
-		r, d := flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now, CoordFallbackReady: e.passCoordFallback})
+		r, d := flow.FirstMatch(flow.CoordRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now, CoordFallbackReady: e.passCoordFallback})
 		if !stopped {
 			e.logProjectWaitLocked(id, s, r.ID, "waiting", d.Why, r.ID+":"+d.Why)
 			return
