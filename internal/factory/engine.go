@@ -747,6 +747,14 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 		}
 		r, d = match()
 	}
+	if r.ID == "J4" && len(flow.OpenPlanFindings(s.Project)) == 0 {
+		if n := len(s.Project.PlanReviews); n > 0 && s.Project.PlanReviews[n-1].Verdict != "" && s.Project.PlanReviews[n-1].Accepted.IsZero() {
+			e.acceptPlanLocked(id, s, "J16", []string{flow.AskAcceptPlan}, "accept held plan", now)
+			if !e.cleanLocked(id) {
+				return
+			}
+		}
+	}
 	if r.ID == "J6" || (r.ID == "J4" && !flow.RunLive(s.Project.RunID, s.Project.Run)) {
 		if capWhy, capped := flow.CoordHourlyCap(s.Project, s.Settings, now); r.ID == "J6" && capped {
 			e.reconcileAlertLocked(id, s, flow.AlertAgentsDown+"@j6", true, flow.Alert{Kind: flow.AlertAgentsDown, Cause: capWhy, At: now, Rule: "J6", Scope: "j6_cap"}, "alert", "")
