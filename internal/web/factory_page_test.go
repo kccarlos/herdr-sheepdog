@@ -127,7 +127,7 @@ func TestFactoryPageFetchesW0Routes(t *testing.T) {
 		}
 		used[pattern] = true
 	}
-	for _, want := range []string{"GET /api/factory/projects", "GET /api/factory/projects/{id}/graph", "GET /api/factory/projects/{id}/log"} {
+	for _, want := range []string{"GET /api/factory/projects", "GET /api/factory/projects/{id}/graph", "GET /api/factory/projects/{id}/log", "GET /api/factory/projects/{id}/settings"} {
 		if !used[want] {
 			t.Errorf("app.js never fetches %s", want)
 		}
