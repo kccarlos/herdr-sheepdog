@@ -27,7 +27,7 @@ Every check prints a one-line fix when it fails (`--no-canary` skips the short t
 
 ## Start, watch, and stop
 
-Make sure the sheepdog daemon is running (`sheepdog start`), then start a factory project from your terminal:
+Make sure the sheepdog daemon is running (`sheepdog start`). On a Mac with **Sheepdog.app** ([desktop.md](desktop.md#sheepdogapp)), you can manage a project's full life cycle from `http://127.0.0.1:7777/factory` after pairing the browser once (start a new project with start checks and fixes, stop, resume, give a new goal, reopen a finished project, and change settings). You can also run every step from your terminal:
 
 ```sh
 sheepdog factory doctor ~/repo
@@ -37,10 +37,10 @@ sheepdog factory log -n 30
 sheepdog factory stop
 ```
 
-- `sheepdog factory start <folder> --goal "<sentence>"` runs the start checks first and refuses to start on any `FAIL`. Pass `--max-running N` (1–20, default 3) to set concurrent tasks at a project's first start (change it later in the settings panel on `/factory`); one extra slot beyond `N` is available for an urgent task or a task you just answered.
-- `sheepdog factory status` queries the running daemon (including in-memory alerts) and prints each task's id, title, stage, last logged rule, age, and reason, plus any active alerts. When the daemon is stopped, it falls back to stored `state.json` and `log.jsonl`.
-- `sheepdog factory log` prints each engine step from `log.jsonl`, followed by the project's first-look pass rate once any task has a reviewed round.
-- `sheepdog factory stop` stops the project and every agent run it started, keeping the plan and stored state so you can start again later. Restarting with `sheepdog factory start` always requires `--goal`: pass the same goal to resume, or a new goal to have the coordinator update the plan.
+- `sheepdog factory start <folder> --goal "<sentence>"` (**from the page:** **New project**, **Resume**, **New goal**, or **Reopen with a new goal**) runs the start checks first and refuses to start on any `FAIL`. Pass `--max-running N` (1–20, default 3) to set concurrent tasks at a project's first start (change it later in the settings panel on `/factory`); one extra slot beyond `N` is available for an urgent task or a task you just answered.
+- `sheepdog factory status` (**from the page:** the board at `/factory`) queries the running daemon (including in-memory alerts) and prints each task's id, title, stage, last logged rule, age, and reason, plus any active alerts. When the daemon is stopped, it falls back to stored `state.json` and `log.jsonl`.
+- `sheepdog factory log` (**from the page:** the **log** card on the board and task view) prints each engine step from `log.jsonl`, followed by the project's first-look pass rate once any task has a reviewed round.
+- `sheepdog factory stop` (**from the page:** **Stop** in the project bar, confirmed with **Stop the project**) stops the project and every agent run it started, keeping the plan and stored state so you can start again later. Restarting with `sheepdog factory start` always requires `--goal`: pass the same goal to resume, or a new goal to have the coordinator update the plan.
 - **By live voice:** when a voice session is live, saying *"stop the factory"* or *"start the factory"* stops or restarts your existing factory projects.
 
 Coordinator, worker, and reviewer runs report back to the daemon through internal `sheepdog factory` commands using a per-run `SHEEPDOG_RUN_TOKEN`. See [commands.md](commands.md#factory-agent-commands) for the list.
@@ -57,8 +57,9 @@ Use your configured `web.port` if it is not `7777`. `/factory` answers only dire
 
 The board refreshes every 3 seconds and shows:
 
-- **Tasks**, grouped in attention order: **needs your approval**, **waiting on you**, **blocked**, **waiting on CI**, **working**, **waiting on others**, **queued**, and a collapsed **done** list. Click any task row to open its detail view (latest rule and verdict, review rounds, active model, dependencies, and recent log lines).
-- **Projects** in the sidebar, with running or stopped status and stage counts.
+- **This project** bar under the goal, showing the project's state (`running`, `stopped`, or `finished`) and its actions (**Stop** with confirmation, **Resume**, **New goal**, or **Reopen with a new goal**).
+- **Tasks**, grouped in attention order: **needs your approval**, **waiting on you**, **blocked**, **waiting on CI**, **working**, **waiting on others**, **queued**, and a collapsed **done** list. Click any task row to open its detail view (latest verdict with the rule id under a **details** fold, review rounds, active model, dependencies, and recent log lines).
+- **Projects** in the sidebar, with `running`, `stopped`, or `finished` status, stage counts, and **New project**.
 - **Asks for you**, showing open gated asks and override cards.
 - **Agents**, listing up to one active run per task (the reviewer while reviewing, otherwise the worker; the coordinator is not listed here).
 
