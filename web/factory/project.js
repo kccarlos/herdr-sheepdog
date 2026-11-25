@@ -6,8 +6,8 @@ const ico14 = (d) => `<svg width="14" height="14" viewBox="0 0 24 24" fill="none
 export const PLUS_ICO = ico14('M12 5v14M5 12h14');
 const FAIL_ICO = ico14('M6 6l12 12M18 6L6 18'), SKIP_ICO = ico14('M5 12h14');
 const CK_ST = { ok: ['pass', 'ck-ok', OK_ICO], warn: ['warning', 'ck-warn', ERR_ICO], fail: ['fail', 'ck-fail', FAIL_ICO], skip: ['skipped', 'ck-skip', SKIP_ICO] };
-const ST_DOT = { running: 'working', stopped: 'idle', finished: 'done' };
-const NG_GO = { running: 'Give it this goal', stopped: 'Start with this goal', finished: 'Reopen with this goal' };
+const ST_DOT = Object.assign(Object.create(null), { running: 'working', stopped: 'idle', finished: 'done' });
+const NG_GO = Object.assign(Object.create(null), { running: 'Give it this goal', stopped: 'Start with this goal', finished: 'Reopen with this goal' });
 export const projectState = (pr) => pr?.state || (pr?.running ? 'running' : 'stopped');
 export const CK_CANT = "Can't run the start checks: sheepdog did not answer in time. Check that sheepdog is running, then check again.";
 export const EMPTY_CARD_HTML = `<section class="card" aria-label="No project"><h2>no project yet</h2><p class="muted">A project is one folder with a git repository and one goal. The coordinator plans the tasks, workers build them, reviewers check them, and you are asked only for decisions.</p><div class="ask-opts"><button type="button" class="ask-opt pri" data-new-project="1">${PLUS_ICO}New project</button></div></section>`;

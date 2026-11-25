@@ -59,7 +59,7 @@ details.done summary, details.all-settings summary, .pair-box summary, details.s
 .task-head { display: flex; flex-direction: column; gap: 10px; }
 .task-head h1 { margin: 0; font-size: 32px; line-height: 1.2; overflow-wrap: anywhere; }
 .meta, .srow-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; font-size: 13px; color: var(--muted); }
-.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: var(--radius-pill); font-weight: 500; background: var(--code); color: var(--fg); }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: var(--radius-pill); font-size: 13px; font-weight: 500; background: var(--code); color: var(--fg); }
 .pill.working { color: var(--working); background: color-mix(in srgb, var(--working) 14%, var(--card)); }
 .pill.done { color: var(--done); background: color-mix(in srgb, var(--done) 14%, var(--card)); }
 .pill.blocked { color: var(--blocked-text); background: var(--primary-soft); }

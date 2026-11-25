@@ -100,6 +100,13 @@ async function poll() {
   }
   const prev = data;
   data = next; down = off;
+  const prevPr = !off && prev?.p === next?.p && prev?.projects.find((x) => x.id === next.p), nextPr = !off && next?.projects.find((x) => x.id === next.p);
+  if (nextPr && !paUI.busy) {
+    const st = projectState(nextPr), canStop = st === 'running' || (st === 'finished' && Boolean(nextPr.live));
+    if (paUI.mode === 'stop' && !canStop) paUI.mode = '';
+    if (prevPr && projectState(prevPr) !== st) { paUI.error = ''; paUI.checks = null; }
+    if (askUI.pending?.kind === 'project' && ((askUI.pending.action === 'stop' && !canStop) || (askUI.pending.action === 'resume' && st !== 'stopped'))) clearPair();
+  }
   if (setUI.editor && (next?.asks || []).some((a) => a.status === 'open' && a.set?.name === setUI.editor.row && (!a.project || a.project === next.p))) setUI.editor = null;
   if (!off) lastOK = Date.now();
   render();
@@ -108,8 +115,7 @@ async function poll() {
     if (sr.rows) { setUI.rows = sr.rows; setUI.error = ''; }
     else if (sr.http || !setUI.rows) { setUI.error = sr.error; if (sr.needsPairing) Object.assign(askUI, { needsPairing: true, pairMessage: sr.pairMessage || '' }); }
     else down = true;
-    const prevPr = prev?.p === next?.p && prev?.projects.find((x) => x.id === next.p), nextPr = prevPr && next.projects.find((x) => x.id === next.p);
-    if (prevPr && nextPr && (prevPr.state ? prevPr.state === 'running' : prevPr.running) && (nextPr.state ? nextPr.state === 'finished' : !nextPr.running)) {
+    if (prevPr && nextPr && projectState(prevPr) === 'running' && (nextPr.state ? nextPr.state === 'finished' : !nextPr.running)) {
       for (const a of prev.asks || []) if (a.status === 'open' && a.set && (!a.project || a.project === next.p) && !setUI.notices[a.set.name]
         && !next.asks.some((x) => x.id === a.id || (x.status === 'open' && x.project === next.p && x.set?.name === a.set.name))
         && (setUI.rows || []).find((r) => r.name === a.set.name)?.value !== a.set.value) {
@@ -283,7 +289,7 @@ async function runProjectAction(action, goalOverride) {
   if (!pr) return;
   const st = projectState(pr), goal = action === 'resume' ? (pr.goal ?? '') : (goalOverride !== undefined ? goalOverride : paUI.goal.trim());
   if (action === 'newgoal' && !goal) { Object.assign(paUI, { error: 'Write a goal first.', checks: null }); render(); return $('pa-goal')?.focus({ preventScroll: true }); }
-  const seq = ++paSeq; Object.assign(paUI, { busy: action, error: '', checks: null }); if (!askUI.pairDone) clearPair(); render();
+  const seq = ++paSeq; Object.assign(paUI, action === 'resume' ? { mode: '', goal: '' } : {}, { busy: action, error: '', checks: null }); if (!askUI.pairDone) clearPair(); render();
   const res = await (action === 'stop' ? stopProject(askFlow, pr.id) : startProject(askFlow, pr.folder, goal)).catch((e) => ({ ok: false, message: e.message || 'Network error.' }));
   if (seq !== paSeq) return;
   paUI.busy = '';
@@ -298,7 +304,7 @@ async function runProjectAction(action, goalOverride) {
   if (Array.isArray(res.results)) Object.assign(paUI, { error: `Not started: a start check failed. Fix it, then press ${action === 'resume' ? 'Resume' : (st === 'finished' ? 'Reopen' : 'New goal')} again.`, checks: res.results });
   else paUI.error = res.message || (action === 'stop' ? 'Could not stop project.' : 'Could not start project.');
   render();
-  (action === 'newgoal' && !paUI.checks ? $('pa-goal') : paBar()?.querySelector('button'))?.focus({ preventScroll: true });
+  (action === 'newgoal' ? (paUI.checks ? paBar()?.querySelector('button[data-pa="ng-go"]') || $('pa-goal') : $('pa-goal')) : paBar()?.querySelector(`button[data-pa="${action}"]`) || paBar()?.querySelector('button'))?.focus({ preventScroll: true });
 }
 async function runCheck() {
   const seq = npSeq; Object.assign(npUI, { checking: true, checkError: '', startError: '', errors: {}, fixes: {} }); if (askUI.pending?.kind === 'start') clearPair(); render();
@@ -378,10 +384,10 @@ const syncEdit = (e) => {
 $('board').addEventListener('input', syncEdit);
 $('board').addEventListener('change', syncEdit);
 $('board').addEventListener('keydown', (e) => {
-  if (e.key === 'Escape' && paUI.mode === 'stop' && e.target.closest?.('.pa-confirm')) {
+  if (e.key === 'Escape' && paUI.mode === 'stop' && !paUI.busy && e.target.closest?.('.pa-confirm')) {
     e.preventDefault(); paUI.mode = ''; render(); return paBar()?.querySelector('button[data-pa="stop"]')?.focus({ preventScroll: true });
   }
-  const ctrl = e.key === 'Enter' && !e.target.closest?.('[data-np-form]') && e.target.closest?.('input[data-setting]'), n = ctrl?.dataset.setting;
+  const ctrl = e.key === 'Enter' && !e.target.closest?.('[data-np-form]') && e.target.closest?.('input[data-setting]'), n = ctrl ? ctrl.dataset.setting : undefined;
   if (ctrl && setUI.edits[n] !== undefined) {
     e.preventDefault();
     if (!setUI.busy && !(data?.asks || []).some((a) => a.status === 'open' && a.set?.name === n && (!a.project || a.project === data.p)) && (!ctrl.reportValidity || ctrl.reportValidity())) submitSetting(data.p, n, ctrl.value);
@@ -396,7 +402,7 @@ $('board').addEventListener('click', (e) => {
   if (pa && !paUI.busy) {
     const a = pa.dataset.pa;
     if (a === 'stop' || a === 'newgoal') {
-      if (a === 'newgoal' && paUI.mode === 'newgoal') return $('pa-goal')?.focus({ preventScroll: true });
+      if (a === 'newgoal' && paUI.mode === 'newgoal') return paUI.checks && paUI.goal.trim() ? runProjectAction('newgoal') : $('pa-goal')?.focus({ preventScroll: true });
       Object.assign(paUI, emptyPA(), { mode: a }); if (askUI.pending?.kind === 'project') clearPair(); render();
       return (a === 'stop' ? paBar()?.querySelector('button[data-pa="stop-no"]') : $('pa-goal'))?.focus({ preventScroll: true });
     }
