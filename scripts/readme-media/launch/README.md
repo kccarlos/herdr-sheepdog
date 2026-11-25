@@ -2,8 +2,7 @@
 
 `assets/readme/launch.mp4` (1920x1080, H.264 + AAC), `launch-vertical.mp4`
 (1080x1920), `launch-poster.png` (the title lockup with a play button) and
-`assets/readme/install.gif` (800 px, about 18 s). The storyboard is
-[docs/dev/launch-video.md](../../../docs/dev/launch-video.md); this cut is its
+`assets/readme/install.gif` (800 px, about 18 s). This cut is the
 synthetic version, made from the parts the offline demo can show honestly.
 
 ## Video
