@@ -156,25 +156,103 @@ func New(paths Paths, client *hc.Client) *Engine {
 	return e
 }
 
-// Start runs start checks (J1), records the project (storing its id in local
-// git config), marks it started, and wakes the loop. A non-zero maxRunning
-// sets Settings.MaxRunning.
-func (e *Engine) Start(folder, goal string, maxRunning int) error {
-	folder, goal = strings.TrimSpace(folder), strings.TrimSpace(goal)
-	if folder == "" || goal == "" {
-		return errors.New("folder and goal are required")
-	}
+// SettingError refuses a start or check setting pair by row name (plan.md 14.4).
+type SettingError struct{ Name, Message string }
+
+func (e *SettingError) Error() string { return e.Message }
+
+// StartChecksError carries every onboard.Result when StartChecks fails at Start.
+type StartChecksError struct {
+	Msg     string
+	Results []onboard.Result
+}
+
+func (e *StartChecksError) Error() string { return e.Msg }
+
+// StoredSettingsError wraps a stored Settings.Validate error at Start (SE7).
+type StoredSettingsError struct{ error }
+
+func (e *Engine) runStartChecks(folder string, settings *flow.Settings) []onboard.Result {
 	check := e.StartCheck
 	if check == nil {
 		check = StartChecks
 	}
-	opts := DoctorOptions{Folder: folder, DataDir: e.Paths.DataDir}
+	opts := DoctorOptions{Folder: folder, DataDir: e.Paths.DataDir, Settings: settings}
 	if e.HC != nil {
 		opts.HCSocket = e.HC.Socket
 	}
-	checkCtx, checkCancel := context.WithTimeout(context.Background(), startCheckTimeout)
-	results := check(checkCtx, opts)
-	checkCancel()
+	ctx, cancel := context.WithTimeout(context.Background(), startCheckTimeout)
+	defer cancel()
+	return check(ctx, opts)
+}
+
+func applyStartSet(s flow.Settings, set map[string]string, existing bool) (flow.Settings, error) {
+	for _, name := range slices.Sorted(maps.Keys(set)) {
+		rows := s.Rows()
+		i := slices.IndexFunc(rows, func(r flow.SettingRow) bool { return r.Name == name })
+		if i < 0 {
+			return s, &SettingError{Name: name, Message: fmt.Sprintf("unknown setting %q", name)}
+		}
+		next, err := s.With(name, set[name])
+		if !rows[i].Top || (existing && (err != nil || next.Rows()[i].Value != rows[i].Value)) {
+			return s, &SettingError{Name: name, Message: fmt.Sprintf("Change %s in the settings panel on the factory page.", rows[i].Label)}
+		}
+		if err != nil {
+			return s, &SettingError{Name: name, Message: err.Error()}
+		}
+		s = next
+	}
+	return s, nil
+}
+
+// CheckStart runs StartChecks for folder against set (Top keys) without writing state (plan.md 14.4).
+func (e *Engine) CheckStart(folder string, set map[string]string) ([]onboard.Result, error) {
+	if folder = strings.TrimSpace(folder); folder == "" {
+		return nil, errors.New("folder is required")
+	}
+	chosen, err := applyStartSet(flow.DefaultSettings(), set, false)
+	if err != nil {
+		return nil, err
+	}
+	return e.runStartChecks(folder, map[bool]*flow.Settings{true: &chosen}[len(set) > 0]), nil
+}
+
+// Start runs start checks (J1), records the project, marks it started, and wakes the loop.
+func (e *Engine) Start(folder, goal string, maxRunning int) error {
+	var set map[string]string
+	if maxRunning != 0 {
+		set = map[string]string{"max_running": fmt.Sprint(maxRunning)}
+	}
+	return e.StartSet(folder, goal, set)
+}
+
+// StartSet starts folder with goal, applying Top settings in set at a first start only (SE10).
+func (e *Engine) StartSet(folder, goal string, set map[string]string) error {
+	folder, goal = strings.TrimSpace(folder), strings.TrimSpace(goal)
+	if folder == "" || goal == "" {
+		return errors.New("folder and goal are required")
+	}
+	chosen, checkSettings := flow.DefaultSettings(), (*flow.Settings)(nil)
+	if len(set) > 0 {
+		var err error
+		if chosen, err = applyStartSet(chosen, set, false); err != nil {
+			return err
+		}
+		ctx0, cancel0 := context.WithTimeout(context.Background(), lockGitTimeout)
+		root0, id0, _ := e.git.RepoProject(ctx0, folder, false)
+		cancel0()
+		if id0 == "" {
+			id0, _ = findStoredProjectWith(e.Paths, cmp.Or(root0, folder), underFolder)
+		}
+		if prev, lerr := LoadState(e.Paths.State(cmp.Or(id0, "."))); id0 != "" && lerr == nil {
+			if _, err = applyStartSet(prev.Settings, set, true); err != nil {
+				return err
+			}
+		} else {
+			checkSettings = &chosen
+		}
+	}
+	results := e.runStartChecks(folder, checkSettings)
 	var failed []string
 	for _, r := range results {
 		if r.Status == onboard.Fail {
@@ -182,7 +260,7 @@ func (e *Engine) Start(folder, goal string, maxRunning int) error {
 		}
 	}
 	if len(failed) > 0 {
-		return fmt.Errorf("not starting; fix these first (sheepdog factory doctor %s shows every check):\n%s", folder, strings.Join(failed, "\n"))
+		return &StartChecksError{Msg: fmt.Sprintf("not starting; fix these first (sheepdog factory doctor %s shows every check):\n%s", folder, strings.Join(failed, "\n")), Results: results}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
 	defer cancel()
@@ -190,22 +268,25 @@ func (e *Engine) Start(folder, goal string, maxRunning int) error {
 	if err != nil {
 		return err
 	}
+	repoURL := e.git.GitHubRepoURL(ctx, root)
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	s, err := LoadState(e.Paths.State(id))
 	if os.IsNotExist(err) {
-		s = flow.State{Project: flow.Project{ID: id}, Settings: flow.DefaultSettings()}
+		s = flow.State{Project: flow.Project{ID: id}, Settings: chosen}
 	} else if err != nil {
+		return err
+	} else if _, err = applyStartSet(s.Settings, set, true); len(set) > 0 && err != nil {
 		return err
 	}
 	if err := e.freshLocked(id, s); err != nil {
 		return err
 	}
-	if maxRunning != 0 {
-		s.Settings.MaxRunning = maxRunning
-	}
 	if err := s.Settings.Validate(); err != nil {
-		return err
+		return &StoredSettingsError{err}
+	}
+	if s.Project.Finished && goal == s.Project.Goal && len(s.Project.Wakes) == 0 {
+		return e.refuse(id, flow.RefuseClosed, "This project is finished. Give it a new goal.")
 	}
 	if s.Project.RunID != "" {
 		_, _ = e.observeCoordLocked(ctx, id, &s)
@@ -216,7 +297,7 @@ func (e *Engine) Start(folder, goal string, maxRunning int) error {
 			holdProjectWake(&s, "new_goal", "owner gave a new goal", "goal: "+goal, e.now())
 		}
 	}
-	s.Project.Folder, s.Project.Goal, s.Project.Started, s.Project.Finished, s.Project.Acts, s.Project.Base, s.Project.Invariants, s.Project.WaitKey, s.Project.CoordSilentStops = root, goal, true, false, nil, nil, nil, "", 0
+	s.Project.Folder, s.Project.RepoURL, s.Project.Goal, s.Project.Started, s.Project.Finished, s.Project.Acts, s.Project.Base, s.Project.Invariants, s.Project.WaitKey, s.Project.CoordSilentStops = root, repoURL, goal, true, false, nil, nil, nil, "", 0
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.lastSweep, id)
 	delete(e.lastProbe, id)
@@ -287,9 +368,13 @@ func stopWorkerRec(a *flow.Attempt, st flow.Settings, now time.Time, keepResume 
 }
 
 func stopTaskRuns(t *flow.Task, st flow.Settings, now time.Time) {
-	if a := flow.OpenAttempt(*t); a != nil {
-		stopWorkerRec(a, st, now, true)
-		stopReviewRec(a.Review, st, now)
+	for i := range t.Attempts {
+		if i == len(t.Attempts)-1 && t.Attempts[i].Closed == "" {
+			stopWorkerRec(&t.Attempts[i], st, now, true)
+		} else if t.Attempts[i].RunID != "" || flow.RunLive("", t.Attempts[i].Run) {
+			stopWorkerRec(&t.Attempts[i], st, now, false)
+		}
+		stopReviewRec(t.Attempts[i].Review, st, now)
 	}
 }
 
@@ -317,9 +402,16 @@ func (e *Engine) Stop(project string) error {
 	defer cancel()
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	id, s, err := e.findProjectLocked(ctx, strings.TrimSpace(project))
+	target := strings.TrimSpace(project)
+	id, s, err := e.findProjectLocked(ctx, target)
 	if err != nil {
+		if err.Error() == "no started factory project" {
+			return e.refuse("", "not_found", map[bool]string{true: fmt.Sprintf("No project %q exists.", target), false: "No started factory project."}[target != ""])
+		}
 		return err
+	}
+	if s.Project.Finished && !projectLive(s) {
+		return nil
 	}
 	freshErr := e.freshLocked(id, s)
 	if err := e.stopCoordTerminalsLocked(ctx, id, s); err != nil {
@@ -354,7 +446,8 @@ func (e *Engine) Stop(project string) error {
 		stopRec(&s.Project.Run, flow.RoleCoordinator, s.Settings, now)
 		reconcileCoordWakes(&s.Project)
 	}
-	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Finished, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.Invariants, s.Project.WaitKey, s.Project.CoordSilentStops = "", "", nil, false, false, nil, nil, false, 0, nil, "", 0
+	acts := map[bool][]flow.Act{true: slices.DeleteFunc(s.Project.Acts, func(a flow.Act) bool { return a.Key == flow.AskStopCoordinator })}[s.Project.Finished]
+	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.Invariants, s.Project.WaitKey, s.Project.CoordSilentStops = "", "", nil, false, acts, nil, false, 0, nil, "", 0
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.lastPass, id)
 	delete(e.lastSweep, id)

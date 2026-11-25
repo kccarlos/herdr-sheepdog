@@ -60,6 +60,14 @@ func (g *Git) ghRepo(ctx context.Context, dir string) (string, error) {
 	return GitHubOrigin(func(args ...string) (string, error) { return g.gitCmd(ctx, dir, args...) })
 }
 
+// GitHubRepoURL returns the https://github.com/<owner>/<repo> address for dir's origin, or "" on failure (SE18).
+func (g *Git) GitHubRepoURL(ctx context.Context, dir string) string {
+	if slug, err := g.ghRepo(ctx, dir); err == nil && slug != "" {
+		return "https://github.com/" + slug
+	}
+	return ""
+}
+
 // RunGH returns the captured stdout, stderr and exit status from herdr-core.
 func (g *Git) RunGH(ctx context.Context, dir string, args ...string) (hc.ExecResult, error) {
 	r, err := g.run(ctx, dir, "gh", args, map[string]string{

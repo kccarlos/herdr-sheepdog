@@ -22,8 +22,11 @@ const DefaultLogLimit, MaxLogLimit = 50, 500
 type ProjectView struct {
 	ID      string         `json:"id"`
 	Folder  string         `json:"folder,omitempty"`
+	RepoURL string         `json:"repo_url,omitempty"`
 	Goal    string         `json:"goal,omitempty"`
+	State   string         `json:"state,omitempty"`
 	Running bool           `json:"running"`
+	Live    bool           `json:"live,omitempty"`
 	Status  string         `json:"status,omitempty"`
 	Counts  map[string]int `json:"counts,omitempty"`
 	Error   string         `json:"error,omitempty"`
@@ -70,8 +73,25 @@ func ProjectsView(states []flow.State) []ProjectView {
 	return out
 }
 
+func projectLive(s flow.State) bool {
+	return s.Project.RunID != "" || flow.RunLive("", s.Project.Run) ||
+		slices.ContainsFunc(s.Project.PlanReviews, func(pr flow.PlanReview) bool {
+			return pr.Run != nil && (pr.Run.RunID != "" || flow.RunLive("", pr.Run.Run))
+		}) ||
+		slices.ContainsFunc(s.Tasks, func(t flow.Task) bool {
+			return slices.ContainsFunc(t.Attempts, func(a flow.Attempt) bool {
+				return a.RunID != "" || flow.RunLive("", a.Run) || a.Review != nil && (a.Review.RunID != "" || flow.RunLive("", a.Review.Run))
+			})
+		})
+}
+
 func projectViewOf(s flow.State) ProjectView {
-	counts, status := map[string]int{}, ""
+	counts, status, state := map[string]int{}, "", "stopped"
+	if s.Project.Finished {
+		state = "finished"
+	} else if s.Project.Started {
+		state = "running"
+	}
 	for _, tv := range GraphViewOf(s, nil).Tasks {
 		counts[tv.Stage]++
 	}
@@ -84,7 +104,7 @@ func projectViewOf(s flow.State) ProjectView {
 			}
 		}
 	}
-	return ProjectView{ID: s.Project.ID, Folder: s.Project.Folder, Goal: s.Project.Goal, Running: s.Project.Started, Status: status, Counts: counts}
+	return ProjectView{ID: s.Project.ID, Folder: s.Project.Folder, RepoURL: s.Project.RepoURL, Goal: s.Project.Goal, State: state, Running: s.Project.Started, Live: projectLive(s), Status: status, Counts: counts}
 }
 
 var taskRows = func() map[string]flow.Row[flow.In] {
