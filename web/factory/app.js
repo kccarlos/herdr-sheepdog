@@ -133,7 +133,7 @@ async function poll() {
 
 // set replaces an element's HTML only when it changed, then reopens the <details>
 // that were open and puts keyboard focus back on the same control.
-const key = (e) => e.id ? `${e.tagName}#${e.id}` : [e.tagName, e.dataset?.setting || e.dataset?.sugg || e.dataset?.pa || e.dataset?.view || e.getAttribute('href') || e.dataset?.askId || e.closest?.('[data-row]')?.dataset.row || e.closest?.('[data-ask-id]')?.dataset.askId || '', e.dataset?.option || e.dataset?.copy || e.getAttribute('aria-label') || (e.dataset?.npCheck && 'np-check') || (e.dataset?.npStart && 'np-start') || e.className || e.parentElement?.className || e.textContent?.slice(0, 24) || ''].join(':');
+const key = (e) => e.id ? `${e.tagName}#${e.id}` : e.dataset?.view ? `${e.tagName}:view:${e.dataset.view}` : e.dataset?.ref ? `${e.tagName}:ref:${e.dataset.ref}` : [e.tagName, e.dataset?.setting || e.dataset?.sugg || e.dataset?.pa || e.getAttribute('href') || e.dataset?.askId || e.closest?.('[data-row]')?.dataset.row || e.closest?.('[data-ask-id]')?.dataset.askId || '', e.dataset?.option || e.dataset?.copy || e.getAttribute('aria-label') || (e.dataset?.npCheck && 'np-check') || (e.dataset?.npStart && 'np-start') || e.className || e.parentElement?.className || e.textContent?.slice(0, 24) || ''].join(':');
 function set(el, html) {
   if (el._html === html) return;
   const open = [...el.querySelectorAll('details[open]')].map(key);
@@ -168,11 +168,16 @@ function render() {
   }
   $('aside').hidden = !!t; $('asks').hidden = !!t; $('tasks-top').hidden = !narrow;
   set($('tasks-top'), narrow ? boardHTML(tasks, 'top') : '');
+  const prevBox = graphOn ? $('main').querySelector('.gbox') : null;
+  const gScroll = prevBox ? prevBox.scrollLeft : 0, gBoxFocus = Boolean(prevBox && document.activeElement === prevBox);
   set($('main'), npUI.open ? renderNewProjectHTML(npUI.rows, npState()) : (t ? taskHTML(t) : boardHTML(tasks, narrow ? 'body' : '')));
   if (graphOn) {
     syncGraphBox($('main'));
+    const box = $('main').querySelector('.gbox');
+    if (box && gScroll) box.scrollLeft = gScroll;
+    if (box && gBoxFocus && box.getAttribute('tabindex') === '0') box.focus({ preventScroll: true });
     const a = document.activeElement?.closest?.('a.gnode');
-    if (a && $('main').contains(a)) highlightGraph(a.closest('svg'), a.dataset.ref);
+    if (a && $('main').contains(a)) highlightGraph(a.closest('svg'), a.dataset.ref, true);
   }
   $('settings').hidden = npUI.open || !!t || !pr || !!data.problem;
   $('settings').className = setUI.error ? 'card dashed' : 'card';
@@ -484,8 +489,8 @@ $('board').addEventListener('submit', async (e) => {
   else { clearPair(); render(); await poll(); }
 });
 const gRef = (el) => el?.closest?.('a.gnode')?.dataset.ref || '';
-const onGraphHi = (e) => { const a = e.target.closest?.('a.gnode'); if (a) highlightGraph(a.closest('svg'), a.dataset.ref); };
-const onGraphLo = (e) => { const a = e.target.closest?.('a.gnode'), svg = a?.closest('svg'); if (a && !(e.relatedTarget && a.contains(e.relatedTarget))) highlightGraph(svg, e.type === 'mouseout' && svg?.contains(document.activeElement) ? gRef(document.activeElement) : ''); };
+const onGraphHi = (e) => { const a = e.target.closest?.('a.gnode'); if (a) highlightGraph(a.closest('svg'), a.dataset.ref, e.type === 'focusin'); };
+const onGraphLo = (e) => { const a = e.target.closest?.('a.gnode'), svg = a?.closest('svg'); if (a && !(e.relatedTarget && a.contains(e.relatedTarget))) highlightGraph(svg, e.type === 'mouseout' && svg?.contains(document.activeElement) ? gRef(document.activeElement) : '', true); };
 for (const ev of ['focusin', 'mouseover']) $('board').addEventListener(ev, onGraphHi);
 for (const ev of ['focusout', 'mouseout']) $('board').addEventListener(ev, onGraphLo);
 if (mq?.addEventListener) mq.addEventListener('change', () => data && render());

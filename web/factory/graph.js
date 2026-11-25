@@ -73,13 +73,13 @@ export function renderGraphSVG(tasks = [], project = '') {
       `<path class="garrow" ${attrs} d="M${e.x2 - 4} ${e.y2 - 7} L${e.x2 + 4} ${e.y2 - 7} L${e.x2} ${e.y2} Z"></path>`;
   }).join('');
   const nodeHTML = g.nodes.map(({ task: t, x, y, w, h }) => {
-    const [label, dot] = stageInfo(t.stage);
+    const [label, dot] = stageInfo(t.stage), title = t.title || '';
     const after = (t.after || []).length ? `, after ${t.after.join(' and ')}` : '';
-    const aria = `${t.ref}, ${t.title}, ${label}${after}`;
+    const aria = `${[t.ref, title, label].filter(Boolean).join(', ')}${after}`;
     return `<a class="gnode" data-ref="${esc(t.ref)}" href="#${enc(project)}/${enc(t.ref)}" aria-label="${esc(aria)}">` +
       `<rect class="box" x="${x}" y="${y}" width="${w}" height="${h}" rx="10"></rect>` +
-      `<text class="ref" x="${x + 10}" y="${y + 16}">${esc(t.ref)}</text>` +
-      `<text x="${x + 10}" y="${y + 32}">${esc(clip(t.title || ''))}</text>` +
+      `<text class="ref" x="${x + 10}" y="${y + 16}">${esc(clip(t.ref || '', 20))}</text>` +
+      `<text x="${x + 10}" y="${y + 32}">${esc(clip(title))}</text>` +
       `${stageMark(dot, x, y)}<text class="st" x="${x + 26}" y="${y + 47}">${esc(clip(label, 21))}</text></a>`;
   }).join('');
   return `<svg width="${g.width}" height="${g.height}" viewBox="0 0 ${g.width} ${g.height}" role="group" aria-label="task graph">${edgeHTML}${nodeHTML}</svg>`;
@@ -102,7 +102,7 @@ export function syncGraphBox(root) {
   if (hint) { hint.hidden = !scrolls; hint.textContent = scrolls ? GRAPH_SCROLL_HINT : ''; }
 }
 
-export function highlightGraph(svg, ref) {
+export function highlightGraph(svg, ref, focused = true) {
   if (!svg) return;
   const keep = new Set(ref ? [ref] : []);
   for (const e of svg.querySelectorAll('path[data-from]')) {
@@ -113,6 +113,6 @@ export function highlightGraph(svg, ref) {
   }
   for (const a of svg.querySelectorAll('a.gnode')) {
     const r = a.dataset.ref;
-    a.setAttribute('class', `gnode${!ref ? '' : r === ref ? ' focus' : keep.has(r) ? ' hot' : ' dim'}`);
+    a.setAttribute('class', `gnode${!ref ? '' : r === ref && focused ? ' focus' : keep.has(r) ? ' hot' : ' dim'}`);
   }
 }
