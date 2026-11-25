@@ -39,7 +39,9 @@ trap cleanup_trap EXIT
 
 factory_preflight
 
-G='Add func PlanCalc(n int) int returning n + 1 in a new file hello/plan11.go with unit test TestPlanCalc in hello/plan11_test.go (after: [], no gate, outcome: "PlanCalc(n) returns n+1" proved by test: TestPlanCalc; estimate_lines: 30). On the backlog, not asked for now: a --verbose flag. Plan it as its own task.'
+# A fresh name per run: a name an earlier run already merged makes the reviewer delete the needed task too.
+N=$(date +%H%M%S)
+G="Add func PlanCalc$N(n int) int returning n + 1 in a new file hello/plan11_$N.go with unit test TestPlanCalc$N in hello/plan11_${N}_test.go (after: [], no gate, outcome: \"PlanCalc$N(n) returns n+1\" proved by test: TestPlanCalc$N; estimate_lines: 30). On the backlog, not asked for now: a --verbose flag. Plan it as its own task."
 
 daemon
 "$D/sheepdog" factory start "$R" --goal "$G" --config "$C" >/dev/null || fail "initial start refused"
