@@ -56,6 +56,7 @@ These subcommands are called only by factory coordinator, worker, and reviewer r
 | `sheepdog factory report review` | Reviewer | Submit a `pass` or `changes` verdict with `--code`, `--head`, `--self-check-misses`, `--deletable`, and optional `--class`, `--not-run`, and `--findings <path>` (outside the worktree). A dirty worktree voids the round and stops the reviewer. |
 | `sheepdog factory report retro` | Retro | Submit a `ship`, `fix`, or `redesign` verdict with `--code`, `--head`, `--cause`, `--worker-change`, `--worker-change-kind` (`check`\|`brief`), `--coordinator-change`, `--coordinator-change-kind` (`check`\|`brief`), and optional `--findings <path>`. |
 | `sheepdog factory report plan-review` | Plan reviewer | Submit a `pass` or `changes` verdict with `--code` and optional `--findings <path>`. |
+| `sheepdog factory plan reject <task> --why "<why>"` | Coordinator | Reject an open plan-review finding on a task, with the reason. |
 | `sheepdog factory report ask` | Worker / Reviewer | Send a `decision` question (2–9 options and a `--recommend` pick) to the coordinator and wake it. |
 | `sheepdog factory ask` | Coordinator | Open a structured ask (`--kind`), or open an engine-filled override card (`--kind override --task <task> [...]`). Gated kinds go to the owner. |
 | `sheepdog factory answer` | Coordinator | Answer an open `decision` ask (`<ask> "<option>" [--why "<why>"]`) and deliver it to the asking worker (or hold it for a replacement) or live reviewer (cancelling the ask if the reviewer already ended). Gated asks require an owner proof. |
