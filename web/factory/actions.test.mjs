@@ -38,7 +38,7 @@ const W = {
 
 const mkProj = (o = {}) => ({
   id: 'proj-demo',
-  folder: '/Users/owner/code/notes',
+  folder: '/Users/dev/code/notes',
   repo_url: 'https://github.com/owner/notes',
   goal: 'A notes page with search',
   state: 'running',
@@ -473,14 +473,14 @@ test('stop on a running project asks first, focuses Keep it running, closes on K
 test('resume on a stopped project sends the exact stored goal to start without settings and transitions to running', async (t) => {
   const fullGoal = '# A notes page with search\n\nInclude tags and keyboard navigation.';
   const daemon = fakeDaemon({
-    projects: [mkProj({ id: 'proj-demo', folder: '/Users/owner/code/notes', goal: fullGoal, state: 'stopped', running: false, live: false })],
+    projects: [mkProj({ id: 'proj-demo', folder: '/Users/dev/code/notes', goal: fullGoal, state: 'stopped', running: false, live: false })],
     paired: true,
   });
   const page = await bootPage(t, daemon);
 
   btn(projectBar(page.doc), W.resume).click(); await page.flush();
   assert.equal(daemon.started.length, 1, 'Resume must POST /api/factory/projects/start once');
-  assert.equal(daemon.started[0].folder, '/Users/owner/code/notes');
+  assert.equal(daemon.started[0].folder, '/Users/dev/code/notes');
   assert.equal(daemon.started[0].goal, fullGoal, 'Resume must send the exact stored goal, not a shortened title');
   assert.ok(!daemon.started[0].set || Object.keys(daemon.started[0].set).length === 0, 'Resume must not send settings overrides');
   assert.match(projectBar(page.doc).textContent, /\brunning\b/);
@@ -489,9 +489,9 @@ test('resume on a stopped project sends the exact stored goal to start without s
 
 test('new goal form shows only the goal field with state-specific hint and submit label (reopen on finished)', async (t) => {
   const projects = [
-    mkProj({ id: 'proj-run', folder: '/Users/owner/code/run', goal: 'Goal A', state: 'running', running: true, live: true }),
-    mkProj({ id: 'proj-stop', folder: '/Users/owner/code/stop', goal: 'Goal B', state: 'stopped', running: false, live: false }),
-    mkProj({ id: 'proj-fin', folder: '/Users/owner/code/fin', goal: 'Goal C', state: 'finished', running: true, live: false }),
+    mkProj({ id: 'proj-run', folder: '/Users/dev/code/run', goal: 'Goal A', state: 'running', running: true, live: true }),
+    mkProj({ id: 'proj-stop', folder: '/Users/dev/code/stop', goal: 'Goal B', state: 'stopped', running: false, live: false }),
+    mkProj({ id: 'proj-fin', folder: '/Users/dev/code/fin', goal: 'Goal C', state: 'finished', running: true, live: false }),
   ];
   const daemon = fakeDaemon({ projects, paired: true });
   const page = await bootPage(t, daemon, { hash: '#proj-run' });
@@ -518,7 +518,7 @@ test('new goal form shows only the goal field with state-specific hint and submi
   assert.ok(btn(bar, W.ngGoStop), 'stopped new-goal form must use Start with this goal');
   ta.value = 'New stopped goal'; ta.dispatchEvent({ type: 'input', bubbles: true }); await page.flush();
   btn(projectBar(page.doc), W.ngGoStop).click(); await page.flush();
-  assert.equal(daemon.started.at(-1)?.folder, '/Users/owner/code/stop');
+  assert.equal(daemon.started.at(-1)?.folder, '/Users/dev/code/stop');
   assert.equal(daemon.started.at(-1)?.goal, 'New stopped goal');
   assert.ok(!daemon.started.at(-1)?.set || Object.keys(daemon.started.at(-1).set).length === 0);
 
@@ -533,7 +533,7 @@ test('new goal form shows only the goal field with state-specific hint and submi
   assert.equal(btn(bar, W.ngGoStop), undefined);
   ta.value = 'Add keyboard shortcuts'; ta.dispatchEvent({ type: 'input', bubbles: true }); await page.flush();
   btn(projectBar(page.doc), W.ngGoFin).click(); await page.flush();
-  assert.equal(daemon.started.at(-1)?.folder, '/Users/owner/code/fin');
+  assert.equal(daemon.started.at(-1)?.folder, '/Users/dev/code/fin');
   assert.equal(daemon.started.at(-1)?.goal, 'Add keyboard shortcuts');
   assert.match(projectBar(page.doc).textContent, /\brunning\b/, 'reopened project transitions to running');
 });
@@ -670,7 +670,7 @@ test('unpaired stop and resume open the pairing box inside the project bar (not 
   assert.match(projectBar(stopPage.doc).textContent, /\bstopped\b/);
 
   // Unpaired Resume: pairing box opens in project bar and resumes Start with the stored goal.
-  const resDaemon = fakeDaemon({ projects: [mkProj({ id: 'proj-demo', folder: '/Users/owner/code/notes', goal: 'Stored goal', state: 'stopped', running: false, live: false })], paired: false });
+  const resDaemon = fakeDaemon({ projects: [mkProj({ id: 'proj-demo', folder: '/Users/dev/code/notes', goal: 'Stored goal', state: 'stopped', running: false, live: false })], paired: false });
   const resPage = await bootPage(t, resDaemon);
   btn(projectBar(resPage.doc), W.resume).click(); await resPage.flush();
   const resPair = projectBar(resPage.doc).querySelector(`[role="region"][aria-label="${W.pairH}"]`);
