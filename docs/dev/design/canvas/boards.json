@@ -1090,30 +1090,6 @@
    "h": 1159
   },
   {
-   "id": "FactoryWebMain",
-   "title": "Factory web — home, light",
-   "file": "FactoryWebMain.dc.html",
-   "png": null,
-   "w": 1440,
-   "h": 1840
-  },
-  {
-   "id": "FactoryWebTask",
-   "title": "Factory web — one task",
-   "file": "FactoryWebTask.dc.html",
-   "png": null,
-   "w": 1440,
-   "h": 1320
-  },
-  {
-   "id": "FactoryWebEmpty",
-   "title": "Factory web — empty, no tasks",
-   "file": "FactoryWebEmpty.dc.html",
-   "png": null,
-   "w": 1280,
-   "h": 900
-  },
-  {
    "id": "FactoryWebLoading",
    "title": "Factory web — loading and no link",
    "file": "FactoryWebLoading.dc.html",
@@ -1125,25 +1101,9 @@
    "id": "FactoryWebOffline",
    "title": "Factory web — link lost after load",
    "file": "FactoryWebOffline.dc.html",
-   "png": null,
+   "png": "png/FactoryWebOffline.png",
    "w": 1440,
-   "h": 1900
-  },
-  {
-   "id": "FactoryWebPhone",
-   "title": "Factory web — home on a phone",
-   "file": "FactoryWebPhone.dc.html",
-   "png": null,
-   "w": 390,
-   "h": 3900
-  },
-  {
-   "id": "FactoryWebHomeDark",
-   "title": "Factory web — home, dark",
-   "file": "FactoryWebHomeDark.dc.html",
-   "png": null,
-   "w": 1440,
-   "h": 1840
+   "h": 2213
   },
   {
    "id": "FactoryWebLifeHome",

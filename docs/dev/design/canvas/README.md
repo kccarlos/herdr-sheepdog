@@ -33,3 +33,9 @@ is re-exported after every change.
   tab order, the screen-reader labels and the open questions. Their PNGs
   were rendered from the board sources in headless Chrome, not exported
   from the canvas; the logo in them is the repository's.
+- The older Part 4 boards `FactoryWebMain`, `FactoryWebHomeDark`,
+  `FactoryWebPhone`, `FactoryWebEmpty` and `FactoryWebTask` were removed
+  from the canvas on 2026-11-24: `FactoryWebLifeHome` (with its dark and
+  360 px copies), `FactoryWebNewProject` and `FactoryWebTaskLife` replace
+  them. `FactoryWebLoading` stays, and `FactoryWebOffline` was redrawn on
+  the Part 4b page.
