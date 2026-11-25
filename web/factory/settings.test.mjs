@@ -402,3 +402,171 @@ test('asks.js exports updated PAIR_HINT, pairBoxHTML and send; settings.js expor
   assert.equal(typeof setMod.renderSettingsHTML, 'function', 'settings.js must export renderSettingsHTML');
   assert.ok(!/\bPOST\b|method\s*:/.test(readFileSync(new URL('./app.js', import.meta.url), 'utf8')), 'app.js must hold no POST');
 });
+
+test('narrow #board.cols does not inherit a pixel flex-basis height in column direction', () => {
+  const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+  const beforeMedia = css.split('@media (min-width: 761px)')[0];
+  const hasNarrowOverride = /#board\.cols\s*>\s*\.col-main[\s\S]*?#board\.cols\s*>\s*aside[\s\S]*?flex(?:-basis)?:\s*(?:none|0\s+1\s+auto|auto)/.test(beforeMedia)
+    || (/#board\.cols\s*>\s*\.col-main[^}]*flex(?:-basis)?:\s*(?:none|0\s+1\s+auto|auto)/.test(beforeMedia)
+      && /#board\.cols\s*>\s*aside[^}]*flex(?:-basis)?:\s*(?:none|0\s+1\s+auto|auto)/.test(beforeMedia));
+  const hasPixelBasis = /\.cols\s*>\s*(?:\.col-main|aside)[^{]*\{[^}]*flex:\s*[^;]*\d+px/.test(beforeMedia);
+  assert.ok(!hasPixelBasis || hasNarrowOverride, 'narrow #board.cols column children must not inherit a 600px/340px flex-basis height');
+});
+
+const wrapDaemon = (base, fetch) => Object.assign(Object.create(base), { fetch });
+
+test('answering a setting ask on another project does not show a cancelled notice on a stopped project', async (t) => {
+  const askOther = { id: 'ask-other', project: 'proj-other', kind: 'rule', gated: true, status: 'open', question: 'This project: review rounds 3 (now 2). Save?', options: ['Save', 'Keep current'], recommend: 'Save', set: { name: 'review_rounds', value: '3', was: '2' } };
+  const base = fakeDaemon({ asks: [askOther], paired: true });
+  const daemon = wrapDaemon(base, async (p, i) => p === '/api/factory/projects'
+    ? { ok: true, status: 200, json: async () => ({ protocol: 1, projects: [{ id: 'proj-demo', goal: 'Stopped proj', running: false, counts: {} }, { id: 'proj-other', goal: 'Other proj', running: true, counts: {} }] }) }
+    : base.fetch(p, i));
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  daemon.openAsks[0].status = 'answered';
+  await page.pollNow();
+  assert.doesNotMatch(rowOf(sec, 'review rounds', page.doc).box.textContent, /project finished before you answered/);
+});
+
+test('saving a setting ask from another device on a stopped project does not show a cancelled notice', async (t) => {
+  const base = fakeDaemon({ paired: true });
+  const daemon = wrapDaemon(base, async (p, i) => p === '/api/factory/projects'
+    ? { ok: true, status: 200, json: async () => ({ protocol: 1, projects: [{ id: 'proj-demo', goal: 'A notes page', running: false, counts: {} }] }) }
+    : base.fetch(p, i));
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  (await editRow(page, sec, 'review rounds', '3')).box.querySelector('button[aria-label="Change review rounds"]').click();
+  await page.flush();
+  daemon.openAsks[0].status = 'answered';
+  daemon.rows.find((r) => r.name === 'review_rounds').value = '3';
+  await page.pollNow();
+  assert.doesNotMatch(rowOf(sec, 'review rounds', page.doc).box.textContent, /project finished before you answered/);
+});
+
+test('typing multiple digits into an already-dirty number input keeps the same DOM node and requires a value', async (t) => {
+  const page = await bootPage(t, fakeDaemon({ paired: true })), sec = findCard(page.doc, 'settings');
+  const first = (await editRow(page, sec, 'ci stalled minutes', '1')).ctrl;
+  first.focus();
+  first.value = '15';
+  first.dispatchEvent({ type: 'input', bubbles: true });
+  await page.flush();
+  assert.strictEqual(rowOf(sec, 'ci stalled minutes', page.doc).ctrl, first, 'typing a second digit must not replace the focused <input>');
+  assert.ok(first.hasAttribute('required'), 'numeric setting input must have required so blank cannot submit');
+});
+
+test('successful pairing announces Paired. Sending what you asked for… while resuming and restores focus to the row', async (t) => {
+  let releasePost, markStarted, sawSession = false;
+  const holdPost = new Promise((r) => { releasePost = r; });
+  const postStarted = new Promise((r) => { markStarted = r; });
+  const base = fakeDaemon({ paired: false });
+  const daemon = wrapDaemon(base, async (p, i) => {
+    if (p === '/api/auth/session') sawSession = true;
+    if (sawSession && p.endsWith('/settings') && i?.method === 'POST') { markStarted(); await holdPost; }
+    return base.fetch(p, i);
+  });
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  try {
+    (await editRow(page, sec, 'review rounds', '3')).box.querySelector('button[aria-label="Change review rounds"]').click();
+    await page.flush();
+    sec.querySelector('input[name="code"]').value = 'ABCD-EFGH';
+    sec.querySelector('form[data-pair-form]').dispatchEvent({ type: 'submit', bubbles: true });
+    await postStarted;
+    await new Promise((r) => setImmediate(r));
+    assert.equal(
+      sec.querySelector('[role="region"][aria-label="pair this browser"] [role="status"]')?.textContent.trim(),
+      'Paired. Sending what you asked for…',
+      'expected pr.done status in pairing box while resuming pending proposal',
+    );
+  } finally { releasePost(); }
+  await page.flush();
+  assert.ok(rowOf(sec, 'review rounds', page.doc).box.contains(page.doc.activeElement), 'focus must return to the row after pairing resumes');
+});
+
+test('keyboard focus survives disabled buttons on wrong pairing code and returns to row control after Pair', async (t) => {
+  const daemon = fakeDaemon({ paired: false, onPropose: () => ({ status: 400, body: { code: 'out_of_range', error: 'review rounds 4 does not fit: max rounds is 3 (allowed 4–10). Raise max rounds first.' } }) });
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  const proto = sec.constructor.prototype;
+  const origFocus = proto.focus, origInner = Object.getOwnPropertyDescriptor(proto, 'innerHTML');
+  t.after(() => { proto.focus = origFocus; Object.defineProperty(proto, 'innerHTML', origInner); });
+  proto.focus = function () { if (!this.disabled && this.ownerDocument) this.ownerDocument.activeElement = this; };
+  Object.defineProperty(proto, 'innerHTML', {
+    get: origInner.get, configurable: true,
+    set(h) { if (this.ownerDocument?.activeElement && this.contains(this.ownerDocument.activeElement)) this.ownerDocument.activeElement = null; origInner.set.call(this, h); },
+  });
+  const btn = (await editRow(page, sec, 'review rounds', '4')).box.querySelector('button[aria-label="Change review rounds"]');
+  btn.focus(); btn.click(); await page.flush();
+  assert.equal(page.doc.activeElement?.getAttribute('name'), 'code', 'focus moves to pairing code when box opens');
+  sec.querySelector('input[name="code"]').value = 'BAD-CODE';
+  sec.querySelector('form[data-pair-form] button[type="submit"]').focus();
+  sec.querySelector('form[data-pair-form]').dispatchEvent({ type: 'submit', bubbles: true });
+  await page.flush();
+  assert.ok(sec.querySelector('[aria-label="pair this browser"]')?.contains(page.doc.activeElement), 'focus must stay in pairing box on wrong code');
+  sec.querySelector('input[name="code"]').value = 'ABCD-EFGH';
+  sec.querySelector('form[data-pair-form]').dispatchEvent({ type: 'submit', bubbles: true });
+  await page.flush();
+  assert.ok(rowOf(sec, 'review rounds', page.doc).box.contains(page.doc.activeElement), 'after Pair succeeds, focus must return to the row control that asked');
+});
+
+test('renderSettingsHTML escapes malicious min/max and app.js handles quoted setting names without selector injection', async (t) => {
+  const { renderSettingsHTML } = await import('./settings.js');
+  const html = renderSettingsHTML([{
+    name: 'review_rounds', label: 'review rounds', value: '2', default: '2',
+    min: '1"><img src=x onerror=alert(1)>', max: '9', top: true,
+  }], [], {});
+  assert.doesNotMatch(html, /<img|onerror=/i, 'min/max must not allow raw HTML/attribute injection');
+  const rows = [{ name: 'bad"name', label: 'bad name', value: '2', default: '2', min: 1, max: 5, top: true }];
+  const daemon = fakeDaemon({ rows, paired: true });
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  (await editRow(page, sec, 'bad name', '99')).box.querySelector('button[aria-label="Change bad name"]').click();
+  await page.flush();
+  assert.equal(daemon.proposed.length, 0, 'quoted setting name must still resolve its input and enforce reportValidity()');
+});
+
+test('numeric row with min === max still renders as type="number" with range', async () => {
+  const { renderSettingsHTML } = await import('./settings.js');
+  const html = renderSettingsHTML([{
+    name: 'max_rounds', label: 'max rounds', value: '10', default: '5', min: 10, max: 10, top: true,
+  }], [], {});
+  assert.match(html, /type="number"[^>]*min="10"[^>]*max="10"/);
+  assert.match(html, /allowed 10–10/);
+});
+
+test('focus on the second row Save button survives a 3 s poll without jumping to the first row', async (t) => {
+  const asks = [
+    { id: 'ask-1', project: 'proj-demo', kind: 'rule', gated: true, status: 'open', question: 'This project: max running 5 (now 4). Save?', options: ['Save', 'Keep current'], recommend: 'Save', set: { name: 'max_running', value: '5', was: '4' } },
+    { id: 'ask-2', project: 'proj-demo', kind: 'rule', gated: true, status: 'open', question: 'This project: review rounds 3 (now 2). Save?', options: ['Save', 'Keep current'], recommend: 'Save', set: { name: 'review_rounds', value: '3', was: '2' } },
+  ];
+  const daemon = fakeDaemon({ asks, paired: true });
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  const save2 = rowOf(sec, 'review rounds', page.doc).box.querySelector('button[aria-label="Save (Recommended)"]');
+  save2.focus();
+  daemon.rows.find((r) => r.name === 'max_rounds').value = '4';
+  await page.pollNow();
+  assert.equal(page.doc.activeElement?.getAttribute('data-ask-id'), 'ask-2', 'focus must stay on ask-2 Save button');
+});
+
+test('pressing Enter twice while a proposal is in flight sends only one POST', async (t) => {
+  let release; const hold = new Promise((r) => { release = r; });
+  const base = fakeDaemon({ paired: true });
+  const daemon = wrapDaemon(base, async (p, i) => { if (p.endsWith('/settings') && i?.method === 'POST') await hold; return base.fetch(p, i); });
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  try {
+    const ctrl = (await editRow(page, sec, 'review rounds', '3')).ctrl;
+    ctrl.dispatchEvent({ type: 'keydown', key: 'Enter', bubbles: true });
+    rowOf(sec, 'review rounds', page.doc).ctrl.dispatchEvent({ type: 'keydown', key: 'Enter', bubbles: true });
+  } finally { release(); }
+  await page.flush();
+  assert.equal(daemon.proposed.length, 1, 'Enter must respect setUI.busy');
+});
+
+test('network error after initial load keeps last-known settings instead of wiping to error state', async (t) => {
+  let failNet = false;
+  const base = fakeDaemon({ paired: true });
+  const daemon = wrapDaemon(base, async (p, i) => {
+    if (failNet && (p.endsWith('/graph') || p.endsWith('/settings'))) throw new TypeError('Failed to fetch');
+    return base.fetch(p, i);
+  });
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  assert.ok(rowOf(sec, 'max running', page.doc), 'initial settings loaded');
+  failNet = true;
+  await page.pollNow();
+  assert.ok(!sec.textContent.includes(W.cant), 'offline poll must keep last-known settings');
+});
