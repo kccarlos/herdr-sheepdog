@@ -139,7 +139,8 @@ func GraphViewOf(s flow.State, logs []LogLine) GraphView {
 }
 
 func revActive(a *flow.Attempt) bool {
-	return a != nil && a.Review != nil && (a.Review.Run == nil || a.Review.Run.State != flow.PhaseEnded)
+	return a != nil && a.Review != nil && (a.Review.Run == nil || a.Review.Run.State != flow.PhaseEnded) &&
+		!slices.ContainsFunc(a.Rounds, func(r flow.Round) bool { return r.N == a.Review.Round && r.Verdict != "" })
 }
 
 func graphViewOf(s flow.State, lastRow map[string]LogLine) GraphView {
@@ -365,9 +366,10 @@ func taskSteps(t flow.Task, st flow.State, att *flow.Attempt, stage, why string,
 			txt = "parked here, waiting on the coordinator"
 		case name == "implementing" && s == "now" && rounds > 0 && att != nil && flow.CoveringOverride(*att, h) == nil && nc != nil && (nc.Kind == flow.RoundFull || nc.Kind == flow.RoundDelta) && nc.Verdict == flow.VerdictChanges:
 			txt = fmt.Sprintf("sent back from review round %d; %s", nc.N, rnd)
+		case name == "review" && s == "now" && liveRev && att.Review.Role() == flow.RoleReviewer:
+			txt = fmt.Sprintf("review round %d; %s", cmp.Or(att.Review.Round, len(att.Rounds)+1), needs)
 		case name == "review" && s == "now":
-			txt = cmp.Or(map[bool]string{true: fmt.Sprintf("review round %d; %s", len(att.Rounds)+1, needs)}[liveRev && att.Review.Role() == flow.RoleReviewer],
-				map[bool]string{true: rnd}[revPassed], map[bool]string{true: rnd + "; " + needs}[rnd != ""], needs)
+			txt = cmp.Or(map[bool]string{true: rnd}[revPassed], map[bool]string{true: rnd + "; " + needs}[rnd != ""], needs)
 		case name == "review":
 			txt = map[string]string{"todo": needs, "done": rnd, "skipped": "skipped by your override"}[s]
 		case name == "retro" && s == "now" && liveRev && att.Review.Role() == flow.RoleRetro:
@@ -415,7 +417,7 @@ func taskWhy(t flow.Task, a *flow.Attempt, unmet []string, started bool, stage s
 		if a.Review.Role() == flow.RoleRetro {
 			return "In retro"
 		}
-		return fmt.Sprintf("In review round %d", len(a.Rounds)+1)
+		return fmt.Sprintf("In review round %d", cmp.Or(a.Review.Round, len(a.Rounds)+1))
 	case r.Why == flow.WhyCI:
 		return "Waiting on CI and merge"
 	case r.ID == "N23":
