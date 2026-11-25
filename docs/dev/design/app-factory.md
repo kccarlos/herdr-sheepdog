@@ -160,8 +160,10 @@ every project folder it has. So:
 In the app the head is always in the Agents list. The sections are, in
 order: **Needs you, Working, Stopped, Done.**
 
-- Running: under Working. A head with an open ask or a stuck coordinator
-  is under Needs you.
+- Running: under Working. A head whose coordinator is stuck on a dialog
+  is under Needs you. An open ask is its own card under Needs you; the
+  head stays under Working and shows "1 waiting on you", so it never jumps
+  sections beside its own card.
 - Stopped: under **Stopped**, with its Resume button. The section is shown
   only when a project is stopped. It exists because Done is closed by
   default and would hide Resume, and Working would be untrue.
@@ -519,8 +521,15 @@ text box on the project head: `POST /api/factory/projects/{id}/say`.
   | Empty text | the send button is off; nothing is sent |
   | Too long | a counter appears near the cap; over it: "Too long. Keep it under 1,000 characters." |
   | Project not found | "This project is gone." and the page closes to Agents |
-  | No paired-device identity | "This phone is not paired with the computer any more. Pair it again." |
+  | No paired-device identity | "Not sent: Work Mac no longer knows this phone. Pair this phone again in Settings ▸ Work Mac, then send again." The same pattern as Stop on the boards ("Not stopped: … then press Stop again."): it names the computer and says where to pair. |
 
+- **Strings this page adds.** The page keeps no wording list of its own;
+  the app's strings go into the wording table
+  ([slice14-wording.md](canvas/slice14-wording.md)) with the board export.
+  These four are new here: `1 waiting on you` (on a head under Working);
+  `Not sent: <computer> no longer knows this phone. Pair this phone again
+  in Settings ▸ <computer>, then send again.`; `Too long. Keep it under
+  1,000 characters.`; `This project is gone.`
 - **Where a question goes.** The box sends instructions. One sentence
   under it says so: "A question? Ask by voice, or ask Sheepdog in
   Conversation." A question typed into the box is a `Say`, which changes
