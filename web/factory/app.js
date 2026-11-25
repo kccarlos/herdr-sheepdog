@@ -5,6 +5,7 @@ import { renderSettingsHTML, proposeSetting, parseModelCandidates } from './sett
 import { renderNewProjectHTML, renderProjectActionsHTML, loadNewProject, checkProject, startProject, stopProject, projectState, EMPTY_CARD_HTML, PLUS_ICO } from './project.js';
 import { renderMarkdown } from '../static/markdown.js';
 import { goalTitle } from './goal.js';
+import { renderGraphSection, syncGraphBox, highlightGraph } from './graph.js';
 
 const POLL_MS = 3000, GIVE_UP_MS = 8000, NOTICE_MS = 5000;
 const $ = (id) => document.getElementById(id);
@@ -18,6 +19,7 @@ const ORDER = ['owner_gate', 'owner_answer', 'blocked_or_failed', 'ci', 'working
 // A stage this page does not know yet shows under its raw name rather than vanishing.
 const stage = (t) => STAGE[t.stage] || [t.stage || 'unknown', 'idle'];
 let data = null, down = false, lastOK = 0, timer = 0, busy = false, again = false, curNarrow = true, npSeq = 0, paSeq = 0, justStarted = null, boardNotice = null, boardNoticeTimer = 0;
+let taskView = (() => { try { return globalThis.sessionStorage?.getItem('factory-view') === 'graph' ? 'graph' : 'list'; } catch { return 'list'; } })();
 const started = Date.now(), noticeTimers = new Map();
 const mq = globalThis.matchMedia?.('(max-width: 760px)') || null;
 const askFlow = createAskFlow(browserAskDeps());
@@ -131,7 +133,7 @@ async function poll() {
 
 // set replaces an element's HTML only when it changed, then reopens the <details>
 // that were open and puts keyboard focus back on the same control.
-const key = (e) => e.id ? `${e.tagName}#${e.id}` : [e.tagName, e.dataset?.setting || e.dataset?.sugg || e.dataset?.pa || e.getAttribute('href') || e.dataset?.askId || e.closest?.('[data-row]')?.dataset.row || e.closest?.('[data-ask-id]')?.dataset.askId || '', e.dataset?.option || e.dataset?.copy || e.getAttribute('aria-label') || (e.dataset?.npCheck && 'np-check') || (e.dataset?.npStart && 'np-start') || e.className || e.parentElement?.className || e.textContent?.slice(0, 24) || ''].join(':');
+const key = (e) => e.id ? `${e.tagName}#${e.id}` : e.dataset?.view ? `${e.tagName}:view:${e.dataset.view}` : e.dataset?.ref ? `${e.tagName}:ref:${e.dataset.ref}` : [e.tagName, e.dataset?.setting || e.dataset?.sugg || e.dataset?.pa || e.getAttribute('href') || e.dataset?.askId || e.closest?.('[data-row]')?.dataset.row || e.closest?.('[data-ask-id]')?.dataset.askId || '', e.dataset?.option || e.dataset?.copy || e.getAttribute('aria-label') || (e.dataset?.npCheck && 'np-check') || (e.dataset?.npStart && 'np-start') || e.className || e.parentElement?.className || e.textContent?.slice(0, 24) || ''].join(':');
 function set(el, html) {
   if (el._html === html) return;
   const open = [...el.querySelectorAll('details[open]')].map(key);
@@ -156,6 +158,8 @@ function render() {
   if (waiting) return;
   const tasks = sortedTasks();
   const t = !npUI.open && data.task && tasks.find((x) => x.ref === data.task), pr = data.projects.find((x) => x.id === data.p);
+  const graphOn = !npUI.open && !t && Boolean(pr) && !data.problem && tasks.length >= 2 && taskView === 'graph';
+  $('board').className = graphOn ? 'cols graph-view' : 'cols';
   const narrow = !t && !npUI.open && Boolean(mq ? mq.matches : globalThis.innerWidth <= 760);
   if (curNarrow !== narrow && $('main').after) {
     if (narrow) { $('main').before($('asks')); $('projects').after($('settings')); }
@@ -164,7 +168,17 @@ function render() {
   }
   $('aside').hidden = !!t; $('asks').hidden = !!t; $('tasks-top').hidden = !narrow;
   set($('tasks-top'), narrow ? boardHTML(tasks, 'top') : '');
+  const prevBox = graphOn ? $('main').querySelector('.gbox') : null;
+  const gScroll = prevBox ? prevBox.scrollLeft : 0, gBoxFocus = Boolean(prevBox && document.activeElement === prevBox);
   set($('main'), npUI.open ? renderNewProjectHTML(npUI.rows, npState()) : (t ? taskHTML(t) : boardHTML(tasks, narrow ? 'body' : '')));
+  if (graphOn) {
+    syncGraphBox($('main'));
+    const box = $('main').querySelector('.gbox');
+    if (box && gScroll) box.scrollLeft = gScroll;
+    if (box && gBoxFocus && box.getAttribute('tabindex') === '0') box.focus({ preventScroll: true });
+    const a = document.activeElement?.closest?.('a.gnode');
+    if (a && $('main').contains(a)) highlightGraph(a.closest('svg'), a.dataset.ref, true);
+  }
   $('settings').hidden = npUI.open || !!t || !pr || !!data.problem;
   $('settings').className = setUI.error ? 'card dashed' : 'card';
   if (!$('settings').hidden) set($('settings'), renderSettingsHTML(setUI.rows, data.asks, setState()));
@@ -182,7 +196,9 @@ const projHTML = (pr) => `<a class="proj" href="#${enc(pr.id)}"${pr.id === data.
 
 function boardHTML(tasks, part) {
   const pr = data.projects.find((x) => x.id === data.p), done = tasks.filter((x) => x.stage === 'done');
-  let top = `<div class="head"><h1>tasks</h1>${pr ? `<span>${done.length} of ${tasks.length} done</span>` : ''}</div>`, body = '';
+  const showGraph = Boolean(pr) && !data.problem && tasks.length >= 2 && taskView === 'graph';
+  const sw = pr && !data.problem && tasks.length >= 2 ? `<div class="seg" role="group" aria-label="show tasks as"><button type="button" class="${showGraph ? '' : 'on'}" data-view="list" aria-pressed="${!showGraph}">list</button><button type="button" class="${showGraph ? 'on' : ''}" data-view="graph" aria-pressed="${showGraph}">graph</button></div>` : '';
+  let top = `<div class="head"><h1>tasks</h1>${pr ? `<div class="head-r"><span>${done.length} of ${tasks.length} done</span>${sw}</div>` : ''}</div>`, body = '';
   if (data.problem) body = `<section class="card" role="status"><h2>can't show the factory</h2><p class="muted">${esc(data.problem)}</p></section>`;
   else if (!pr) body = EMPTY_CARD_HTML;
   else {
@@ -190,12 +206,15 @@ function boardHTML(tasks, part) {
     top += `<p class="goal-title">${esc(title)}</p>` + (rawGoal && rawGoal !== title ? `<details class="goal-full"><summary>full project goal</summary><div class="md-body">${renderMarkdown(pr.goal)}</div></details>` : '') + ' ' + renderProjectActionsHTML(pr, paState());
     if (boardNotice?.project === pr.id) body += `<p class="set-ok" role="status">${OK_ICO}<span>${esc(boardNotice.text)}</span></p>`;
     if (!tasks.length) body += `<section class="card" aria-label="No tasks"><h2>no tasks yet</h2><p class="muted">The coordinator has not planned this project yet.</p></section>`;
-    const other = [...new Set(tasks.map((x) => x.stage))].filter((s) => s !== 'done' && !ORDER.includes(s));
-    for (const s of [...ORDER, ...other]) {
-      const rows = tasks.filter((x) => x.stage === s), [rawLabel, , alert] = stage(rows[0] || { stage: s }), label = esc(rawLabel);
-      if (rows.length) body += `<section class="group" aria-label="${label}"><h2${alert ? ' class="alert"' : ''}>${label} <span class="count">${rows.length}</span></h2><div class="rows${alert ? ' alert' : ''}">${rows.map(rowHTML).join('')}</div></section>`;
+    else if (showGraph) body += renderGraphSection(tasks, pr.id);
+    else {
+      const other = [...new Set(tasks.map((x) => x.stage))].filter((s) => s !== 'done' && !ORDER.includes(s));
+      for (const s of [...ORDER, ...other]) {
+        const rows = tasks.filter((x) => x.stage === s), [rawLabel, , alert] = stage(rows[0] || { stage: s }), label = esc(rawLabel);
+        if (rows.length) body += `<section class="group" aria-label="${label}"><h2${alert ? ' class="alert"' : ''}>${label} <span class="count">${rows.length}</span></h2><div class="rows${alert ? ' alert' : ''}">${rows.map(rowHTML).join('')}</div></section>`;
+      }
+      if (done.length) body += `<details class="done"><summary>${done.length} done · show them</summary><div class="rows">${done.map(rowHTML).join('')}</div></details>`;
     }
-    if (done.length) body += `<details class="done"><summary>${done.length} done · show them</summary><div class="rows">${done.map(rowHTML).join('')}</div></details>`;
     body += logHTML(data.log, 'log');
   }
   return part === 'top' ? top : part === 'body' ? body : top + body;
@@ -434,6 +453,8 @@ $('board').addEventListener('keydown', (e) => {
 });
 const openModelCands = (r, raw) => parseModelCandidates(raw, r.clis[0]).map((c) => ({ ...c, cli: r.clis.includes(c.cli) ? c.cli : r.clis[0] }));
 $('board').addEventListener('click', (e) => {
+  const vw = e.target.closest('button[data-view]');
+  if (vw) { taskView = vw.dataset.view === 'graph' ? 'graph' : 'list'; try { globalThis.sessionStorage?.setItem('factory-view', taskView); } catch {} return render(); }
   if (e.target.closest('button[data-new-project]')) return openNewProject();
   if (e.target.closest('a[data-np-back]')) { e.preventDefault(); closeNewProject(); return render(); }
   if (npUI.open && e.target.closest('a.proj')) { closeNewProject(); return render(); }
@@ -506,8 +527,14 @@ $('board').addEventListener('submit', async (e) => {
   else if (pending?.askId) await submitAnswer(pending.askId, pending.option, pending.row || '');
   else { clearPair(); render(); await poll(); }
 });
+const gRef = (el) => el?.closest?.('a.gnode')?.dataset.ref || '';
+const onGraphHi = (e) => { const a = e.target.closest?.('a.gnode'); if (a) highlightGraph(a.closest('svg'), a.dataset.ref, e.type === 'focusin'); };
+const onGraphLo = (e) => { const a = e.target.closest?.('a.gnode'), svg = a?.closest('svg'); if (a && !(e.relatedTarget && a.contains(e.relatedTarget))) highlightGraph(svg, e.type === 'mouseout' && svg?.contains(document.activeElement) ? gRef(document.activeElement) : '', true); };
+for (const ev of ['focusin', 'mouseover']) $('board').addEventListener(ev, onGraphHi);
+for (const ev of ['focusout', 'mouseout']) $('board').addEventListener(ev, onGraphLo);
 if (mq?.addEventListener) mq.addEventListener('change', () => data && render());
-else addEventListener('resize', () => data && render());
+addEventListener('resize', () => { if (!data) return; if (!mq?.addEventListener) render(); else syncGraphBox($('main')); });
+if (globalThis.ResizeObserver) new ResizeObserver(() => data && syncGraphBox($('main'))).observe($('main'));
 $('retry').addEventListener('click', poll);
 addEventListener('hashchange', () => { if (npUI.open) closeNewProject(); scrollTo(0, 0); poll(); });
 poll();

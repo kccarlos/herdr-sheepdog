@@ -1,0 +1,253 @@
+{
+  "seq": 42,
+  "project": {
+    "id": "notes-demo",
+    "folder": "/Users/dev/code/notes",
+    "repo_url": "https://github.com/example/notes",
+    "goal": "A notes page with search",
+    "started": false
+  },
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Notes table and model",
+      "brief": "Add the notes table migration and Go model.",
+      "outcomes": [{ "text": "Notes table migrates cleanly", "proved_by": "test: go test ./internal/notes" }],
+      "estimate_lines": 120,
+      "done": { "merged_commit": "a1b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e" },
+      "attempts": []
+    },
+    {
+      "id": "T2",
+      "title": "Notes API: list and read",
+      "brief": "Add GET /api/notes and GET /api/notes/{id}.",
+      "outcomes": [{ "text": "List and read endpoints return JSON", "proved_by": "test: go test ./internal/api" }],
+      "estimate_lines": 110,
+      "done": { "merged_commit": "b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f" },
+      "attempts": []
+    },
+    {
+      "id": "T3",
+      "title": "Page shell and routes",
+      "brief": "Add the notes web shell and client router.",
+      "outcomes": [{ "text": "Page shell renders without errors", "proved_by": "test: npm test" }],
+      "estimate_lines": 90,
+      "done": { "merged_commit": "c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a" },
+      "attempts": []
+    },
+    {
+      "id": "T4",
+      "title": "Notes list page",
+      "brief": "Show saved notes in reverse chronological order.",
+      "outcomes": [{ "text": "Notes list renders saved items", "proved_by": "test: npm test" }],
+      "after": ["T1", "T2", "T3"],
+      "estimate_lines": 130,
+      "done": { "merged_commit": "d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b" },
+      "attempts": []
+    },
+    {
+      "id": "T5",
+      "title": "Note editor",
+      "brief": "Add markdown editing and autosave for a note.",
+      "outcomes": [{ "text": "Editor saves updates cleanly", "proved_by": "test: npm test" }],
+      "after": ["T1", "T3"],
+      "estimate_lines": 150,
+      "last_row": "N36",
+      "attempts": [
+        {
+          "base_commit": "d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b",
+          "branch": "factory/T5-1",
+          "worktree": "/Users/dev/code/notes-wt/T5-1",
+          "pr": 15,
+          "run_id": "",
+          "ready": [{ "head": "e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c" }],
+          "rounds": [],
+          "accepts": [],
+          "acts": [],
+          "size_cap": 300
+        }
+      ]
+    },
+    {
+      "id": "T6",
+      "title": "Notes API: write",
+      "brief": "Add POST, PUT and DELETE endpoints for notes.",
+      "outcomes": [{ "text": "Write endpoints validate input and persist", "proved_by": "test: go test ./internal/api" }],
+      "after": ["T2"],
+      "estimate_lines": 140,
+      "last_row": "N23",
+      "attempts": [
+        {
+          "base_commit": "b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f",
+          "branch": "factory/T6-1",
+          "worktree": "/Users/dev/code/notes-wt/T6-1",
+          "pr": 0,
+          "run_id": "",
+          "ready": [],
+          "rounds": [],
+          "accepts": [],
+          "acts": [],
+          "size_cap": 280
+        }
+      ]
+    },
+    {
+      "id": "T7",
+      "title": "Search index for note text",
+      "brief": "Add full-text index updated on note writes.",
+      "outcomes": [{ "text": "Index returns ranked note ids", "proved_by": "test: go test ./internal/search" }],
+      "after": ["T1"],
+      "estimate_lines": 160,
+      "done": { "merged_commit": "e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c" },
+      "attempts": []
+    },
+    {
+      "id": "T8",
+      "title": "Tags table and model",
+      "brief": "Add tags table and note-tag join model.",
+      "outcomes": [{ "text": "Tag associations persist cleanly", "proved_by": "test: go test ./internal/tags" }],
+      "after": ["T1"],
+      "estimate_lines": 100,
+      "done": { "merged_commit": "f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d" },
+      "attempts": []
+    },
+    {
+      "id": "T9",
+      "title": "Empty and error pages",
+      "brief": "Add empty state and error recovery views.",
+      "outcomes": [{ "text": "Empty and error states render with plain recovery", "proved_by": "test: npm test" }],
+      "after": ["T3"],
+      "estimate_lines": 90,
+      "last_row": "N23",
+      "attempts": [
+        {
+          "base_commit": "c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a",
+          "branch": "factory/T9-1",
+          "worktree": "/Users/dev/code/notes-wt/T9-1",
+          "pr": 0,
+          "run_id": "",
+          "ready": [],
+          "rounds": [],
+          "accepts": [],
+          "acts": [],
+          "size_cap": 180
+        }
+      ]
+    },
+    {
+      "id": "T10",
+      "title": "Search box on the notes page",
+      "brief": "Add live search input to filter the notes list.",
+      "outcomes": [{ "text": "Typing in search box filters notes", "proved_by": "test: npm test" }],
+      "after": ["T4", "T7"],
+      "estimate_lines": 110,
+      "attempts": []
+    },
+    {
+      "id": "T11",
+      "title": "Delete a note, with an undo",
+      "brief": "Allow deleting a note with a temporary undo banner.",
+      "outcomes": [{ "text": "Deleted note can be restored via undo", "proved_by": "test: npm test" }],
+      "after": ["T5", "T6"],
+      "estimate_lines": 120,
+      "attempts": []
+    },
+    {
+      "id": "T12",
+      "title": "Tags on a note",
+      "brief": "Allow adding and removing tags inside the editor.",
+      "outcomes": [{ "text": "Tags save with the note", "proved_by": "test: npm test" }],
+      "after": ["T5", "T8"],
+      "estimate_lines": 120,
+      "attempts": []
+    },
+    {
+      "id": "T13",
+      "title": "Search API",
+      "brief": "Expose GET /api/notes/search backed by the text index.",
+      "outcomes": [{ "text": "Search API returns matching notes", "proved_by": "test: go test ./internal/api" }],
+      "after": ["T7"],
+      "estimate_lines": 100,
+      "attempts": []
+    },
+    {
+      "id": "T14",
+      "title": "Keyboard shortcuts",
+      "brief": "Add keyboard navigation for list and new note.",
+      "outcomes": [{ "text": "Shortcuts move focus and open notes", "proved_by": "test: npm test" }],
+      "after": ["T4"],
+      "estimate_lines": 80,
+      "attempts": []
+    },
+    {
+      "id": "T15",
+      "title": "Highlight the words found",
+      "brief": "Highlight matched search terms in note snippets.",
+      "outcomes": [{ "text": "Matched terms highlight safely", "proved_by": "test: npm test" }],
+      "after": ["T10", "T13"],
+      "estimate_lines": 90,
+      "attempts": []
+    },
+    {
+      "id": "T16",
+      "title": "Filter notes by tag",
+      "brief": "Filter the notes list when a tag pill is selected.",
+      "outcomes": [{ "text": "Selecting a tag filters the list", "proved_by": "test: npm test" }],
+      "after": ["T12"],
+      "estimate_lines": 85,
+      "attempts": []
+    },
+    {
+      "id": "T17",
+      "title": "Search by tag",
+      "brief": "Support tag:name queries in search API and box.",
+      "outcomes": [{ "text": "Tag queries narrow search results", "proved_by": "test: go test ./internal/search" }],
+      "after": ["T12", "T13"],
+      "estimate_lines": 100,
+      "attempts": []
+    },
+    {
+      "id": "T18",
+      "title": "Sort notes by date",
+      "brief": "Add created and updated sort choices to the list.",
+      "outcomes": [{ "text": "Notes reorder by chosen date field", "proved_by": "test: npm test" }],
+      "after": ["T14"],
+      "estimate_lines": 75,
+      "attempts": []
+    },
+    {
+      "id": "T19",
+      "title": "Export notes as a file",
+      "brief": "Export filtered notes as a single markdown bundle.",
+      "outcomes": [{ "text": "Export downloads valid markdown", "proved_by": "test: npm test" }],
+      "after": ["T16", "T18"],
+      "estimate_lines": 110,
+      "attempts": []
+    },
+    {
+      "id": "T20",
+      "title": "Verify the milestone",
+      "brief": "Run end-to-end checks across search, tags, sort and export.",
+      "outcomes": [{ "text": "All notes and search flows pass", "proved_by": "test: go test ./..." }],
+      "after": ["T15", "T17", "T18"],
+      "estimate_lines": 80,
+      "attempts": []
+    }
+  ],
+  "asks": [
+    {
+      "id": "ask-notes-10",
+      "project": "notes-demo",
+      "folder": "/Users/dev/code/notes",
+      "kind": "delete",
+      "gated": true,
+      "question": "Keep archived notes in search results by default?",
+      "options": ["Exclude archived", "Include archived"],
+      "recommend": "Exclude archived",
+      "task": "T10",
+      "asked_by": "coordinator",
+      "at": "2026-11-24T12:00:00Z",
+      "status": "open"
+    }
+  ]
+}
