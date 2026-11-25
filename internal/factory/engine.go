@@ -727,11 +727,10 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 	if n := len(s.Project.PlanReviews); (n == 0 || !s.Project.PlanReviews[n-1].Accepted.IsZero()) && slices.ContainsFunc(s.Tasks, func(t flow.Task) bool { return !flow.Ended(t) && t.Unreviewed }) {
 		prReady, prWhy = e.planReviewerReady(ctx, *s)
 	}
-	match := func() (flow.Row[flow.ProjectIn], flow.Decision) {
-		return flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now, CoordFallbackReady: e.passCoordFallback, PlanReviewerReady: prReady, PlanRun: append(planRun, flow.Run{})[0]})
+	match := func(rows []flow.Row[flow.ProjectIn]) (flow.Row[flow.ProjectIn], flow.Decision) {
+		return flow.FirstMatch(rows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now, CoordFallbackReady: e.passCoordFallback, PlanReviewerReady: prReady, PlanRun: append(planRun, flow.Run{})[0]})
 	}
-	r, d := match()
-	if len(d.Asked) > 0 && d.Asked[0] == flow.AskCoordDialogStuck {
+	if r, d := match(flow.CoordRows); len(d.Asked) > 0 && d.Asked[0] == flow.AskCoordDialogStuck {
 		s.Project.CoordDialogStucks++
 		s.Project.Acts = append(s.Project.Acts, flow.Act{Key: flow.CoordStuckKey(s.Project.Run), Result: "done", At: now})
 		if s.Project.CoordDialogStucks >= 2 {
@@ -745,8 +744,8 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 		if !e.cleanLocked(id) {
 			return
 		}
-		r, d = match()
 	}
+	r, d := match(flow.ProjectRows)
 	if r.ID == "J4" && len(flow.OpenPlanFindings(s.Project)) == 0 {
 		if n := len(s.Project.PlanReviews); n > 0 && s.Project.PlanReviews[n-1].Verdict != "" && s.Project.PlanReviews[n-1].Accepted.IsZero() {
 			e.acceptPlanLocked(id, s, "J16", []string{flow.AskAcceptPlan}, "accept held plan", now)
@@ -1203,7 +1202,7 @@ func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State,
 	adopt, bin := s.Project.Run == nil || s.Project.Run.State != flow.PhaseEnded, cmp.Or(e.Bin, "sheepdog")
 	if !adopt {
 		stopped := e.stopCoordWithBackoffLocked(ctx, id, s, now, true)
-		r, d := flow.FirstMatch(flow.ProjectRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now, CoordFallbackReady: e.passCoordFallback})
+		r, d := flow.FirstMatch(flow.CoordRows, flow.ProjectIn{Project: s.Project, Tasks: s.Tasks, Settings: s.Settings, Now: now, CoordFallbackReady: e.passCoordFallback})
 		if !stopped {
 			e.logProjectWaitLocked(id, s, r.ID, "waiting", d.Why, r.ID+":"+d.Why)
 			return
