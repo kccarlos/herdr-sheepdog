@@ -98,3 +98,26 @@ func TestSettingsModelsRowsTopWithAndRuleQuestion(t *testing.T) {
 		t.Errorf("RuleQuestion(models.worker) = %q, want %q", got, wantQ)
 	}
 }
+
+// TestSettingsWithCommaMatchesWordingTable verifies Settings.With prefixes
+// comma refusals with the row label to match slice14-wording.md mo.r.comma.
+func TestSettingsWithCommaMatchesWordingTable(t *testing.T) {
+	want := "worker models: a model name cannot hold a comma"
+	if _, err := DefaultSettings().With("models.worker", "claude/sonnet,opus/medium"); err == nil || err.Error() != want {
+		t.Fatalf("With(models.worker, comma) = %v, want %q", err, want)
+	}
+}
+
+// TestParseCandidatesMalformedMultiEntryDoesNotBlameComma verifies malformed
+// multi-entry candidate lists report the cli/model/effort shape error rather
+// than blaming a comma in a model name, while genuine comma-in-model still does.
+func TestParseCandidatesMalformedMultiEntryDoesNotBlameComma(t *testing.T) {
+	for _, raw := range []string{"claude/sonnet/medium, bad", "claude/sonnet, claude/opus"} {
+		if _, err := ParseCandidates(raw); err == nil || err.Error() != "each entry must be cli/model/effort" {
+			t.Errorf("ParseCandidates(%q) = %v, want %q", raw, err, "each entry must be cli/model/effort")
+		}
+	}
+	if _, err := ParseCandidates("claude/foo,bar/medium"); err == nil || err.Error() != "a model name cannot hold a comma" {
+		t.Errorf("ParseCandidates(comma in model) = %v, want %q", err, "a model name cannot hold a comma")
+	}
+}

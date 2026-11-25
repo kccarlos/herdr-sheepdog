@@ -659,3 +659,163 @@ test('candidate editor offers only row.clis, refuses empty model, shows unknown-
     assert.ok(retro().querySelector('[role="alert"]')?.textContent.includes(tc.want[0]));
   }
 });
+
+test('comma in model input refuses with mo.r.comma instead of smuggling a second candidate', async (t) => {
+  const daemon = fakeDaemon({ rows: modelsRows(), paired: true });
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  const w = () => sec.querySelector('[data-row="models.worker"]');
+  w().querySelector('button[aria-label="Edit worker models"]').click(); await page.flush();
+  const mIn = w().querySelector('input[data-cand-field="model"]');
+  mIn.value = 'sonnet/high, claude/opus'; mIn.dispatchEvent({ type: 'input', bubbles: true }); await page.flush();
+  w().querySelector('button[aria-label="Change worker models"]').click(); await page.flush();
+  assert.equal(daemon.proposed.length, 0, 'comma in model must not serialize into multiple candidates');
+  assert.equal(w().querySelector('[role="alert"]')?.textContent.trim(), 'worker models: a model name cannot hold a comma');
+  assert.ok(w().querySelector('input[data-cand-field="model"]')?.classList.contains('bad'), 'offending model input must be marked bad');
+});
+
+test('plan reviewer models with empty default can be reset Back to the default from the editor', async (t) => {
+  const rows = modelsRows().map((r) => r.name === 'models.plan_reviewer' ? { ...r, value: 'claude/opus/high' } : r);
+  const daemon = fakeDaemon({ rows, paired: true });
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  const pr = () => sec.querySelector('[data-row="models.plan_reviewer"]');
+  pr().querySelector('button[aria-label="Edit plan reviewer models"]').click(); await page.flush();
+  pr().querySelector('button[aria-label="Fill in the default plan reviewer models"]').click(); await page.flush();
+  pr().querySelector('button[aria-label="Change plan reviewer models"]').click(); await page.flush();
+  assert.equal(pr().querySelector('[role="alert"]'), null, 'resetting plan reviewer models must not refuse with Type a model name');
+  assert.deepEqual(daemon.proposed, [{ name: 'models.plan_reviewer', value: '' }]);
+});
+
+test('style.css does not give .fix-blk a pixel flex-basis inside column-flex .srow', () => {
+  const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+  assert.doesNotMatch(css, /\.fix-blk[^{]*\{[^}]*flex:\s*[^;]*\d+px/, '.fix-blk must not inherit a pixel flex-basis height in column .srow');
+});
+
+test('Copy button announces Copied to screen readers', async (t) => {
+  const prevNav = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  t.after(() => { if (prevNav) Object.defineProperty(globalThis, 'navigator', prevNav); else delete globalThis.navigator; });
+  Object.defineProperty(globalThis, 'navigator', { value: { userAgent: '', maxTouchPoints: 0, clipboard: { writeText: async () => {} } }, configurable: true, writable: true });
+  const daemon = fakeDaemon({ rows: modelsRows(), paired: true, onPropose: () => ({ status: 400, body: { code: 'not_launchable', error: 'codex is not signed in', fix: 'run: codex login' } }) });
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  const w = () => sec.querySelector('[data-row="models.worker"]');
+  w().querySelector('button[aria-label="Edit worker models"]').click(); await page.flush();
+  w().querySelector('button[aria-label="Change worker models"]').click(); await page.flush();
+  const btn = w().querySelector('button[data-copy="codex login"]');
+  assert.ok(btn, 'expected Copy button for run: fix');
+  btn.click(); await page.flush();
+  const nextBtn = w().querySelector('button[data-copy="codex login"]');
+  assert.ok(w().querySelector('[role="status"]')?.textContent.includes('Copied') || nextBtn?.getAttribute('aria-label')?.includes('Copied'), 'Copied state must be announced');
+});
+
+test('Copy button does not show Copied when clipboard writeText rejects', async (t) => {
+  const prevNav = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+  t.after(() => { if (prevNav) Object.defineProperty(globalThis, 'navigator', prevNav); else delete globalThis.navigator; });
+  Object.defineProperty(globalThis, 'navigator', { value: { userAgent: '', maxTouchPoints: 0, clipboard: { writeText: () => Promise.reject(new Error('denied')) } }, configurable: true, writable: true });
+  const daemon = fakeDaemon({ rows: modelsRows(), paired: true, onPropose: () => ({ status: 400, body: { code: 'not_launchable', error: 'codex is not signed in', fix: 'run: codex login' } }) });
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  const w = () => sec.querySelector('[data-row="models.worker"]');
+  w().querySelector('button[aria-label="Edit worker models"]').click(); await page.flush();
+  w().querySelector('button[aria-label="Change worker models"]').click(); await page.flush();
+  w().querySelector('button[data-copy="codex login"]').click(); await page.flush();
+  assert.equal(w().querySelector('button[data-copy="codex login"]')?.textContent.trim(), 'Copy', 'failed clipboard write must not show Copied');
+});
+
+test('typing in model field after CLI refusal clears .bad on CLI select across poll', async (t) => {
+  const daemon = fakeDaemon({ rows: modelsRows(), paired: true, onPropose: () => ({ status: 400, body: { code: 'not_launchable', error: 'claude is not installed', fix: 'install Claude Code, then run: claude auth login' } }) });
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  const w = () => sec.querySelector('[data-row="models.worker"]');
+  w().querySelector('button[aria-label="Edit worker models"]').click(); await page.flush();
+  w().querySelector('button[aria-label="Change worker models"]').click(); await page.flush();
+  assert.ok(w().querySelector('select').classList.contains('bad'));
+  const mIn = w().querySelector('input[data-cand-field="model"]');
+  mIn.value = 'opus'; mIn.dispatchEvent({ type: 'input', bubbles: true }); await page.flush();
+  await page.pollNow();
+  assert.equal(w().querySelector('select').classList.contains('bad'), false, 'CLI select .bad must clear');
+});
+
+test('Cancel in models editor clears open pairing box and pending proposal', async (t) => {
+  const daemon = fakeDaemon({ rows: modelsRows(), paired: false });
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  const w = () => sec.querySelector('[data-row="models.worker"]');
+  w().querySelector('button[aria-label="Edit worker models"]').click(); await page.flush();
+  const mIn = w().querySelector('input[data-cand-field="model"]');
+  mIn.value = 'opus'; mIn.dispatchEvent({ type: 'input', bubbles: true }); await page.flush();
+  w().querySelector('button[aria-label="Change worker models"]').click(); await page.flush();
+  assert.ok(w().querySelector('form[data-pair-form]'), 'pairing form opens in row');
+  w().querySelector('button[data-cand-cancel]').click(); await page.flush();
+  assert.equal(w().querySelector('form[data-pair-form]'), null, 'Cancel must close pairing form and drop pending setting');
+});
+
+test('models editor controls ignore clicks while a proposal is in flight', async (t) => {
+  let release; const hold = new Promise((r) => { release = r; });
+  const base = fakeDaemon({ rows: modelsRows(), paired: true });
+  const daemon = wrapDaemon(base, async (p, i) => { if (p.endsWith('/settings') && i?.method === 'POST') await hold; return base.fetch(p, i); });
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  const w = () => sec.querySelector('[data-row="models.worker"]');
+  try {
+    w().querySelector('button[aria-label="Edit worker models"]').click(); await page.flush();
+    const mIn = w().querySelector('input[data-cand-field="model"]');
+    mIn.value = 'opus'; mIn.dispatchEvent({ type: 'input', bubbles: true }); await page.flush();
+    w().querySelector('button[aria-label="Change worker models"]').click();
+    await new Promise((r) => setImmediate(r));
+    w().querySelector('button[data-cand-add]')?.click();
+    assert.equal(w().querySelectorAll('input[data-cand-field="model"]').length, 1, 'Add a model must not mutate candidates while busy');
+    w().querySelector('button[data-cand-default]')?.click();
+    assert.equal(w().querySelector('input[data-cand-field="model"]')?.value, 'opus', 'Back to the default must not reset candidates while busy');
+  } finally { release(); }
+  await page.flush();
+});
+
+test('answering a setting ask clears stale models editor for that row', async (t) => {
+  const daemon = fakeDaemon({ rows: modelsRows(), paired: true });
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  const w = () => sec.querySelector('[data-row="models.worker"]');
+  w().querySelector('button[aria-label="Edit worker models"]').click(); await page.flush();
+  assert.ok(w().querySelector('ol.cand-ed'), 'editor opens');
+  daemon.openAsks.push({
+    id: 'ask-ext-1', project: 'proj-demo', kind: 'rule', gated: true, asked_by: 'engine', status: 'open',
+    question: 'This project: worker models agy/gemini-4-neon/medium (now claude/sonnet/medium). Save?',
+    options: ['Save', 'Keep current'], recommend: 'Save',
+    set: { name: 'models.worker', value: 'agy/gemini-4-neon/medium', was: 'claude/sonnet/medium' },
+  });
+  await page.pollNow();
+  const saveBtn = w().querySelector('button[aria-label="Save (Recommended)"]');
+  assert.ok(saveBtn, 'ask card renders in row');
+  saveBtn.click(); await page.flush();
+  assert.equal(w().querySelector('ol.cand-ed'), null, 'answering the ask must not reopen the stale models editor');
+});
+
+test('claude model field offers datalist suggestions from project settings and defaults while keeping unknown-list hint', async (t) => {
+  const daemon = fakeDaemon({ rows: modelsRows(), paired: true });
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  const w = () => sec.querySelector('[data-row="models.worker"]');
+  w().querySelector('button[aria-label="Edit worker models"]').click(); await page.flush();
+  const opts = w().querySelector('datalist')?.querySelectorAll('option').map((o) => o.getAttribute('value')) || [];
+  assert.ok(opts.includes('opus') && opts.includes('sonnet'), `expected opus and sonnet suggestions from project settings/defaults, got ${JSON.stringify(opts)}`);
+  assert.ok(w().textContent.includes('sheepdog cannot list the models claude offers.'));
+});
+
+test('does-not-offer highlight does not false-match prefix-substring model names or other CLIs', async (t) => {
+  const rows = modelsRows().map((r) => r.name === 'models.worker' ? { ...r, value: 'agy/gemini/medium, claude/gemini-4-neo/medium, agy/gemini-4-neo/medium' } : r);
+  const daemon = fakeDaemon({ rows, paired: true, onPropose: () => ({ status: 400, body: { code: 'not_launchable', error: 'agy does not offer gemini-4-neo. It offers: gemini-4-neon.' } }) });
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  const w = () => sec.querySelector('[data-row="models.worker"]');
+  w().querySelector('button[aria-label="Edit worker models"]').click(); await page.flush();
+  w().querySelector('button[aria-label="Change worker models"]').click(); await page.flush();
+  const ins = w().querySelectorAll('input[data-cand-field="model"]');
+  assert.equal(ins.length, 3);
+  assert.equal(ins[0].classList.contains('bad'), false, 'prefix-substring candidate must not be marked bad');
+  assert.equal(ins[1].classList.contains('bad'), false, 'different-CLI candidate must not be marked bad');
+  assert.equal(ins[2].classList.contains('bad'), true, 'failing candidate must be marked bad');
+});
+
+test('Keep current notice on a multi-candidate models row joins candidates with then', async (t) => {
+  const daemon = fakeDaemon({ rows: modelsRows(), paired: true });
+  const page = await bootPage(t, daemon), sec = findCard(page.doc, 'settings');
+  const rev = () => sec.querySelector('[data-row="models.reviewer"]');
+  rev().querySelector('button[aria-label="Edit reviewer models"]').click(); await page.flush();
+  const mIn = rev().querySelector('input[data-cand-field="model"]');
+  mIn.value = 'opus-2'; mIn.dispatchEvent({ type: 'input', bubbles: true }); await page.flush();
+  rev().querySelector('button[aria-label="Change reviewer models"]').click(); await page.flush();
+  rev().querySelectorAll('button').find((b) => b.textContent.trim() === 'Keep current').click(); await page.flush();
+  assert.equal(rev().querySelector('[role="status"]')?.textContent.trim(), 'Kept at claude/opus/medium then claude/sonnet/medium. Nothing changed.');
+});

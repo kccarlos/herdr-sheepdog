@@ -168,3 +168,28 @@ func TestSettingRowsRunsNoCLIAndPopulatesModels(t *testing.T) {
 		}
 	}
 }
+
+// TestModelsProposeResetToDefaultChecksLaunch verifies resetting models.<role>
+// via empty value ("", SE6) probes and runs launch checks on the resolved
+// default candidate list instead of skipping them (KB-LCH-23).
+func TestModelsProposeResetToDefaultChecksLaunch(t *testing.T) {
+	t.Parallel()
+	r := newAskRig(t)
+	r.edit(func(s *flow.State) {
+		s.Settings.Models = map[string][]flow.Candidate{
+			flow.RoleWorker: {{CLI: "agy", Model: "gemini-4-neon", Effort: "medium"}},
+		}
+	})
+	r.eng.probeLaunch = func(_ context.Context, clis []string) flow.ResolveFacts {
+		return flow.ResolveFacts{CLIs: map[string]flow.CLIFacts{
+			"claude": {Installed: false},
+			"agy":    {Installed: true, SignedIn: true},
+		}}
+	}
+	if _, err := r.eng.ProposeSetting(r.id, "models.worker", "", "dev-browser-1"); refusalCode(err) != "not_launchable" || !strings.Contains(err.Error(), "claude is not installed") {
+		t.Fatalf("reset models.worker to uninstalled default = %v, want not_launchable 'claude is not installed'", err)
+	}
+	if len(r.state().Asks) != 0 {
+		t.Fatalf("refused reset mutated Asks: %+v", r.state().Asks)
+	}
+}
