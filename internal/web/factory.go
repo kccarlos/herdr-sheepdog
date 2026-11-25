@@ -250,14 +250,14 @@ func (s *Server) handleFactoryOwner(kind string) http.HandlerFunc {
 		}
 		switch {
 		case err == nil && kind == "check":
-			reply(http.StatusOK, map[string]any{"results": append([]onboard.Result{}, res...)})
+			reply(http.StatusOK, map[string]any{"results": checksOf(res)})
 		case err == nil:
 			s.log.Log(logSource, "web.factory.project_"+kind, "", map[string]any{"folder": strings.TrimSpace(req.Folder), "project": strings.TrimSpace(req.Project), "device_id": dev})
 			reply(http.StatusOK, map[string]any{"ok": true, "device_id": dev})
 		case errors.As(err, &se):
 			reply(http.StatusBadRequest, map[string]string{"name": se.Name, "message": se.Message, "error": se.Message})
 		case errors.As(err, &sce):
-			reply(http.StatusBadRequest, map[string]any{"error": sce.Error(), "results": append([]onboard.Result{}, sce.Results...)})
+			reply(http.StatusBadRequest, map[string]any{"error": sce.Error(), "results": checksOf(sce.Results)})
 		case errors.As(err, &sse):
 			reply(http.StatusBadRequest, map[string]string{"error": "Not started: a setting is not allowed. Change it in settings below."})
 		case errors.As(err, &ref):
@@ -279,4 +279,13 @@ func writeFactoryRefusal(w http.ResponseWriter, err error) {
 		return
 	}
 	writeJSON(w, refusalStatus(ref.Code), map[string]string{"code": ref.Code, "error": ref.Error()})
+}
+
+// checksOf is the page's form of the start checks (the setup wizard's Check).
+func checksOf(rs []onboard.Result) []onboard.Check {
+	out := make([]onboard.Check, 0, len(rs))
+	for _, r := range rs {
+		out = append(out, onboard.CheckOf(r))
+	}
+	return out
 }

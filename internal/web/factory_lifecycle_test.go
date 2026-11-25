@@ -107,6 +107,12 @@ func TestFactoryOwnerPageRoutesAndTickets_KB_ASK_19_KB_SET_2(t *testing.T) {
 	wc := f.doLoopback(http.MethodPost, routes[0], map[string]any{"folder": repo}, "")
 	var chk map[string][]any
 	webExpect(t, wc.Code == http.StatusOK && json.Unmarshal(wc.Body.Bytes(), &chk) == nil && len(chk["results"]) == 2 && len(f.eng.Projects()) == 0, "ticketless check = %d %s (projs=%d)", wc.Code, wc.Body.String(), len(f.eng.Projects()))
+	var shape struct {
+		Results []struct {
+			Name, Status, Detail, Fix string
+		} `json:"results"`
+	}
+	webExpect(t, json.Unmarshal(wc.Body.Bytes(), &shape) == nil && len(shape.Results) == 2 && shape.Results[0].Status == "ok" && shape.Results[1].Status == "fail" && shape.Results[1].Fix == "run: claude auth login" && strings.Contains(wc.Body.String(), `"name":"git version"`), "check results wire shape = %s", wc.Body.String())
 	w := f.doLoopback(http.MethodPost, routes[0], map[string]any{"folder": repo, "set": map[string]string{"max_running": "0"}}, "")
 	webExpect(t, w.Code == http.StatusBadRequest && strings.Contains(w.Body.String(), `"name":"max_running"`) && strings.Contains(w.Body.String(), "1–20"), "check bad set = %d %s", w.Code, w.Body.String())
 	for _, p := range routes[1:] {
