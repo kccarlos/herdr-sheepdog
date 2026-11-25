@@ -163,19 +163,18 @@ func graphViewOf(s flow.State, lastRow map[string]LogLine) GraphView {
 	tasks := make([]TaskView, 0, len(s.Tasks))
 	for i, t := range s.Tasks {
 		stage, why, row := taskStageWhy(t, s.Tasks, s.Asks, s.Settings, s.Project.Started)
-		l, model, term, rounds, att := lastRow[t.ID], "", "", 0, (*flow.Attempt)(nil)
-		if n := len(t.Attempts); n > 0 {
-			att = &t.Attempts[n-1]
+		l, model, term, rounds, att := lastRow[t.ID], "", "", 0, flow.OpenAttempt(t)
+		if att != nil {
 			rounds = len(slices.DeleteFunc(slices.Clone(flow.Counted(*att)), func(r flow.Round) bool { return r.Kind == flow.RoundSendBack || r.Kind == flow.RoundRetro }))
 		}
-		if a := flow.OpenAttempt(t); revActive(a) {
-			model, term = a.Review.Reviewer.Model, cmp.Or(a.Review.RunID, a.RunID)
-		} else if a != nil && a.RunID != "" {
-			model, term = storedWorkerModel(t).Model, a.RunID
+		if revActive(att) {
+			model, term = att.Review.Reviewer.Model, cmp.Or(att.Review.RunID, att.RunID)
+		} else if att != nil && att.RunID != "" {
+			model, term = storedWorkerModel(t).Model, att.RunID
 		}
 		tasks = append(tasks, TaskView{
 			Ref: t.ID, Title: t.Title, Brief: t.Brief, Stage: stage, WhyWaiting: why, After: append([]string{}, t.After...), Dependents: append([]string{}, deps[t.ID]...),
-			Layer: layers[i], Rounds: rounds, Model: model, Terminal: term, LastRule: l.Rule, LastDecision: l.Decision, Steps: taskSteps(t, s.Project, s.Settings, att, stage, why, row, rounds),
+			Layer: layers[i], Rounds: rounds, Model: model, Terminal: term, LastRule: l.Rule, LastDecision: l.Decision, Steps: taskSteps(t, s, att, stage, why, row, rounds),
 		})
 	}
 	return GraphView{Protocol: 1, Project: s.Project.ID, Folder: s.Project.Folder, Tasks: tasks}
@@ -292,61 +291,95 @@ func taskStageWhy(t flow.Task, tasks []flow.Task, asks []flow.Ask, settings flow
 	return stage, taskWhy(t, a, unmet, started, stage, r), r
 }
 
-func stepFromRow(t flow.Task, s flow.Settings, stage string, r flow.Row[flow.In], hasRetro bool) string {
-	switch stage {
-	case "done", "ci":
-		return map[string]string{"ci": "CI"}[stage]
-	case "queued", "waiting_on_dep":
-		return map[bool]string{true: "plan review", false: "planned"}[stage == "queued" && (r.ID == "N10" || r.ID == "") && t.Unreviewed && s.PlanReviewRounds > 0]
-	case "working":
+func stepFromRow(t flow.Task, st flow.State, att *flow.Attempt, r flow.Row[flow.In], prDone, hasRetro bool) string {
+	if att == nil {
+		notDone, dropped := flow.UnmetDeps(t, st.Tasks)
+		switch {
+		case prDone:
+			return "implementing"
+		case (r.Stage == "queued" || r.Stage != "waiting_on_dep" && len(notDone)+len(dropped) == 0) && t.Unreviewed && st.Settings.PlanReviewRounds > 0:
+			return "plan review"
+		default:
+			return "planned"
+		}
+	}
+	rec := flow.OpenRecap(t)
+	switch {
+	case r.Stage == "ci" || r.ID == "N17":
+		return "CI"
+	case r.Stage == "working":
 		return cmp.Or(map[string]string{"the reviewer": "review", "the retro reviewer": "retro"}[r.WaitsOn], "implementing")
-	}
-	if a := flow.OpenAttempt(t); a == nil {
-		return map[bool]string{true: "plan review", false: "planned"}[t.Unreviewed && s.PlanReviewRounds > 0]
-	} else if len(a.Ready) == 0 {
+	case len(att.Ready) == 0 || att.NothingToChange != "" || r.ID == "N12" || r.ID == "N14" || rec != nil && (rec.Trigger == flow.TriggerSize || rec.Trigger == flow.TriggerTime):
 		return "implementing"
-	}
-	lr, _ := flow.FirstMatch(flow.LadderRows, flow.In{Task: t, Settings: s})
-	if lr.Stage == "blocked_or_failed" || lr.WaitsOn == "the retro reviewer" && !hasRetro {
+	case r.ID == "N24" || r.ID == "N25" || rec != nil && rec.Trigger == flow.TriggerReview:
 		return map[bool]string{true: "retro", false: "review"}[hasRetro]
 	}
-	return stepFromRow(t, s, lr.Stage, lr, hasRetro)
+	lr, _ := flow.FirstMatch(flow.LadderRows, flow.In{Task: t, Settings: st.Settings})
+	switch {
+	case lr.Stage == "ci":
+		return "CI"
+	case lr.WaitsOn == "the worker":
+		return "implementing"
+	case hasRetro && (lr.ID == "L2" || lr.ID == "L3" || lr.WaitsOn == "the retro reviewer"):
+		return "retro"
+	default:
+		return "review"
+	}
 }
 
-func taskSteps(t flow.Task, p flow.Project, s flow.Settings, att *flow.Attempt, stage, why string, r flow.Row[flow.In], rounds int) []StepView {
-	hasRetro := len(t.Retros) > 0 || att != nil && (att.Review != nil && att.Review.Role() == flow.RoleRetro || slices.ContainsFunc(att.Rounds, func(rd flow.Round) bool { return rd.Kind == flow.RoundRetro }))
-	override := att != nil && (r.ID == "N15" || r.ID == "N19" || r.ID == "N19b" || flow.CoveringOverride(*att, flow.H(*att)) != nil || slices.ContainsFunc(att.Accepts, func(ac flow.Accept) bool { return ac.By == "override" }))
-	now, ended := stepFromRow(t, s, stage, r, hasRetro), stage == "done" && (t.Dropped != nil || t.Closed != nil || t.Split != nil)
-	names := slices.DeleteFunc([]string{"planned", "plan review", "implementing", "review", "retro", "CI", "merged"}, func(x string) bool {
-		return x == "plan review" && s.PlanReviewRounds <= 0 || x == "retro" && !hasRetro && now != "retro"
+func taskSteps(t flow.Task, st flow.State, att *flow.Attempt, stage, why string, r flow.Row[flow.In], rounds int) []StepView {
+	cfg := st.Settings
+	prDone := cfg.PlanReviewRounds > 0 && !t.Unreviewed && slices.ContainsFunc(st.Project.PlanReviews, func(pr flow.PlanReview) bool {
+		return (!pr.Accepted.IsZero() || pr.Verdict == flow.VerdictUnavailable) && slices.Contains(pr.Tasks, t.ID)
 	})
-	nowIdx := map[bool]int{true: len(names), false: slices.Index(names, now)}[stage == "done"]
-	if ended {
-		last := cmp.Or(map[bool]string{true: "CI"}[att != nil && len(att.Ready) > 0 && (override || len(att.Accepts) > 0 || flow.OpenAttempt(t) != nil && flow.Ladder(flow.In{Task: t, Settings: s}) == flow.Passed)],
-			map[bool]string{true: "retro"}[att != nil && hasRetro], map[bool]string{true: "review"}[att != nil && (rounds > 0 || att.Review != nil || override)],
-			map[bool]string{true: "implementing"}[att != nil], map[bool]string{true: "plan review"}[s.PlanReviewRounds > 0 && !t.Unreviewed], "planned")
+	h, nc, hasRetro, revPassed, revSkipped := "", (*flow.Round)(nil), false, false, false
+	if att != nil {
+		h = flow.H(*att)
+		nc = flow.NewestCovering(*att, h)
+		hasRetro = att.Review != nil && att.Review.Role() == flow.RoleRetro || len(flow.AttemptRetros(*att)) > 0
+		revPassed = nc != nil && (nc.Verdict == flow.VerdictPass && len(flow.PassingCovering(*att, h)) >= cfg.ReviewRounds || nc.Kind == flow.RoundRetro && nc.Verdict == flow.VerdictShip)
+		revSkipped = !revPassed && (r.ID == "N19b" || flow.CoveringOverride(*att, h) != nil || slices.ContainsFunc(att.Accepts, func(ac flow.Accept) bool { return ac.By == "override" && flow.Covers(*att, ac.Head, h) }))
+	}
+	term, unmerged, now := flow.Ended(t) || r.Stage == "done", t.Dropped != nil || t.Closed != nil || t.Split != nil, ""
+	if !term {
+		now = stepFromRow(t, st, att, r, prDone, hasRetro)
+	}
+	names := slices.DeleteFunc([]string{"planned", "plan review", "implementing", "review", "retro", "CI", "merged"}, func(x string) bool {
+		return x == "plan review" && cfg.PlanReviewRounds <= 0 || x == "retro" && !hasRetro && now != "retro"
+	})
+	nowIdx := len(names)
+	if !term {
+		nowIdx = slices.Index(names, now)
+	} else if unmerged {
+		last := cmp.Or(map[bool]string{true: "CI"}[att != nil && len(att.Ready) > 0 && (revPassed || revSkipped || slices.ContainsFunc(att.Accepts, func(ac flow.Accept) bool { return flow.Covers(*att, ac.Head, h) }))],
+			map[bool]string{true: "retro"}[att != nil && hasRetro], map[bool]string{true: "review"}[att != nil && (len(att.Rounds) > 0 || att.Review != nil || revSkipped)],
+			map[bool]string{true: "implementing"}[att != nil], map[bool]string{true: "plan review"}[prDone], "planned")
 		names = names[:slices.Index(names, last)+1]
 	}
-	prDone := len(p.PlanReviews) > 0 && (!p.PlanReviews[len(p.PlanReviews)-1].Accepted.IsZero() || p.PlanReviews[len(p.PlanReviews)-1].Verdict == flow.VerdictUnavailable)
-	rnd, steps := map[bool]string{true: "1 round done", false: fmt.Sprintf("%d rounds done", rounds)}[rounds == 1], make([]StepView, len(names))
+	rnd, needs := cmp.Or(map[int]string{1: "1 round done"}[rounds], map[bool]string{true: fmt.Sprintf("%d rounds done", rounds)}[rounds > 1]), fmt.Sprintf("needs %d passing, at most %d", cfg.ReviewRounds, cfg.MaxRounds)
+	liveRev, steps := (stage == "working" || r.Stage == "working") && !t.Parked && revActive(att), make([]StepView, len(names))
 	for i, name := range names {
-		st, txt := map[int]string{-1: "done", 0: "now", 1: "todo"}[cmp.Compare(i, nowIdx)], ""
-		st = cmp.Or(map[bool]string{true: "done"}[name == "plan review" && st == "todo" && !t.Unreviewed && prDone], map[bool]string{true: "skipped"}[name == "review" && st == "done" && override], st)
+		s, txt := cmp.Or(map[bool]string{true: "skipped"}[name == "review" && i < nowIdx && revSkipped], map[int]string{-1: "done", 0: "now", 1: "todo"}[cmp.Compare(i, nowIdx)]), ""
 		switch {
-		case st == "now" && t.Parked:
+		case s == "now" && t.Parked:
 			txt = "parked here, waiting on the coordinator"
-		case name == "implementing" && st == "now" && rounds > 0 && (r.ID == "N22" || att != nil && flow.LastReviewed(*att) != nil && flow.LastReviewed(*att).Verdict != flow.VerdictPass):
-			txt = fmt.Sprintf("sent back from review round %d; %s", rounds, rnd)
+		case name == "implementing" && s == "now" && rounds > 0 && att != nil && flow.CoveringOverride(*att, h) == nil && nc != nil && (nc.Kind == flow.RoundFull || nc.Kind == flow.RoundDelta) && nc.Verdict == flow.VerdictChanges:
+			txt = fmt.Sprintf("sent back from review round %d; %s", nc.N, rnd)
+		case name == "review" && s == "now":
+			txt = cmp.Or(map[bool]string{true: fmt.Sprintf("review round %d; %s", len(att.Rounds)+1, needs)}[liveRev && att.Review.Role() == flow.RoleReviewer],
+				map[bool]string{true: rnd}[revPassed], map[bool]string{true: rnd + "; " + needs}[rnd != ""], needs)
 		case name == "review":
-			txt = map[string]string{"now": fmt.Sprintf("review round %d; needs %d passing, at most %d", rounds+1, s.ReviewRounds, s.MaxRounds), "todo": fmt.Sprintf("needs %d passing, at most %d", s.ReviewRounds, s.MaxRounds), "done": map[bool]string{true: rnd}[rounds > 0], "skipped": "skipped by your override"}[st]
-		case st == "now" && (name == "retro" || name == "CI"):
-			txt = map[string]string{"retro": "a retro reviewer is looking at why review keeps failing", "CI": why}[name]
-		case name == "merged" && st == "done" && att != nil && att.PR > 0:
+			txt = map[string]string{"todo": needs, "done": rnd, "skipped": "skipped by your override"}[s]
+		case name == "retro" && s == "now" && liveRev && att.Review.Role() == flow.RoleRetro:
+			txt = "a retro reviewer is looking at why review keeps failing"
+		case name == "CI" && s == "now":
+			txt = why
+		case name == "merged" && s == "done" && att != nil && att.PR > 0:
 			txt = fmt.Sprintf("PR #%d", att.PR)
 		}
-		steps[i] = StepView{Name: name, State: st, Text: txt}
+		steps[i] = StepView{Name: name, State: s, Text: txt}
 	}
-	if ended {
+	if unmerged {
 		steps = append(steps, map[bool]StepView{false: {Name: map[bool]string{true: "split", false: "dropped"}[t.Split != nil], State: "ended", Text: "ended without merging"}, true: {Name: "closed", State: "ended", Text: "ended without merging: its PR was closed"}}[t.Closed != nil])
 	}
 	return steps

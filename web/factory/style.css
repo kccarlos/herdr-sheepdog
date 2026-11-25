@@ -145,7 +145,7 @@ fieldset.np-models > legend { padding: 0; margin-bottom: 4px; }
 .ask-opt.danger { border-color: var(--danger); color: var(--danger); }
 .sbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 2px; min-width: 0; }
 .bar { display: inline-flex; align-items: center; gap: 3px; flex: none; }
-.bar span { display: block; width: 18px; height: 6px; border-radius: 3px; background: var(--code); box-sizing: border-box; }
+.bar span { display: block; width: 18px; height: 6px; border-radius: 3px; background: var(--line); box-sizing: border-box; }
 .bar span.done { background: var(--done); }
 .bar span.now { background: var(--working); height: 10px; outline: 1.5px solid var(--fg); outline-offset: 1px; }
 .bar span.skip { background: none; border: 1px dashed var(--slate); }
