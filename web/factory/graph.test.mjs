@@ -48,7 +48,7 @@ function matchOne(el, sel) {
 
 class El {
   constructor(tag, doc) {
-    Object.assign(this, { nodeType: 1, tagName: tag.toUpperCase(), ownerDocument: doc, parentElement: null, _nodes: [], _attrs: new Map(), _ls: new Map(), _raw: '', _val: undefined });
+    Object.assign(this, { nodeType: 1, tagName: tag.toUpperCase(), ownerDocument: doc, parentElement: null, _nodes: [], _attrs: new Map(), _ls: new Map(), _raw: '', _val: undefined, scrollLeft: 0 });
     const dk = (p) => 'data-' + String(p).replace(/[A-Z]/g, (c) => '-' + c.toLowerCase());
     this.dataset = new Proxy({}, { get: (_, p) => typeof p === 'string' ? this._attrs.get(dk(p)) : undefined, set: (_, p, v) => (this.setAttribute(dk(p), v), true) });
     this.elements = new Proxy({}, { get: (_, p) => typeof p === 'string' ? this.querySelectorAll('input,button,select,textarea').find((c) => c.getAttribute('name') === p || c.id === p) : undefined });
@@ -676,4 +676,227 @@ test('graph CSS keeps node text >= 12 px, scrolls inside graph box, uses stage t
   }
   const app = readFileSync(new URL('./app.js', import.meta.url), 'utf8');
   assert.ok(!/\bPOST\b|method\s*:/.test(app), 'app.js must hold no POST');
+});
+
+// --- Failing tests for PR 14.9 review and live-check findings ---
+
+function mutableDaemon(state) {
+  let inFlight = 0;
+  const reply = (s, o) => ({ ok: s >= 200 && s < 300, status: s, json: async () => o });
+  const fetch = async (path) => {
+    inFlight++;
+    try {
+      await Promise.resolve();
+      if (path === '/api/hello') return reply(200, { computer: { id: 'D1', name: 'Test Mac' } });
+      if (path === '/api/factory/projects') return reply(200, { protocol: 1, projects: [{ id: 'proj-demo', goal: 'A notes page with search', running: true, counts: { working: 1 } }] });
+      if (path === '/api/factory/projects/proj-demo/graph') return reply(200, { protocol: 1, project: 'proj-demo', tasks: state.tasks || [] });
+      if (path.startsWith('/api/factory/projects/proj-demo/log')) return reply(200, { protocol: 1, project: 'proj-demo', lines: state.lines || [] });
+      if (path === '/api/factory/projects/proj-demo/settings') return reply(200, { protocol: 1, rows: [] });
+      if (path === '/api/factory/asks') return reply(200, { protocol: 1, asks: state.asks || [] });
+      return reply(404, { error: 'not found' });
+    } finally { inFlight--; }
+  };
+  return { fetch, get inFlight() { return inFlight; } };
+}
+
+function cssRules(css) {
+  const clean = css.replace(/\/\*[\s\S]*?\*\//g, '');
+  const out = [];
+  const walk = (src, media = '') => {
+    let i = 0;
+    while (i < src.length) {
+      const open = src.indexOf('{', i);
+      if (open < 0) break;
+      const head = src.slice(i, open).trim();
+      let depth = 1, j = open + 1;
+      while (j < src.length && depth > 0) {
+        if (src[j] === '{') depth++;
+        else if (src[j] === '}') depth--;
+        j++;
+      }
+      const body = src.slice(open + 1, j - 1);
+      if (head.startsWith('@media')) walk(body, head);
+      else out.push({ selectors: head.split(',').map((s) => s.trim()), body, media });
+      i = j;
+    }
+  };
+  walk(clean);
+  return out;
+}
+
+test('activating the list/graph switch keeps keyboard focus on the pressed switch button', async (t) => {
+  const tasks = [
+    makeTask('T1', 'Base table', 'done', 1, [], ['T2']),
+    makeTask('T2', 'List page', 'working', 2, ['T1'], []),
+  ];
+  const page = await bootPage(t, fakeDaemon({ tasks }), { width: 1280 });
+  const graphBtn = page.doc.querySelector('button[data-view="graph"]');
+  graphBtn.focus();
+  graphBtn.click();
+  await page.flush();
+
+  const liveGraphBtn = page.doc.querySelector('button[data-view="graph"]');
+  assert.equal(page.doc.activeElement, liveGraphBtn, 'focus must stay on the live graph button after switching to graph');
+
+  const listBtn = page.doc.querySelector('button[data-view="list"]');
+  listBtn.focus();
+  listBtn.click();
+  await page.flush();
+
+  const liveListBtn = page.doc.querySelector('button[data-view="list"]');
+  assert.equal(page.doc.activeElement, liveListBtn, 'focus must stay on the live list button after switching back to list');
+});
+
+test('scrolling graph box keeps keyboard focus and scrollLeft across a 3 s poll that updates #main', async (t) => {
+  const mid = Array.from({ length: 8 }, (_, i) => makeTask(`U${i + 1}`, `Feature ${i + 1}`, 'queued', 2, ['U0'], ['U9']));
+  const state = {
+    tasks: [
+      makeTask('U0', 'Root', 'done', 1, [], mid.map((x) => x.ref)),
+      ...mid,
+      makeTask('U9', 'Join', 'waiting_on_dep', 3, mid.map((x) => x.ref), []),
+    ],
+    lines: [],
+  };
+  const page = await bootPage(t, mutableDaemon(state), { width: 1280 });
+  page.doc.querySelector('button[data-view="graph"]').click();
+  await page.flush();
+
+  const box0 = page.doc.querySelector('.gbox');
+  assert.equal(box0.getAttribute('tabindex'), '0', 'wide graph box must be focusable before poll');
+  box0.focus();
+  box0.scrollLeft = 240;
+
+  state.lines = [{ at: '2026-11-24T12:00:00Z', by: 'engine', task: 'U1', decision: 'started', why: 'slot free' }];
+  await page.pollNow();
+
+  const box1 = page.doc.querySelector('.gbox');
+  assert.equal(page.doc.activeElement, box1, 'focus must remain on the live .gbox after poll updates #main');
+  assert.equal(box1.scrollLeft, 240, 'scrolling .gbox must preserve scrollLeft across poll');
+});
+
+test('focused graph node keeps keyboard focus and edge highlight when its stage changes on a 3 s poll', async (t) => {
+  const state = {
+    tasks: [
+      makeTask('T1', 'Base table', 'working', 1, [], ['T2']),
+      makeTask('T2', 'List page', 'waiting_on_dep', 2, ['T1'], []),
+      makeTask('T3', 'Standalone docs', 'queued', 1, [], []),
+    ],
+    lines: [],
+  };
+  const page = await bootPage(t, mutableDaemon(state), { width: 1280 });
+  page.doc.querySelector('button[data-view="graph"]').click();
+  await page.flush();
+
+  const n2 = page.doc.querySelector('a.gnode[data-ref="T2"]');
+  n2.focus();
+  n2.dispatchEvent({ type: 'focusin', bubbles: true });
+  await page.flush();
+  assert.ok(page.doc.querySelector('a.gnode[data-ref="T3"]').classList.contains('dim'), 'unrelated node T3 must be dimmed while T2 is focused');
+
+  state.tasks = [
+    makeTask('T1', 'Base table', 'done', 1, [], ['T2']),
+    makeTask('T2', 'List page', 'working', 2, ['T1'], []),
+    makeTask('T3', 'Standalone docs', 'queued', 1, [], []),
+  ];
+  await page.pollNow();
+
+  const liveT1 = page.doc.querySelector('a.gnode[data-ref="T1"]');
+  const liveT2 = page.doc.querySelector('a.gnode[data-ref="T2"]');
+  const liveT3 = page.doc.querySelector('a.gnode[data-ref="T3"]');
+  const edge = page.doc.querySelector('path.gedge[data-from="T1"][data-to="T2"]');
+  assert.equal(page.doc.activeElement, liveT2, 'focus must stay on live T2 node after stage transition on poll');
+  assert.ok(liveT2.classList.contains('focus') || liveT2.classList.contains('hot'), 'live T2 node must keep highlight after poll');
+  assert.ok(liveT1.classList.contains('hot'), 'neighbour T1 must stay highlighted after poll');
+  assert.ok(liveT3.classList.contains('dim'), 'unrelated node T3 must stay dimmed after poll');
+  assert.ok(edge.classList.contains('hot'), 'incident edge T1 -> T2 must stay strong after poll');
+});
+
+test('graph CSS bounds .gbox and its column so wide graphs scroll inside the box instead of stretching the page', () => {
+  const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+  const rules = cssRules(css);
+  const declsFor = (matchSel, mediaFilter = null) => rules
+    .filter((r) => (mediaFilter === null || mediaFilter(r.media)) && r.selectors.some(matchSel))
+    .map((r) => r.body)
+    .join(';');
+
+  const gboxCSS = declsFor((s) => /(^|[\s>])\.gbox$/.test(s));
+  assert.match(gboxCSS, /overflow-x:\s*auto\b/, '.gbox must scroll sideways with overflow-x: auto');
+  assert.match(gboxCSS, /min-width:\s*0\b/, '.gbox must set min-width: 0 so a wide SVG cannot stretch it');
+  assert.match(gboxCSS, /(?:max-)?width:\s*100%/, '.gbox must bound its width to 100% of its column');
+
+  const colMainCSS = declsFor((s) => /(^|[\s>])\.col-main$/.test(s));
+  const mainCSS = declsFor((s) => /(^|[\s>])main$/.test(s) || /^#main$/.test(s));
+  assert.match(colMainCSS, /min-width:\s*0\b/, '.col-main must set min-width: 0');
+  assert.match(mainCSS, /min-width:\s*0\b/, 'main inside .col-main must set min-width: 0');
+
+  // #board.cols inherits flex-wrap: wrap from .cols; in column layout (narrow and .graph-view)
+  // a wrapping column flex container sizes its line to max-content (the SVG width) unless
+  // .col-main is bounded with (max-)width: 100% or column layout sets flex-wrap: nowrap.
+  const colBounded = /(?:max-)?width:\s*100%/.test(colMainCSS);
+  const colsCSS = declsFor((s) => /^\.cols$/.test(s), (m) => !m);
+  const baseBoardCSS = declsFor((s) => /^#board(\.cols)?$/.test(s), (m) => !m);
+  const wideBoardCSS = declsFor((s) => /^#board(\.cols)?$/.test(s), (m) => Boolean(m));
+  const graphBoardCSS = declsFor((s) => /^#board(\.cols)?\.graph-view$/.test(s));
+  const nowrapInColLayout = (!/flex-wrap:\s*wrap\b/.test(colsCSS) || /flex-wrap:\s*nowrap\b/.test(baseBoardCSS))
+    && (!/flex-wrap:\s*wrap\b/.test(wideBoardCSS) || /flex-wrap:\s*nowrap\b/.test(graphBoardCSS));
+  assert.ok(colBounded || nowrapInColLayout,
+    'column layout on #board.cols / #board.cols.graph-view must bound .col-main with (max-)width: 100% or flex-wrap: nowrap');
+});
+
+test('renderGraphSVG clips a valid 32-char task ref visually to fit the node box while keeping the full ref in aria-label and href', async () => {
+  const { renderGraphSVG } = await loadGraph();
+  const longRef = 'task-notes-search-highlight-v200'; // 32 chars, valid per internal/factory/report.go
+  const doc = createDoc(renderGraphSVG([makeTask(longRef, 'Highlight', 'working', 1)], 'proj-demo'));
+  const a = doc.querySelector('svg a');
+  const boxW = Number(a.querySelector('rect').getAttribute('width'));
+  const refTxt = a.querySelector('text.ref').textContent.trim();
+  assert.ok(10 + refTxt.length * 7.2 <= boxW - 10, `drawn ref "${refTxt}" overflows ${boxW}px box at 12px mono`);
+  assert.equal(a.dataset.ref, longRef, 'data-ref must keep full unclipped ref');
+  assert.equal(a.getAttribute('href'), `#proj-demo/${encodeURIComponent(longRef)}`, 'href must keep full unclipped ref');
+  assert.ok((a.getAttribute('aria-label') || '').startsWith(`${longRef}, `), 'aria-label must keep full unclipped ref');
+});
+
+test('hovering a graph node highlights its edges and neighbours without applying the keyboard .focus ring', async (t) => {
+  const tasks = [
+    makeTask('T1', 'Root A', 'done', 1, [], ['T2', 'T3']),
+    makeTask('T2', 'Child A1', 'working', 2, ['T1'], ['T4']),
+    makeTask('T3', 'Child A2', 'working', 2, ['T1'], ['T4']),
+    makeTask('T4', 'Join A', 'waiting_on_dep', 3, ['T2', 'T3'], []),
+  ];
+  const page = await bootPage(t, fakeDaemon({ tasks }));
+  page.doc.querySelector('button[data-view="graph"]').click();
+  await page.flush();
+
+  const n1 = page.doc.querySelector('a.gnode[data-ref="T1"]');
+  const n2 = page.doc.querySelector('a.gnode[data-ref="T2"]');
+  const n3 = page.doc.querySelector('a.gnode[data-ref="T3"]');
+  const n4 = page.doc.querySelector('a.gnode[data-ref="T4"]');
+  const e12 = page.doc.querySelector('path.gedge[data-from="T1"][data-to="T2"]');
+  const e24 = page.doc.querySelector('path.gedge[data-from="T2"][data-to="T4"]');
+
+  n1.dispatchEvent({ type: 'mouseover', bubbles: true });
+  await page.flush();
+
+  assert.ok(!n1.classList.contains('focus'), 'mouse hover must not apply keyboard .focus ring to hovered node');
+  assert.ok(n1.classList.contains('hot') && !n1.classList.contains('dim'), 'hovered node T1 must be highlighted as .hot');
+  assert.ok(n2.classList.contains('hot') && n3.classList.contains('hot'), 'direct neighbours T2 and T3 must stay strong');
+  assert.ok(n4.classList.contains('dim'), 'non-neighbour T4 must be dimmed on hover');
+  assert.ok(e12.classList.contains('hot'), 'incident edge T1 -> T2 must be strong on hover');
+  assert.ok(e24.classList.contains('dim'), 'non-incident edge T2 -> T4 must be dimmed on hover');
+
+  n1.dispatchEvent({ type: 'mouseout', bubbles: true, relatedTarget: null });
+  await page.flush();
+  assert.ok(page.doc.querySelectorAll('a.gnode').every((a) => !a.classList.contains('dim') && !a.classList.contains('hot') && !a.classList.contains('focus')), 'mouseout must clear hover highlight');
+});
+
+test('renderGraphSVG omits undefined from aria-label when a task has no title', async () => {
+  const { renderGraphSVG } = await loadGraph();
+  const doc = createDoc(renderGraphSVG([
+    { ref: 'T1', stage: 'queued', layer: 1, after: [], dependents: ['T2'] },
+    { ref: 'T2', title: '', stage: 'waiting_on_dep', layer: 2, after: ['T1'], dependents: [] },
+  ], 'proj-demo'));
+  const n1 = doc.querySelector('a.gnode[data-ref="T1"]');
+  const label = n1.getAttribute('aria-label') || '';
+  assert.ok(!label.includes('undefined'), `aria-label must not contain "undefined" when title is missing (got "${label}")`);
+  assert.ok(label.startsWith('T1,') && label.includes('queued'), `aria-label must still name ref and stage (got "${label}")`);
 });
