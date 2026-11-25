@@ -338,6 +338,10 @@ function fakeDaemon({
         if (p.error) return reply(500, { error: p.error });
         return reply(200, { protocol: 1, rows: p._rows || rows });
       }
+      if (sm && method === 'POST') {
+        if (!hasSession) return reply(403, { code: 'proof_required', error: 'proof_required' });
+        return reply(200, { ok: true, device_id: 'dev-1' });
+      }
       return reply(404, { error: 'not found' });
     } finally { inFlight--; }
   };
@@ -1179,4 +1183,112 @@ test('every new control has a label, header button carries aria-expanded, no rul
   // app.js still holds no POST
   const appSrc = readFileSync(new URL('./app.js', import.meta.url), 'utf8');
   assert.equal(/\bPOST\b|method\s*:/.test(appSrc), false, 'app.js must hold no POST');
+});
+
+test('unpaired ask or setting-row action on project A does not leak a pairing box onto project B', async (t) => {
+  const projects = [
+    mkProj({ id: 'proj-a', folder: '/Users/dev/code/notes', goal: 'Notes' }),
+    mkProj({ id: 'proj-b', folder: '/Users/dev/code/bookmarks', goal: 'Bookmarks' }),
+  ];
+
+  // 1a. Unpaired ask card click on proj-a must not leak pairing box onto proj-b's asks card
+  const pageAsk = await bootPage(t, fakeDaemon({
+    projects,
+    asks: [mkAsk({ id: 'ask-a1', project: 'proj-a', question: 'Delete table?' })],
+    paired: false,
+  }), { hash: '#proj-a' });
+  const askOpt = pageAsk.doc.getElementById('asks').querySelector('button[data-ask-id="ask-a1"][data-option="Keep it"]');
+  assert.equal(Boolean(askOpt), true, 'expected ask-a1 option button on proj-a');
+  askOpt.click();
+  await pageAsk.flush();
+  assert.equal(Boolean(pageAsk.doc.getElementById('asks').querySelector('.pair-box')), true, 'unpaired ask click must open pairing box on proj-a');
+  await pageAsk.setHash('#proj-b');
+  assert.equal(Boolean(pageAsk.doc.getElementById('asks').querySelector('.pair-box')), false, "proj-a's ask pairing box must not render on proj-b");
+
+  // 1b. Unpaired setting read-back Save click on proj-a must not leak pairing box onto proj-b's settings row
+  const pageReadBack = await bootPage(t, fakeDaemon({
+    projects,
+    asks: [mkSettingAsk({ id: 'ask-set-a', project: 'proj-a' })],
+    paired: false,
+  }), { hash: '#proj-a' });
+  const saveBtn = pageReadBack.doc.getElementById('settings').querySelector('[data-row="review_rounds"] button[data-ask-id="ask-set-a"][data-option="Save"]');
+  assert.equal(Boolean(saveBtn), true, 'expected review_rounds Save button on proj-a');
+  saveBtn.click();
+  await pageReadBack.flush();
+  assert.equal(Boolean(pageReadBack.doc.getElementById('settings').querySelector('[data-row="review_rounds"] .pair-box')), true, 'unpaired setting Save must open pairing box on proj-a');
+  await pageReadBack.setHash('#proj-b');
+  assert.equal(Boolean(pageReadBack.doc.getElementById('settings').querySelector('[data-row="review_rounds"] .pair-box')), false, "proj-a's setting read-back pairing box must not render on proj-b");
+
+  // 1c. Unpaired setting Change click on proj-a must not leak pairing box onto proj-b's settings row
+  const pageChange = await bootPage(t, fakeDaemon({ projects, paired: false }), { hash: '#proj-a' });
+  const maxInput = pageChange.doc.getElementById('settings').querySelector('input[data-setting="max_running"]');
+  assert.equal(Boolean(maxInput), true, 'expected max_running input on proj-a');
+  maxInput.value = '4';
+  maxInput.dispatchEvent({ type: 'input', bubbles: true });
+  await pageChange.flush();
+  const changeBtn = pageChange.doc.getElementById('settings').querySelector('button[data-propose="max_running"]');
+  assert.equal(Boolean(changeBtn), true, 'expected Change button for edited max_running on proj-a');
+  changeBtn.click();
+  await pageChange.flush();
+  assert.equal(Boolean(pageChange.doc.getElementById('settings').querySelector('[data-row="max_running"] .pair-box')), true, 'unpaired setting Change must open pairing box on proj-a');
+  await pageChange.setHash('#proj-b');
+  assert.equal(Boolean(pageChange.doc.getElementById('settings').querySelector('[data-row="max_running"] .pair-box')), false, "proj-a's setting Change pairing box must not render on proj-b");
+});
+
+test('keyboard focus on an overview project card survives a 3 s poll when progress or ask count changes', async (t) => {
+  const daemon = fakeDaemon({
+    projects: [
+      mkProj({ id: 'proj-a', folder: '/Users/dev/code/notes', goal: 'Notes', counts: { done: 2, working: 6 } }),
+      mkProj({ id: 'proj-b', folder: '/Users/dev/code/bookmarks', goal: 'Bookmarks', counts: { done: 1, working: 2 } }),
+    ],
+  });
+  const page = await bootPage(t, daemon, { hash: '' });
+  const cards = overviewCards(page.doc.getElementById('main'));
+  assert.equal(cards.length, 2, 'expected 2 overview cards');
+  cards[0].focus();
+  assert.equal(page.doc.activeElement?.getAttribute('href'), '#proj-a', 'focus must start on proj-a overview card');
+
+  daemon.projects[0].counts = { done: 3, working: 5 };
+  await page.pollNow();
+  assert.equal(page.doc.getElementById('main').contains(page.doc.activeElement), true, 'focus must stay on a live element inside #main after progress poll');
+  assert.equal(page.doc.activeElement?.getAttribute('href'), '#proj-a', 'overview card focus must survive a poll that updates counts');
+
+  daemon.asks.push(mkAsk({ id: 'ask-a1', project: 'proj-a', question: 'Delete table?' }));
+  await page.pollNow();
+  assert.equal(page.doc.getElementById('main').contains(page.doc.activeElement), true, 'focus must stay on a live element inside #main after ask-count poll');
+  assert.equal(page.doc.activeElement?.getAttribute('href'), '#proj-a', 'overview card focus must survive a poll that updates ask count');
+});
+
+test('activating an ask link from the new-project form reloads even when location.hash is already #<proj>', async (t) => {
+  const daemon = fakeDaemon({
+    projects: [mkProj({ id: 'proj-a', folder: '/Users/dev/code/notes', goal: 'Notes' })],
+    asks: [mkAsk({ id: 'ask-a1', project: 'proj-a', question: 'Delete table?' })],
+  });
+  const page = await bootPage(t, daemon, { hash: '#proj-a' });
+  const newBtn = btnByText(page.doc.getElementById('projects'), W.projNew);
+  assert.equal(Boolean(newBtn), true, 'expected New project button in #projects');
+  newBtn.click();
+  await page.flush();
+  assert.equal(page.doc.getElementById('main').querySelector('h1')?.textContent.trim(), W.npH, 'new-project form must be open');
+
+  const fetchesBefore = daemon.fetched.length;
+  headerNeedsBtn(page.doc).click();
+  await page.flush();
+  const link = needsList(page.doc)?.querySelector('a');
+  assert.equal(Boolean(link), true, 'expected ask link in open needs-you list');
+  link.click();
+  await page.flush();
+
+  assert.equal(daemon.fetched.length > fetchesBefore, true, 'leaving new-project form via ask link must reload');
+  assert.equal(page.doc.getElementById('main').querySelector('h1')?.textContent.trim(), 'tasks', 'new-project form must close back to project board');
+  assert.equal(Boolean(needsList(page.doc)), false, 'needs-you list must close');
+  assert.equal(page.doc.activeElement?.dataset?.askId, 'ask-a1', 'focus must land on ask-a1 card after reload');
+});
+
+test('style.css sets overflow-wrap: anywhere on .goal-head so long project names wrap at 360 px', () => {
+  const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const goalHeadRules = [...css.matchAll(/([^{}]*\.goal-head\b[^{}]*)\{([^}]*)\}/g)];
+  assert.equal(goalHeadRules.length > 0, true, 'style.css must define .goal-head');
+  const wraps = goalHeadRules.some(([, , body]) => /overflow-wrap\s*:\s*anywhere\b/.test(body));
+  assert.equal(wraps, true, '.goal-head must set overflow-wrap: anywhere so long unbroken folder names do not overflow at 360 px');
 });
