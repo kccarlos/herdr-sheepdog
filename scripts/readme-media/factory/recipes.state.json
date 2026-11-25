@@ -1,0 +1,76 @@
+{
+  "seq": 14,
+  "project": {
+    "id": "recipes",
+    "folder": "/tmp/sheepdog-demo/recipes",
+    "repo_url": "https://github.com/example/recipes",
+    "goal": "Add ingredient scaling (0.5x, 2x, 3x) to the recipe view",
+    "started": false,
+    "finished": true
+  },
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "Ingredient scaling controls and unit formatting",
+      "brief": "Add a 0.5x / 1x / 2x / 3x serving multiplier to the recipe page and format fractional quantities cleanly.",
+      "outcomes": [
+        { "text": "Selecting a multiplier updates every ingredient quantity", "proved_by": "test: npm test" },
+        { "text": "Mixed fractions format cleanly at 0.5x and 3x", "proved_by": "test: npm test" }
+      ],
+      "estimate_lines": 110,
+      "done": { "merged_commit": "7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b" },
+      "last_row": "N1",
+      "attempts": [
+        {
+          "base_commit": "11223344556677889900aabbccddeeff00112233",
+          "branch": "factory/T1-1",
+          "worktree": "/tmp/sheepdog-demo/data/factory/projects/recipes/worktrees/T1-1",
+          "pr": 4,
+          "run_id": "",
+          "ready": [
+            { "head": "44556677889900aabbccddeeff00112233445566" },
+            { "head": "6677889900aabbccddeeff001122334455667788" }
+          ],
+          "rounds": [
+            {
+              "n": 1,
+              "kind": "full",
+              "head": "44556677889900aabbccddeeff00112233445566",
+              "reviewer": { "cli": "claude", "model": "sonnet", "effort": "high" },
+              "verdict": "changes",
+              "majors": 1,
+              "report_path": "/tmp/sheepdog-demo/data/factory/projects/recipes/reports/T1-r1.md"
+            },
+            {
+              "n": 2,
+              "kind": "delta",
+              "head": "6677889900aabbccddeeff001122334455667788",
+              "reviewer": { "cli": "claude", "model": "sonnet", "effort": "high" },
+              "verdict": "pass",
+              "majors": 0,
+              "report_path": "/tmp/sheepdog-demo/data/factory/projects/recipes/reports/T1-r2.md"
+            },
+            {
+              "n": 3,
+              "kind": "full",
+              "head": "6677889900aabbccddeeff001122334455667788",
+              "reviewer": { "cli": "claude", "model": "opus", "effort": "high" },
+              "verdict": "pass",
+              "majors": 0,
+              "report_path": "/tmp/sheepdog-demo/data/factory/projects/recipes/reports/T1-r3.md"
+            }
+          ],
+          "accepts": [
+            {
+              "head": "6677889900aabbccddeeff001122334455667788",
+              "by": "bar",
+              "rounds": [2, 3]
+            }
+          ],
+          "acts": [],
+          "size_cap": 220
+        }
+      ]
+    }
+  ]
+}

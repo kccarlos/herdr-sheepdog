@@ -50,6 +50,17 @@ https://github.com/user-attachments/assets/4d0834e2-9d1a-453b-a88b-ff4b75428a5a
 - **bring your own models** — one free Gemini key is enough; Gemini Live or GPT-Live for the voice, Gemini, DeepSeek or any OpenAI-compatible endpoint for the brain. [models →](docs/models.md)
 - **measured** — every prompt and harness change merges only past an eval suite with confidence intervals; the losses are published. [evals →](docs/dev/eval/README.md)
 
+## New: factory mode
+
+Point sheepdog at a GitHub repository and give it a goal: a **coordinator** plans the work into small tasks, **workers** build each task in its own worktree, independent **reviewers** check the diffs, CI runs on every pull request, and finished PRs squash-merge into your base branch. Watch progress at `/factory`—on a live task list or dependency graph—and step in only when an ask needs the owner, on the card, on your phone, or by voice. [Factory guide →](docs/factory.md)
+
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/readme/factory/graph-dark.png">
+    <img src="assets/readme/factory/graph-light.png" alt="The /factory task dependency graph showing twenty tasks across five layers, their states, and live progress" width="720">
+  </picture>
+</p>
+
 ---
 
 <a id="install"></a>
