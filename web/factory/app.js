@@ -223,10 +223,10 @@ function boardHTML(tasks, part) {
 function rowHTML(t) {
   const [label, dot] = stage(t), why = t.why_waiting || label;
   const model = t.model || (t.stage === 'queued' || t.stage === 'waiting_on_dep' ? 'not started' : '');
-  const stepAria = Array.isArray(t.steps) && t.steps.length ? stepSummary(t.steps).aria : '';
-  const say = [t.ref, t.title, label, why !== label && why, stepAria, model, `layer ${t.layer}`].filter(Boolean).join(', ');
+  const sum = Array.isArray(t.steps) && t.steps.length ? stepSummary(t.steps) : null;
+  const say = [t.ref, t.title, label, why !== label && why, sum?.aria, model, `layer ${t.layer}`].filter(Boolean).join(', ');
   return `<a class="row" href="#${enc(data.p)}/${enc(t.ref)}" aria-label="${esc(say)}"><span class="dot ${dot}" aria-hidden="true"></span>` +
-    `<span class="what"><span><code>${esc(t.ref)}</code> <b>${esc(t.title)}</b></span><span class="why">${esc(why)}</span>${stepsHTML(t)}</span>` +
+    `<span class="what"><span><code>${esc(t.ref)}</code> <b>${esc(t.title)}</b></span><span class="why">${esc(why)}</span>${stepsHTML(t, false, sum)}</span>` +
     `<span class="chips">${model ? `<span class="chip">${esc(model)}</span>` : ''}<span>layer ${t.layer}</span></span></a>`;
 }
 
@@ -249,11 +249,11 @@ function stepSummary(steps) {
     : cur.name;
   return { words, aria: `step ${i + 1} of ${steps.length}, ${words}` };
 }
-function stepsHTML(t, full = false) {
+function stepsHTML(t, full = false, sum = null) {
   const steps = Array.isArray(t.steps) ? t.steps : [];
   if (!steps.length) return '';
   if (!full) {
-    const { words, aria } = stepSummary(steps);
+    const { words, aria } = sum || stepSummary(steps);
     const segs = steps.map((s) => { const c = Object.hasOwn(STEP_ST, s.state) ? STEP_ST[s.state][0] : ''; return `<span${c ? ` class="${c}"` : ''}></span>`; }).join('');
     return `<span class="sbar"><span class="bar" role="img" aria-label="${esc(aria)}">${segs}</span><span class="small muted">${esc(words)}</span></span>`;
   }
@@ -268,9 +268,6 @@ function stepsHTML(t, full = false) {
   return `<section class="card" aria-label="steps"><h2>steps</h2><ol class="steps">${items}</ol></section>`;
 }
 
-// t.rounds counts finished review rounds; why_waiting names the one running ("In review round 2").
-const roundsDone = (t) => t.rounds ? `${t.rounds} round${t.rounds > 1 ? 's' : ''} done` : '';
-
 const logWhy = (l) => (l.by === 'owner' && l.decision === 'started' && l.why ? goalTitle(l.why, '') : l.why);
 const logHTML = (lines, title, empty = 'Nothing logged yet.') => `<section class="card" aria-label="${title}"><h2>${title}</h2>` + (lines.length
   ? `<ul class="log">${lines.slice().reverse().map((l) => `<li><time datetime="${esc(l.at)}">${clock(l.at, true)}</time> ${esc(l.by)}` +
@@ -280,7 +277,7 @@ const logHTML = (lines, title, empty = 'Nothing logged yet.') => `<section class
 function taskHTML(t) {
   const [label, dot] = stage(t), kv = (k, v) => v ? `<div class="kv"><span>${k}</span><span>${esc(v)}</span></div>` : '';
   const det = [t.last_rule && `rule ${t.last_rule}`, t.terminal && `run ${t.terminal}`, t.layer != null && `layer ${t.layer}`].filter(Boolean).join(' · ');
-  const verdictSub = t.rounds ? `review ${roundsDone(t)}` : (!t.last_rule ? 'No step logged for this task yet.' : '');
+  const verdictSub = t.rounds ? `review ${t.rounds} round${t.rounds > 1 ? 's' : ''} done` : (!t.last_rule ? 'No step logged for this task yet.' : '');
   return `<a class="back" href="#${enc(data.p)}">‹ board</a><div class="task-head"><div class="meta"><code>${esc(t.ref)}</code>` +
     `<span class="pill ${dot}"><span class="dot ${dot}" aria-hidden="true"></span>${esc(label)} · ${esc(t.why_waiting || label)}</span>` +
     `${t.terminal ? `<span>run ${esc(t.terminal)}</span>` : ''}</div><h1>${esc(t.title)}</h1></div><div class="cols"><div class="col-main">` +

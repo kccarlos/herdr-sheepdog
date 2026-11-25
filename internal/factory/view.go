@@ -325,12 +325,10 @@ func stepFromRow(t flow.Task, st flow.State, att *flow.Attempt, r flow.Row[flow.
 
 func taskSteps(t flow.Task, st flow.State, att *flow.Attempt, stage, why string, r flow.Row[flow.In], rounds int) []StepView {
 	cfg := st.Settings
-	prDone := false
-	for _, pr := range st.Project.PlanReviews {
-		if cfg.PlanReviewRounds > 0 && !t.Unreviewed && slices.Contains(pr.Tasks, t.ID) {
-			prDone = !pr.Accepted.IsZero() || pr.Verdict == flow.VerdictUnavailable
-		}
-	}
+	prDone := cfg.PlanReviewRounds > 0 && !t.Unreviewed && slices.ContainsFunc(st.Project.PlanReviews, func(pr flow.PlanReview) bool {
+		return slices.Contains(pr.Tasks, t.ID) && (!pr.Accepted.IsZero() || pr.Verdict == flow.VerdictUnavailable)
+	})
+	hasPR := cfg.PlanReviewRounds > 0 && (t.Unreviewed || prDone)
 	h, nc, hasRetro, revPassed, revSkipped := "", (*flow.Round)(nil), false, false, false
 	if att != nil {
 		h = flow.H(*att)
@@ -344,7 +342,7 @@ func taskSteps(t flow.Task, st flow.State, att *flow.Attempt, stage, why string,
 		now = stepFromRow(t, st, att, r, hasRetro)
 	}
 	names := slices.DeleteFunc([]string{"plan review", "planned", "implementing", "review", "retro", "CI", "merged"}, func(x string) bool {
-		return x == "plan review" && cfg.PlanReviewRounds <= 0 || x == "retro" && !hasRetro && now != "retro"
+		return x == "plan review" && !hasPR || x == "retro" && !hasRetro && now != "retro"
 	})
 	nowIdx := len(names)
 	if !term {
@@ -352,13 +350,13 @@ func taskSteps(t flow.Task, st flow.State, att *flow.Attempt, stage, why string,
 	} else if unmerged {
 		last := cmp.Or(map[bool]string{true: "CI"}[att != nil && len(att.Ready) > 0 && (revPassed || revSkipped || slices.ContainsFunc(att.Accepts, func(ac flow.Accept) bool { return flow.Covers(*att, ac.Head, h) }))],
 			map[bool]string{true: "retro"}[att != nil && hasRetro], map[bool]string{true: "review"}[att != nil && (len(att.Rounds) > 0 || att.Review != nil || revSkipped)],
-			map[bool]string{true: "implementing"}[att != nil], map[bool]string{true: "planned"}[cfg.PlanReviewRounds <= 0 || prDone], "plan review")
+			map[bool]string{true: "implementing"}[att != nil], map[bool]string{true: "planned"}[!hasPR || prDone], "plan review")
 		names = names[:slices.Index(names, last)+1]
 	}
 	rnd, needs := cmp.Or(map[int]string{1: "1 round done"}[rounds], map[bool]string{true: fmt.Sprintf("%d rounds done", rounds)}[rounds > 1]), fmt.Sprintf("needs %d passing, at most %d", cfg.ReviewRounds, cfg.MaxRounds)
 	liveRev, steps := (stage == "working" || r.Stage == "working") && !t.Parked && revActive(att), make([]StepView, len(names))
 	for i, name := range names {
-		s, txt := cmp.Or(map[bool]string{true: "todo"}[name == "plan review" && !term && i < nowIdx && !prDone], map[bool]string{true: "skipped"}[name == "review" && i < nowIdx && revSkipped], map[int]string{-1: "done", 0: "now", 1: "todo"}[cmp.Compare(i, nowIdx)]), ""
+		s, txt := cmp.Or(map[bool]string{true: "skipped"}[name == "review" && i < nowIdx && revSkipped], map[int]string{-1: "done", 0: "now", 1: "todo"}[cmp.Compare(i, nowIdx)]), ""
 		switch {
 		case s == "now" && t.Parked:
 			txt = "parked here, waiting on the coordinator"
