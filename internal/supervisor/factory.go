@@ -422,7 +422,8 @@ func (s *Supervisor) collidingAgentPromptLocked(text string) string {
 func (s *Supervisor) factoryControl(start bool) voice.ToolResult {
 	var changed, errs []string
 	for _, p := range s.cfg.Factory.Projects() {
-		if start == p.Running || (start && p.Error != "") {
+		st := cmp.Or(p.State, map[bool]string{true: "running", false: "stopped"}[p.Running])
+		if p.Error != "" || (start && st != "stopped") || (!start && st != "running" && !(st == "finished" && p.Live)) {
 			continue
 		}
 		var err error

@@ -37,7 +37,7 @@ sheepdog factory log -n 30
 sheepdog factory stop
 ```
 
-- `sheepdog factory start <folder> --goal "<sentence>"` runs the start checks first and refuses to start on any `FAIL`. Pass `--max-running N` (1–20, default 3) to set concurrent tasks; one extra slot beyond `N` is available for an urgent task or a task you just answered.
+- `sheepdog factory start <folder> --goal "<sentence>"` runs the start checks first and refuses to start on any `FAIL`. Pass `--max-running N` (1–20, default 3) to set concurrent tasks at a project's first start (change it later in the settings panel on `/factory`); one extra slot beyond `N` is available for an urgent task or a task you just answered.
 - `sheepdog factory status` queries the running daemon (including in-memory alerts) and prints each task's id, title, stage, last logged rule, age, and reason, plus any active alerts. When the daemon is stopped, it falls back to stored `state.json` and `log.jsonl`.
 - `sheepdog factory log` prints each engine step from `log.jsonl`, followed by the project's first-look pass rate once any task has a reviewed round.
 - `sheepdog factory stop` stops the project and every agent run it started, keeping the plan and stored state so you can start again later. Restarting with `sheepdog factory start` always requires `--goal`: pass the same goal to resume, or a new goal to have the coordinator update the plan.

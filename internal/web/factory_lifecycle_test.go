@@ -17,8 +17,9 @@ import (
 )
 
 type webProjWire struct {
-	ID, State, RepoURL string
-	Live               bool
+	ID, State string
+	RepoURL   string `json:"repo_url"`
+	Live      bool
 }
 
 func webExpect(t *testing.T, ok bool, m string, a ...any) {

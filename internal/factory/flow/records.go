@@ -174,6 +174,7 @@ type BaseState struct {
 type Project struct {
 	ID                 string            `json:"id"`
 	Folder             string            `json:"folder,omitempty"`
+	RepoURL            string            `json:"repo_url,omitempty"`
 	Goal               string            `json:"goal,omitempty"`
 	Started            bool              `json:"started,omitempty"`
 	Finished           bool              `json:"finished,omitempty"`         // J4: project finished with no live coordinator

@@ -39,7 +39,7 @@ const owner = "owner"
 
 // verbRoles is the acceptance table: who may send each verb.
 var verbRoles = map[string]string{
-	"start": owner, "stop": owner,
+	"start": owner, "stop": owner, "check": owner,
 	"plan apply": flow.RoleCoordinator, "recap decide": flow.RoleCoordinator,
 	"plan amend": flow.RoleCoordinator, "plan reject": flow.RoleCoordinator, "task": flow.RoleCoordinator,
 	"ready": flow.RoleWorker, "review": flow.RoleReviewer, "retro": flow.RoleRetro, "plan-review": flow.RolePlanReviewer, "ask": "", "answer": flow.RoleCoordinator,

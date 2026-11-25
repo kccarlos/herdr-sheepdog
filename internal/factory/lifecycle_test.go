@@ -19,8 +19,9 @@ import (
 )
 
 type projectViewWire struct {
-	ID, State, RepoURL string
-	Running, Live      bool
+	ID, State     string
+	RepoURL       string `json:"repo_url"`
+	Running, Live bool
 }
 
 func viewWire(t *testing.T, v ProjectView) (w projectViewWire) {
