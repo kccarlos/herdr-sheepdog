@@ -282,7 +282,7 @@ strings; a test's expected string is the **Text** column
 | `ov.needs` | mark | needs you: 2 | on a project card, only when the project has open asks for you; amber outline, the number is the count |
 | `ov.progress` | card text | 3 of 6 done | done tasks of all tasks |
 | `ov.notasks` | card text | no tasks yet | a project the coordinator has not planned yet |
-| `ov.name` | card text | notes | the project's name: the last part of its folder's path (the project's id when it has no folder); in mono above the goal on overview cards, beside the goal on the project board, and before the goal in the needs-you list |
+| `ov.name` | card text | notes | the project's name: the last part of its folder's path (the project's id when it has no folder); in mono above the goal on overview cards, above the goal on the project board (two or more projects), and before the goal in the needs-you list |
 | `ov.card` | screen-reader text | notes, A notes page with search, running, needs you: 2, 2 of 8 done | a card's label; the whole card is one link into the project |
 | `ov.err` | mark | can't read project | a project whose stored state the daemon cannot read; icon: triangle; danger colour. The card shows the project id, this mark, the hint and the daemon's error; no state word and no progress; it is not a link; it sorts last |
 | `ov.err.hint` | sentence | Its state file could not be read. | under the mark; the daemon's error sentence follows as secondary text |
