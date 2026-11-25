@@ -224,4 +224,4 @@ a.ov-card:hover { background: var(--code); color: var(--fg); }
 .ov-goal { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
 .ov-foot { margin-top: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
 .ov-err { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; color: var(--danger); }
-.goal-head { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.goal-head { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }

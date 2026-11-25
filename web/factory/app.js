@@ -94,7 +94,7 @@ async function poll() {
       Object.assign(setUI, { project: p, rows: null, error: '', busy: '', edits: {}, errors: {}, fixes: {}, notices: {}, editor: null, copied: '' });
       ++paSeq; Object.assign(paUI, emptyPA());
       Object.assign(logUI, { task: '', observations: false, hasObservations: false, error: '' });
-      if (askUI.pending?.kind === 'project') clearPair();
+      askUI.error = ''; askUI.errorAskId = ''; if (askUI.pending && askUI.pending.kind !== 'start') clearPair();
     }
     const routeTask = !sp && !npUI.open && want === p ? (task || '') : '';
     let graph = null, log = [], problem = '';
@@ -155,7 +155,7 @@ async function poll() {
 
 // set replaces an element's HTML only when it changed, then reopens the <details>
 // that were open and puts keyboard focus back on the same control.
-const key = (e) => e.id ? `${e.tagName}#${e.id}` : e.dataset?.view ? `${e.tagName}:view:${e.dataset.view}` : e.dataset?.ref ? `${e.tagName}:ref:${e.dataset.ref}` : e.dataset?.askId && !e.dataset?.option ? `${e.tagName}:ask:${e.dataset.askId}` : [e.tagName, e.dataset?.setting || e.dataset?.sugg || e.dataset?.pa || e.getAttribute('href') || e.dataset?.askId || e.closest?.('[data-row]')?.dataset.row || e.closest?.('[data-ask-id]')?.dataset.askId || '', e.dataset?.option || e.dataset?.copy || e.getAttribute('aria-label') || (e.dataset?.npCheck && 'np-check') || (e.dataset?.npStart && 'np-start') || e.className || e.parentElement?.className || e.textContent?.slice(0, 24) || ''].join(':');
+const key = (e) => e.id ? `${e.tagName}#${e.id}` : e.dataset?.view ? `${e.tagName}:view:${e.dataset.view}` : e.dataset?.ref ? `${e.tagName}:ref:${e.dataset.ref}` : e.dataset?.ovProj ? `${e.tagName}:ov:${e.dataset.ovProj}` : e.dataset?.askId && !e.dataset?.option ? `${e.tagName}:ask:${e.dataset.askId}` : [e.tagName, e.dataset?.setting || e.dataset?.sugg || e.dataset?.pa || e.getAttribute('href') || e.dataset?.askId || e.closest?.('[data-row]')?.dataset.row || e.closest?.('[data-ask-id]')?.dataset.askId || '', e.dataset?.option || e.dataset?.copy || e.getAttribute('aria-label') || (e.dataset?.npCheck && 'np-check') || (e.dataset?.npStart && 'np-start') || e.className || e.parentElement?.className || e.textContent?.slice(0, 24) || ''].join(':');
 function set(el, html) {
   if (el._html === html) return;
   const open = [...el.querySelectorAll('details[open]')].map(key);
@@ -599,7 +599,7 @@ $('needs-you').addEventListener('click', (e) => {
   needsOpen = false;
   if (onBoard) { e.preventDefault(); render(); return focusAskCard(askId); }
   pendingAskFocus = { project: proj, askId };
-  if (npUI.open && location.hash === '#' + enc(proj)) { e.preventDefault(); closeNewProject(); }
+  if (npUI.open && location.hash === '#' + enc(proj)) { e.preventDefault(); render(); closeNewProject(); scrollTo(0, 0); return poll(); }
   render();
 });
 $('needs-you').addEventListener('keydown', (e) => {

@@ -45,7 +45,7 @@ function projectCardHTML(pr, needs) {
   const done = Number(c.done) || 0;
   const prog = total ? `${done} of ${total} done` : 'no tasks yet';
   const aria = [name, title, st, n ? `needs you: ${n}` : '', prog].filter(Boolean).join(', ');
-  return `<a class="card ov-card${n ? ' needs' : ''}" href="#${esc(enc(pr.id))}" aria-label="${esc(aria)}">` +
+  return `<a class="card ov-card${n ? ' needs' : ''}" href="#${esc(enc(pr.id))}" data-ov-proj="${esc(pr.id)}" aria-label="${esc(aria)}">` +
     `<div class="ov-top"><span class="mono muted small">${esc(name)}</span>${n ? `<span class="ov-needs">needs you: ${n}</span>` : ''}</div>` +
     `<span class="ov-goal">${esc(title)}</span>` +
     `<div class="ov-foot"><span class="pill"><span class="dot ${ST_DOT[st] || 'idle'}" aria-hidden="true"></span>${esc(st)}</span>` +
