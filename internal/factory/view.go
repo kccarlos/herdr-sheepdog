@@ -39,20 +39,27 @@ type GraphView struct {
 	Tasks    []TaskView `json:"tasks"`
 }
 
+type StepView struct {
+	Name  string `json:"name"`
+	State string `json:"state"`
+	Text  string `json:"text,omitempty"`
+}
+
 type TaskView struct {
-	Ref          string   `json:"ref"`
-	Title        string   `json:"title"`
-	Brief        string   `json:"brief,omitempty"`
-	Stage        string   `json:"stage"`
-	WhyWaiting   string   `json:"why_waiting,omitempty"`
-	After        []string `json:"after"`
-	Dependents   []string `json:"dependents"`
-	Layer        int      `json:"layer"`
-	Rounds       int      `json:"rounds"`
-	Model        string   `json:"model,omitempty"`
-	Terminal     string   `json:"terminal,omitempty"`
-	LastRule     string   `json:"last_rule,omitempty"`
-	LastDecision string   `json:"last_decision,omitempty"`
+	Ref          string     `json:"ref"`
+	Title        string     `json:"title"`
+	Brief        string     `json:"brief,omitempty"`
+	Stage        string     `json:"stage"`
+	WhyWaiting   string     `json:"why_waiting,omitempty"`
+	After        []string   `json:"after"`
+	Dependents   []string   `json:"dependents"`
+	Layer        int        `json:"layer"`
+	Rounds       int        `json:"rounds"`
+	Model        string     `json:"model,omitempty"`
+	Terminal     string     `json:"terminal,omitempty"`
+	LastRule     string     `json:"last_rule,omitempty"`
+	LastDecision string     `json:"last_decision,omitempty"`
+	Steps        []StepView `json:"steps"`
 }
 
 // LogEntry is the read-only log projection (design.md 12.1); Wake/Model await core writers.
@@ -155,10 +162,11 @@ func graphViewOf(s flow.State, lastRow map[string]LogLine) GraphView {
 	}
 	tasks := make([]TaskView, 0, len(s.Tasks))
 	for i, t := range s.Tasks {
-		stage, why := taskStageWhy(t, s.Tasks, s.Asks, s.Settings, s.Project.Started)
-		l, model, term, rounds := lastRow[t.ID], "", "", 0
+		stage, why, row := taskStageWhy(t, s.Tasks, s.Asks, s.Settings, s.Project.Started)
+		l, model, term, rounds, att := lastRow[t.ID], "", "", 0, (*flow.Attempt)(nil)
 		if n := len(t.Attempts); n > 0 {
-			rounds = len(slices.DeleteFunc(slices.Clone(flow.Counted(t.Attempts[n-1])), func(r flow.Round) bool { return r.Kind == flow.RoundSendBack || r.Kind == flow.RoundRetro }))
+			att = &t.Attempts[n-1]
+			rounds = len(slices.DeleteFunc(slices.Clone(flow.Counted(*att)), func(r flow.Round) bool { return r.Kind == flow.RoundSendBack || r.Kind == flow.RoundRetro }))
 		}
 		if a := flow.OpenAttempt(t); revActive(a) {
 			model, term = a.Review.Reviewer.Model, cmp.Or(a.Review.RunID, a.RunID)
@@ -167,7 +175,7 @@ func graphViewOf(s flow.State, lastRow map[string]LogLine) GraphView {
 		}
 		tasks = append(tasks, TaskView{
 			Ref: t.ID, Title: t.Title, Brief: t.Brief, Stage: stage, WhyWaiting: why, After: append([]string{}, t.After...), Dependents: append([]string{}, deps[t.ID]...),
-			Layer: layers[i], Rounds: rounds, Model: model, Terminal: term, LastRule: l.Rule, LastDecision: l.Decision,
+			Layer: layers[i], Rounds: rounds, Model: model, Terminal: term, LastRule: l.Rule, LastDecision: l.Decision, Steps: taskSteps(t, s.Project, s.Settings, att, stage, why, row, rounds),
 		})
 	}
 	return GraphView{Protocol: 1, Project: s.Project.ID, Folder: s.Project.Folder, Tasks: tasks}
@@ -244,23 +252,23 @@ func (e *Engine) loadProjectCopy(project string) (flow.State, []LogLine, error) 
 	return s, logs, nil
 }
 
-func taskStageWhy(t flow.Task, tasks []flow.Task, asks []flow.Ask, settings flow.Settings, started bool) (string, string) {
+func taskStageWhy(t flow.Task, tasks []flow.Task, asks []flow.Ask, settings flow.Settings, started bool) (string, string, flow.Row[flow.In]) {
+	r, ok := taskRows[t.LastRow]
 	if a := flow.OpenOwnerAskForTask(asks, t.ID); a != nil {
 		if a.Kind == flow.KindGate {
-			return "owner_gate", a.Question
+			return "owner_gate", a.Question, r
 		}
-		return "owner_answer", a.Question
+		return "owner_answer", a.Question, r
 	}
 	if flow.Ended(t) {
-		return "done", ""
+		return "done", "", r
 	}
 	if t.Parked {
-		return "blocked_or_failed", "Parked, waiting on the coordinator"
+		return "blocked_or_failed", "Parked, waiting on the coordinator", r
 	}
 	notDone, dropped := flow.UnmetDeps(t, tasks)
 	unmet := append(notDone, dropped...)
 	a := flow.OpenAttempt(t)
-	r, ok := taskRows[t.LastRow]
 	stage := r.Stage
 	if a != nil && a.RunID == "" && flow.Done(a.Acts, flow.AskWake+"@worker_failed") {
 		stage = "blocked_or_failed"
@@ -281,7 +289,67 @@ func taskStageWhy(t flow.Task, tasks []flow.Task, asks []flow.Ask, settings flow
 			stage = r.Stage
 		}
 	}
-	return stage, taskWhy(t, a, unmet, started, stage, r)
+	return stage, taskWhy(t, a, unmet, started, stage, r), r
+}
+
+func stepFromRow(t flow.Task, s flow.Settings, stage string, r flow.Row[flow.In], hasRetro bool) string {
+	switch stage {
+	case "done", "ci":
+		return map[string]string{"ci": "CI"}[stage]
+	case "queued", "waiting_on_dep":
+		return map[bool]string{true: "plan review", false: "planned"}[stage == "queued" && (r.ID == "N10" || r.ID == "") && t.Unreviewed && s.PlanReviewRounds > 0]
+	case "working":
+		return cmp.Or(map[string]string{"the reviewer": "review", "the retro reviewer": "retro"}[r.WaitsOn], "implementing")
+	}
+	if a := flow.OpenAttempt(t); a == nil {
+		return map[bool]string{true: "plan review", false: "planned"}[t.Unreviewed && s.PlanReviewRounds > 0]
+	} else if len(a.Ready) == 0 {
+		return "implementing"
+	}
+	lr, _ := flow.FirstMatch(flow.LadderRows, flow.In{Task: t, Settings: s})
+	if lr.Stage == "blocked_or_failed" || lr.WaitsOn == "the retro reviewer" && !hasRetro {
+		return map[bool]string{true: "retro", false: "review"}[hasRetro]
+	}
+	return stepFromRow(t, s, lr.Stage, lr, hasRetro)
+}
+
+func taskSteps(t flow.Task, p flow.Project, s flow.Settings, att *flow.Attempt, stage, why string, r flow.Row[flow.In], rounds int) []StepView {
+	hasRetro := len(t.Retros) > 0 || att != nil && (att.Review != nil && att.Review.Role() == flow.RoleRetro || slices.ContainsFunc(att.Rounds, func(rd flow.Round) bool { return rd.Kind == flow.RoundRetro }))
+	override := att != nil && (r.ID == "N15" || r.ID == "N19" || r.ID == "N19b" || flow.CoveringOverride(*att, flow.H(*att)) != nil || slices.ContainsFunc(att.Accepts, func(ac flow.Accept) bool { return ac.By == "override" }))
+	now, ended := stepFromRow(t, s, stage, r, hasRetro), stage == "done" && (t.Dropped != nil || t.Closed != nil || t.Split != nil)
+	names := slices.DeleteFunc([]string{"planned", "plan review", "implementing", "review", "retro", "CI", "merged"}, func(x string) bool {
+		return x == "plan review" && s.PlanReviewRounds <= 0 || x == "retro" && !hasRetro && now != "retro"
+	})
+	nowIdx := map[bool]int{true: len(names), false: slices.Index(names, now)}[stage == "done"]
+	if ended {
+		last := cmp.Or(map[bool]string{true: "CI"}[att != nil && len(att.Ready) > 0 && (override || len(att.Accepts) > 0 || flow.OpenAttempt(t) != nil && flow.Ladder(flow.In{Task: t, Settings: s}) == flow.Passed)],
+			map[bool]string{true: "retro"}[att != nil && hasRetro], map[bool]string{true: "review"}[att != nil && (rounds > 0 || att.Review != nil || override)],
+			map[bool]string{true: "implementing"}[att != nil], map[bool]string{true: "plan review"}[s.PlanReviewRounds > 0 && !t.Unreviewed], "planned")
+		names = names[:slices.Index(names, last)+1]
+	}
+	prDone := len(p.PlanReviews) > 0 && (!p.PlanReviews[len(p.PlanReviews)-1].Accepted.IsZero() || p.PlanReviews[len(p.PlanReviews)-1].Verdict == flow.VerdictUnavailable)
+	rnd, steps := map[bool]string{true: "1 round done", false: fmt.Sprintf("%d rounds done", rounds)}[rounds == 1], make([]StepView, len(names))
+	for i, name := range names {
+		st, txt := map[int]string{-1: "done", 0: "now", 1: "todo"}[cmp.Compare(i, nowIdx)], ""
+		st = cmp.Or(map[bool]string{true: "done"}[name == "plan review" && st == "todo" && !t.Unreviewed && prDone], map[bool]string{true: "skipped"}[name == "review" && st == "done" && override], st)
+		switch {
+		case st == "now" && t.Parked:
+			txt = "parked here, waiting on the coordinator"
+		case name == "implementing" && st == "now" && rounds > 0 && (r.ID == "N22" || att != nil && flow.LastReviewed(*att) != nil && flow.LastReviewed(*att).Verdict != flow.VerdictPass):
+			txt = fmt.Sprintf("sent back from review round %d; %s", rounds, rnd)
+		case name == "review":
+			txt = map[string]string{"now": fmt.Sprintf("review round %d; needs %d passing, at most %d", rounds+1, s.ReviewRounds, s.MaxRounds), "todo": fmt.Sprintf("needs %d passing, at most %d", s.ReviewRounds, s.MaxRounds), "done": map[bool]string{true: rnd}[rounds > 0], "skipped": "skipped by your override"}[st]
+		case st == "now" && (name == "retro" || name == "CI"):
+			txt = map[string]string{"retro": "a retro reviewer is looking at why review keeps failing", "CI": why}[name]
+		case name == "merged" && st == "done" && att != nil && att.PR > 0:
+			txt = fmt.Sprintf("PR #%d", att.PR)
+		}
+		steps[i] = StepView{Name: name, State: st, Text: txt}
+	}
+	if ended {
+		steps = append(steps, map[bool]StepView{false: {Name: map[bool]string{true: "split", false: "dropped"}[t.Split != nil], State: "ended", Text: "ended without merging"}, true: {Name: "closed", State: "ended", Text: "ended without merging: its PR was closed"}}[t.Closed != nil])
+	}
+	return steps
 }
 
 func taskWhy(t flow.Task, a *flow.Attempt, unmet []string, started bool, stage string, r flow.Row[flow.In]) string {
