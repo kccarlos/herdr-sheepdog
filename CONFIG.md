@@ -544,7 +544,7 @@ before a line is written.
 
 ## Factory settings
 
-These factory settings live in each project's `state.json`, not in the config file. A paired browser session can propose changing any number or choice setting for a project (`POST /api/factory/projects/{id}/settings`), opening a gated `rule` ask with a read-back (`Save` / `Keep current`) that takes effect on the next pass once you confirm `Save` (`max_running` can also be set at `sheepdog factory start --max-running N`). They match the fields, defaults, and ranges of `flow.Settings` (`internal/factory/flow/settings.go`). A task's plan must carry `estimate_lines`.
+These factory settings live in each project's `state.json`, not in the config file. A paired browser session can propose changing any setting — numbers, choices, or `models.<role>` (`coordinator`, `worker`, `reviewer`, `retro`, `plan_reviewer`) — for a project (`POST /api/factory/projects/{id}/settings`), opening a gated `rule` ask with a read-back (`Save` / `Keep current`) that takes effect on the next pass once you confirm `Save` (`max_running` can also be set at `sheepdog factory start --max-running N`). They match the fields, defaults, and ranges of `flow.Settings` (`internal/factory/flow/settings.go`). A task's plan must carry `estimate_lines`.
 
 | Setting | Default | Range | Meaning |
 |---|---|---|---|

@@ -137,18 +137,20 @@ func DefaultSettings() Settings {
 	}
 }
 
-// SettingRow is one setting in the settings view (design.md 10.1, plan.md 14.1).
+// SettingRow is one setting in the settings view (design.md 10.1, plan.md 14.1, 14.3).
 type SettingRow struct {
-	Name    string   `json:"name"`
-	Label   string   `json:"label"`
-	Value   string   `json:"value"`
-	Default string   `json:"default"`
-	Min     int      `json:"min"`
-	Max     int      `json:"max"`
-	Allowed []string `json:"allowed,omitempty"`
-	Problem string   `json:"problem,omitempty"`
-	Note    string   `json:"note,omitempty"`
-	Top     bool     `json:"top,omitempty"`
+	Name    string              `json:"name"`
+	Label   string              `json:"label"`
+	Value   string              `json:"value"`
+	Default string              `json:"default"`
+	Min     int                 `json:"min"`
+	Max     int                 `json:"max"`
+	Allowed []string            `json:"allowed,omitempty"`
+	CLIs    []string            `json:"clis,omitempty"`
+	Models  map[string][]string `json:"models,omitempty"`
+	Problem string              `json:"problem,omitempty"`
+	Note    string              `json:"note,omitempty"`
+	Top     bool                `json:"top,omitempty"`
 }
 
 type numSetting struct {
@@ -157,7 +159,12 @@ type numSetting struct {
 	low, high int
 }
 
-func settingLabel(name string) string { return strings.ReplaceAll(name, "_", " ") }
+func settingLabel(name string) string {
+	if role, ok := strings.CutPrefix(name, "models."); ok {
+		return strings.ReplaceAll(role, "_", " ") + " models"
+	}
+	return strings.ReplaceAll(name, "_", " ")
+}
 
 func (s *Settings) numSettings() []numSetting {
 	return []numSetting{
@@ -228,15 +235,27 @@ func (s Settings) Validate() error {
 
 // Rows returns every setting row in table order with its label, default, range and problem.
 func (s Settings) Rows() []SettingRow {
-	d := DefaultSettings()
+	d, dm := DefaultSettings(), DefaultModels(s)
 	dn, sn := d.numSettings(), s.numSettings()
-	rows := make([]SettingRow, len(sn), len(sn)+3)
+	var rows []SettingRow
+	for _, role := range []string{RoleCoordinator, RoleWorker, RoleReviewer, RoleRetro, RolePlanReviewer} {
+		name, lbl, def := "models."+role, settingLabel("models."+role), FormatCandidates(dm[role])
+		val, prob := def, ""
+		if cands, ok := s.Models[role]; ok {
+			val = FormatCandidates(cands)
+			if err := ValidateCandidates("models", map[string][]Candidate{role: slices.Clone(cands)}); err != nil {
+				_, why, _ := strings.Cut(err.Error(), ": ")
+				prob = lbl + ": " + why
+			}
+		}
+		rows = append(rows, SettingRow{Name: name, Label: lbl, Value: val, Default: def, Problem: prob, Top: true})
+	}
 	for i, r := range sn {
 		lbl, prob := settingLabel(r.name), ""
 		if *r.field < r.low || *r.field > r.high {
 			prob = fmt.Sprintf("%s %d: allowed %d–%d", lbl, *r.field, r.low, r.high)
 		}
-		rows[i] = SettingRow{Name: r.name, Label: lbl, Value: strconv.Itoa(*r.field), Default: strconv.Itoa(*dn[i].field), Min: r.low, Max: r.high, Problem: prob, Top: r.name == "max_running"}
+		rows = append(rows, SettingRow{Name: r.name, Label: lbl, Value: strconv.Itoa(*r.field), Default: strconv.Itoa(*dn[i].field), Min: r.low, Max: r.high, Problem: prob, Top: r.name == "max_running"})
 	}
 	srProb := map[bool]string{true: fmt.Sprintf("second reviewer %q: allowed opus or codex", s.SecondReviewer)}[s.SecondReviewer != "opus" && s.SecondReviewer != "codex"]
 	srNote := map[bool]string{true: "not used while reviewer models are set"}[len(s.Models[RoleReviewer]) > 0]
@@ -257,10 +276,25 @@ func (s Settings) With(name, value string) (Settings, error) {
 	if idx < 0 {
 		return Settings{}, fmt.Errorf("unknown setting %q", name)
 	}
+	s.Models = maps.Clone(s.Models)
+	if role, ok := strings.CutPrefix(name, "models."); ok {
+		delete(s.Models, role)
+		if cands, err := ParseCandidates(value); value != "" && err != nil {
+			return Settings{}, err
+		} else if value != "" && FormatCandidates(cands) != before[idx].Default {
+			if s.Models == nil {
+				s.Models = map[string][]Candidate{}
+			}
+			s.Models[role] = cands
+		}
+		if len(s.Models) == 0 {
+			s.Models = nil
+		}
+		return s, nil
+	}
 	if value == "" {
 		value = before[idx].Default
 	}
-	s.Models = maps.Clone(s.Models)
 	switch name {
 	case "second_reviewer":
 		s.SecondReviewer = value
@@ -273,7 +307,8 @@ func (s Settings) With(name, value string) (Settings, error) {
 		if err != nil {
 			return Settings{}, fmt.Errorf("%s %q: allowed %d–%d", before[idx].Label, value, before[idx].Min, before[idx].Max)
 		}
-		*s.numSettings()[idx].field = n
+		ns := s.numSettings()
+		*ns[slices.IndexFunc(ns, func(r numSetting) bool { return r.name == name })].field = n
 	}
 	after := s.Rows()
 	if after[idx].Problem != "" {

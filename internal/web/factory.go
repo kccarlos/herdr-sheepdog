@@ -215,5 +215,9 @@ func writeFactoryRefusal(w http.ResponseWriter, err error) {
 	if status == 0 {
 		status = http.StatusBadRequest
 	}
-	writeJSON(w, status, map[string]string{"code": ref.Code, "error": ref.Error()})
+	body := map[string]string{"code": ref.Code, "error": ref.Why}
+	if ref.Fix != "" {
+		body["fix"] = ref.Fix
+	}
+	writeJSON(w, status, body)
 }

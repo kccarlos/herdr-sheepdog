@@ -1,6 +1,7 @@
 package flow
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -93,9 +94,48 @@ func DefaultModels(s Settings) map[string][]Candidate {
 	return m
 }
 
-// ValidateCandidates trims and checks a role->candidates map (settings.models
-// or task.request): known roles (no coordinator on task.request), known CLIs
-// (claude, codex, agy), non-empty model, and effort (low, medium, high).
+func checkCandidate(c Candidate) error {
+	switch {
+	case !slices.Contains(knownCLIs, c.CLI):
+		return fmt.Errorf("unknown cli %q (allowed %s)", c.CLI, strings.Join(knownCLIs, ", "))
+	case c.Model == "" || strings.Contains(c.Model, ","):
+		return errors.New(map[bool]string{true: "a model name cannot hold a comma", false: "model is required"}[strings.Contains(c.Model, ",")])
+	case c.Effort != "low" && c.Effort != "medium" && c.Effort != "high":
+		return fmt.Errorf("unknown effort %q (allowed low, medium, high)", c.Effort)
+	}
+	return nil
+}
+
+// FormatCandidates formats an ordered candidate list as "<cli>/<model>/<effort>, …".
+func FormatCandidates(cands []Candidate) string {
+	parts := make([]string, len(cands))
+	for i, c := range cands {
+		parts[i] = c.CLI + "/" + c.Model + "/" + c.Effort
+	}
+	return strings.Join(parts, ", ")
+}
+
+// ParseCandidates parses comma-separated "<cli>/<model>/<effort>" candidates in order.
+func ParseCandidates(raw string) ([]Candidate, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, errors.New("must list at least one candidate")
+	}
+	var out []Candidate
+	for _, p := range strings.Split(raw, ",") {
+		p = strings.TrimSpace(p)
+		if i, j := strings.IndexByte(p, '/'), strings.LastIndexByte(p, '/'); p == "" || i < 0 || i == j {
+			return nil, errors.New(map[bool]string{true: "a model name cannot hold a comma", false: "each entry must be cli/model/effort"}[strings.Contains(raw, ",")])
+		} else if c := (Candidate{CLI: strings.TrimSpace(p[:i]), Model: strings.TrimSpace(p[i+1 : j]), Effort: strings.TrimSpace(p[j+1:])}); checkCandidate(c) != nil {
+			return nil, checkCandidate(c)
+		} else {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
+// ValidateCandidates trims and checks a role->candidates map (settings.models or task.request):
+// known roles, known CLIs, non-empty comma-free model, and effort (low, medium, high).
 func ValidateCandidates(field string, m map[string][]Candidate) error {
 	for _, role := range slices.Sorted(maps.Keys(m)) {
 		if _, ok := rolePerm[role]; !ok {
@@ -108,12 +148,8 @@ func ValidateCandidates(field string, m map[string][]Candidate) error {
 		for i := range m[role] {
 			c := &m[role][i]
 			c.CLI, c.Model, c.Effort = strings.TrimSpace(c.CLI), strings.TrimSpace(c.Model), strings.TrimSpace(c.Effort)
-			if !slices.Contains(knownCLIs, c.CLI) {
-				return fmt.Errorf("%s.%s[%d]: unknown cli %q (allowed %s)", field, role, i, c.CLI, strings.Join(knownCLIs, ", "))
-			} else if c.Model == "" {
-				return fmt.Errorf("%s.%s[%d]: model is required", field, role, i)
-			} else if c.Effort != "low" && c.Effort != "medium" && c.Effort != "high" {
-				return fmt.Errorf("%s.%s[%d]: unknown effort %q (allowed low, medium, high)", field, role, i, c.Effort)
+			if err := checkCandidate(*c); err != nil {
+				return fmt.Errorf("%s.%s[%d]: %w", field, role, i, err)
 			}
 		}
 	}

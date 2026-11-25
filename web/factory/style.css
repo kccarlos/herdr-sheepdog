@@ -89,6 +89,12 @@ details.done summary, details.all-settings summary, .pair-box summary { display:
 .set-in.num { width: 88px; flex: none; font-variant-numeric: tabular-nums; }
 .srow { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--line); min-width: 0; }
 .sname { flex: 999 1 160px; min-width: 0; overflow-wrap: anywhere; }
+.srow-models, .fix-blk { flex: 999 1 220px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.cand-list, .cand-ed { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 12px; min-width: 0; } .cand-ed { flex-direction: column; gap: 10px; }
+.cand { display: flex; flex-direction: column; gap: 8px; padding: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: var(--radius-sm); min-width: 0; }
+.cand-fields { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 8px 10px; min-width: 0; } .cand-field { flex: 1 1 110px; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.cand-field.wide { flex: 3 1 180px; } .cand-field .set-in { width: 100%; } .ask-opt.sm { padding: 4px 12px; font-size: 13px; } .mono { font-family: var(--font-mono); }
+.cmd { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; padding: 6px 6px 6px 10px; background: var(--code); border-radius: var(--radius-sm); } .cmd code { flex: 1 1 160px; min-width: 0; color: var(--fg); font-size: 13px; overflow-wrap: anywhere; }
 .goal-title { font-size: 15px; font-weight: 500; color: var(--fg); margin: 0; overflow-wrap: anywhere; }
 details.goal-full summary { min-height: 44px; display: flex; align-items: center; font-size: 13px; color: var(--primary-text); cursor: pointer; }
 .md-body { font-size: 13px; line-height: 1.5; color: var(--fg); background: var(--code); border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 12px; overflow-wrap: anywhere; }

@@ -63,11 +63,11 @@ export function createAskFlow(deps) {
     let { r, body } = await post(url, payload);
     if (r.ok) return { ok: true, ...body };
     const authNeeded = r.status === 401 || (r.status === 403 && (body.code === 'proof_required' || body.error === 'proof_required'));
-    if (!authNeeded) return { ok: false, status: r.status, code: body.code, message: body.error || `Could not complete request (${r.status}).` };
+    if (!authNeeded) return { ok: false, status: r.status, code: body.code, fix: body.fix || '', message: body.error || `Could not complete request (${r.status}).` };
     const auth = await reauth();
     if (!auth.ok) return { ok: false, needsPairing: true, message: auth.message || PAIR_HINT };
     ({ r, body } = await post(url, payload));
-    return r.ok ? { ok: true, ...body } : { ok: false, status: r.status, code: body.code, message: body.error || `Could not complete request (${r.status}).` };
+    return r.ok ? { ok: true, ...body } : { ok: false, status: r.status, code: body.code, fix: body.fix || '', message: body.error || `Could not complete request (${r.status}).` };
   };
   return {
     reauth, send,
