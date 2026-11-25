@@ -25,7 +25,7 @@ sheepdog pair
   **Sheepdog.app** in the Mac menu bar and choose **Pair browser…** for a
   single-use 5-minute `XXXX-XXXX` code, then enter it on `/factory`
   ([desktop.md](desktop.md#sheepdogapp),
-  [factory.md](factory.md#answer-asks-and-overrides)). Short browser codes are
+  [factory.md](factory.md#when-it-needs-you)). Short browser codes are
   accepted only on loopback. On Linux (or without `Sheepdog.app`), answer
   factory asks from the paired iPhone or iPad app or by live voice.
 

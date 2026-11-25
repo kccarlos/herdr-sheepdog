@@ -1,0 +1,14 @@
+{"seq":1,"at":"2026-11-22T15:00:00Z","project":"recipes","by":"owner","rule":"J1","decision":"started","why":"Add ingredient scaling (0.5x, 2x, 3x) to the recipe view"}
+{"seq":2,"at":"2026-11-22T15:03:00Z","project":"recipes","by":"coordinator","rule":"plan","decision":"planned 1 task","why":"T1: Ingredient scaling controls and unit formatting"}
+{"seq":3,"at":"2026-11-22T15:04:00Z","project":"recipes","by":"engine","task":"T1","rule":"N11","asked":["new_attempt"],"decision":"started attempt 1","why":"branch factory/T1-1"}
+{"seq":4,"at":"2026-11-22T15:05:00Z","project":"recipes","by":"engine","task":"T1","rule":"N23","asked":["start_worker"],"decision":"started worker","why":"claude sonnet"}
+{"seq":5,"at":"2026-11-22T15:14:00Z","project":"recipes","by":"engine","task":"T1","rule":"N23","decision":"","why":"the worker is working"}
+{"seq":6,"at":"2026-11-22T15:24:00Z","project":"recipes","by":"worker","task":"T1","rule":"ready","decision":"reported ready","why":"at 44556677889900aabbccddeeff00112233445566 (PR #4)"}
+{"seq":7,"at":"2026-11-22T15:25:00Z","project":"recipes","by":"engine","task":"T1","rule":"N29","asked":["start_reviewer@1@44556677889900aabbccddeeff00112233445566"],"decision":"started review round 1","why":"claude opus"}
+{"seq":8,"at":"2026-11-22T15:36:00Z","project":"recipes","by":"reviewer","task":"T1","rule":"review","decision":"round 1: changes (1 major)","why":"mixed fractions lose rounding precision at 0.5x"}
+{"seq":9,"at":"2026-11-22T15:37:00Z","project":"recipes","by":"engine","task":"T1","rule":"N22","asked":["tell_worker_findings@1"],"decision":"sent back to worker","why":"round 1 findings delivered for PR #4"}
+{"seq":10,"at":"2026-11-22T15:49:00Z","project":"recipes","by":"worker","task":"T1","rule":"ready","decision":"reported ready","why":"at 6677889900aabbccddeeff001122334455667788 (PR #4)"}
+{"seq":11,"at":"2026-11-22T15:58:00Z","project":"recipes","by":"reviewer","task":"T1","rule":"review","decision":"round 2: pass","why":"claude opus — delta review clean"}
+{"seq":12,"at":"2026-11-22T16:10:00Z","project":"recipes","by":"reviewer","task":"T1","rule":"review","decision":"round 3: pass","why":"codex gpt-6.2-sol — second review clean"}
+{"seq":13,"at":"2026-11-22T16:14:00Z","project":"recipes","by":"engine","task":"T1","rule":"N42","asked":["record_accept@6677889900aabbccddeeff001122334455667788","merge@6677889900aabbccddeeff001122334455667788"],"decision":"merged PR #4","why":"passed, green and mergeable at 6677889900aabbccddeeff001122334455667788"}
+{"seq":14,"at":"2026-11-22T16:15:00Z","project":"recipes","by":"engine","task":"T1","rule":"N2","asked":["mark_done"],"decision":"marked done","why":"PR #4 merged at 7a8b9c0d1e2f3a4b5c6d7e8f9a0b1c2d3e4f5a6b"}

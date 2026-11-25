@@ -1,0 +1,24 @@
+{"seq":1,"at":"2026-11-23T09:00:00Z","project":"notes","by":"owner","rule":"J1","decision":"started","why":"A notes page with search"}
+{"seq":4,"at":"2026-11-23T09:06:00Z","project":"notes","by":"coordinator","rule":"plan","decision":"planned 20 tasks","why":"5 layers from schema and API to search, tags and verification"}
+{"seq":12,"at":"2026-11-23T09:42:00Z","project":"notes","by":"engine","task":"T1","rule":"N2","asked":["mark_done"],"decision":"marked done","why":"PR #11 merged at a1b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e"}
+{"seq":18,"at":"2026-11-23T10:15:00Z","project":"notes","by":"engine","task":"T2","rule":"N2","asked":["mark_done"],"decision":"marked done","why":"PR #12 merged at b2c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f"}
+{"seq":24,"at":"2026-11-23T10:34:00Z","project":"notes","by":"engine","task":"T3","rule":"N2","asked":["mark_done"],"decision":"marked done","why":"PR #13 merged at c3d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a"}
+{"seq":30,"at":"2026-11-23T11:20:00Z","project":"notes","by":"engine","task":"T4","rule":"N2","asked":["mark_done"],"decision":"marked done","why":"PR #14 merged at d4e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b"}
+{"seq":34,"at":"2026-11-23T11:48:00Z","project":"notes","by":"engine","task":"T7","rule":"N2","asked":["mark_done"],"decision":"marked done","why":"PR #15 merged at e5f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c"}
+{"seq":38,"at":"2026-11-23T12:10:00Z","project":"notes","by":"engine","task":"T8","rule":"N2","asked":["mark_done"],"decision":"marked done","why":"PR #16 merged at f60718293a4b5c6d7e8f9a0b1c2d3e4f5a6b7c8d"}
+{"seq":40,"at":"2026-11-23T12:22:00Z","project":"notes","by":"engine","task":"T5","rule":"N11","asked":["new_attempt"],"decision":"started attempt 1","why":"branch factory/T5-1"}
+{"seq":41,"at":"2026-11-23T12:23:00Z","project":"notes","by":"engine","task":"T5","rule":"N23","asked":["start_worker"],"decision":"started worker","why":"claude sonnet"}
+{"seq":42,"at":"2026-11-23T12:35:00Z","project":"notes","by":"engine","task":"T5","rule":"N23","decision":"","why":"the worker is working"}
+{"seq":44,"at":"2026-11-23T12:54:00Z","project":"notes","by":"worker","task":"T5","rule":"ready","decision":"reported ready","why":"at 15a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4 (PR #18)"}
+{"seq":46,"at":"2026-11-23T12:55:00Z","project":"notes","by":"engine","task":"T5","rule":"N29","asked":["start_reviewer@1@15a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4"],"decision":"started review round 1","why":"claude opus"}
+{"seq":48,"at":"2026-11-23T13:12:00Z","project":"notes","by":"reviewer","task":"T5","rule":"review","decision":"round 1: pass","why":"claude opus — autosave debounce and offline retry verified"}
+{"seq":49,"at":"2026-11-23T13:13:00Z","project":"notes","by":"engine","task":"T5","rule":"N29","asked":["start_reviewer@2@15a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4"],"decision":"started review round 2","why":"claude opus (fresh session) — second review at 15a6b7c8d9e0f1a2b3c4d5e6f7a8b9c0d1e2f3a4"}
+{"seq":51,"at":"2026-11-23T13:20:00Z","project":"notes","by":"engine","task":"T6","rule":"N23","asked":["start_worker"],"decision":"started worker","why":"claude sonnet"}
+{"seq":52,"at":"2026-11-23T13:34:00Z","project":"notes","by":"coordinator","task":"T9","rule":"N4","decision":"closed task","why":"PR #17 was closed without merging"}
+{"seq":53,"at":"2026-11-23T13:45:00Z","project":"notes","by":"reviewer","task":"T10","rule":"review","decision":"round 1: changes (2 majors)","why":"debounce resets on blur and empty query clears active tag filter"}
+{"seq":54,"at":"2026-11-23T13:46:00Z","project":"notes","by":"engine","task":"T10","rule":"N22","asked":["tell_worker_findings@1"],"decision":"sent back to worker","why":"round 1 findings delivered for PR #19"}
+{"seq":55,"at":"2026-11-23T14:05:00Z","project":"notes","by":"coordinator","task":"T11","rule":"N3","decision":"parked task","why":"waiting until delete API contract settles in T6"}
+{"seq":56,"at":"2026-11-23T14:18:00Z","project":"notes","by":"engine","task":"T13","rule":"N36","decision":"waiting on CI","why":"PR #20 passed 2 review rounds; checks pending"}
+{"seq":57,"at":"2026-11-23T14:25:00Z","project":"notes","by":"coordinator","task":"T19","rule":"drop","decision":"dropped task","why":"deferred to the next milestone"}
+{"seq":58,"at":"2026-11-23T14:40:00Z","project":"notes","by":"engine","task":"T15","rule":"A2","asked":["notify_owner"],"decision":"asked you: ask-notes-15","why":"Keep archived notes in search results by default?"}
+{"seq":59,"at":"2026-11-23T14:45:00Z","project":"notes","by":"engine","task":"T14","rule":"N10","decision":"","why":"no slot is free"}
