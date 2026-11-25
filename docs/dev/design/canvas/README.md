@@ -39,3 +39,8 @@ is re-exported after every change.
   360 px copies), `FactoryWebNewProject` and `FactoryWebTaskLife` replace
   them. `FactoryWebLoading` stays, and `FactoryWebOffline` was redrawn on
   the Part 4b page.
+- `FactoryWebOverview` (with its dark and 360 px copies) was added to
+  Part 4b on 2026-11-24 for PR 14.10: the project overview that `/factory`
+  opens with two or more projects, and the "needs you" button in the
+  header. Its strings are the last wording section of
+  [slice14-wording.md](slice14-wording.md).
