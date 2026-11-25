@@ -61,7 +61,10 @@ func TestPlanReviewReportValidationAndRoles(t *testing.T) {
 		)
 	})
 	validPass := planReviewJSON(t, map[string]any{"verdict": flow.VerdictPass, "code": code, "findings": ""})
-	for _, tc := range []struct{ name, tok, verb, wantRole, wantOwner string; body json.RawMessage }{
+	for _, tc := range []struct {
+		name, tok, verb, wantRole, wantOwner string
+		body                                 json.RawMessage
+	}{
 		{"worker plan-review", "tok-w", "plan-review", flow.RoleWorker, flow.RolePlanReviewer, validPass},
 		{"reviewer plan-review", "tok-r", "plan-review", flow.RoleReviewer, flow.RolePlanReviewer, validPass},
 		{"retro plan-review", "tok-ret", "plan-review", flow.RoleRetro, flow.RolePlanReviewer, validPass},
@@ -80,7 +83,10 @@ func TestPlanReviewReportValidationAndRoles(t *testing.T) {
 	}
 	seqBefore := w.state().Seq
 	over64K := "delete: T1 " + strings.Repeat("a", 64*1024)
-	for _, tc := range []struct{ name string; body json.RawMessage }{
+	for _, tc := range []struct {
+		name string
+		body json.RawMessage
+	}{
 		{"wrong code", planReviewJSON(t, map[string]any{"verdict": flow.VerdictPass, "code": "wrongcode0", "findings": ""})},
 		{"task outside review", planReviewJSON(t, map[string]any{"verdict": flow.VerdictChanges, "code": code, "findings": "delete: T999 outside review\n"})},
 		{"unknown kind", planReviewJSON(t, map[string]any{"verdict": flow.VerdictChanges, "code": code, "findings": "rewrite: T1 unknown kind\n"})},

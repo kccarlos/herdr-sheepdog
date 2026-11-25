@@ -182,8 +182,8 @@ func TestJ15PlanReviewProjectRows(t *testing.T) {
 			Settings: on, Now: now, PlanRun: Run{State: RunWorking},
 		}},
 		{"report accepted changes still has terminal", "J15", []string{AskStopPlanReviewer}, ProjectIn{
-			Project:  Project{Started: true, Run: idle, PlanReviews: []PlanReview{{N: 1, Tasks: []string{"T1"}, Verdict: VerdictChanges, At: now, Findings: []PlanFinding{{Kind: "delete", Task: "T1", Why: "opt"}}, Run: &ReviewRun{Kind: RoundPlan, Round: 1, RunID: "plan-1"}}}},
-			Tasks:    unrev, Settings: on, Now: now, PlanRun: Run{State: RunIdle},
+			Project: Project{Started: true, Run: idle, PlanReviews: []PlanReview{{N: 1, Tasks: []string{"T1"}, Verdict: VerdictChanges, At: now, Findings: []PlanFinding{{Kind: "delete", Task: "T1", Why: "opt"}}, Run: &ReviewRun{Kind: RoundPlan, Round: 1, RunID: "plan-1"}}}},
+			Tasks:   unrev, Settings: on, Now: now, PlanRun: Run{State: RunIdle},
 		}},
 		{"report accepted beats J3 stopping alert", "J15", []string{AskStopPlanReviewer}, ProjectIn{
 			Project:  Project{Started: true, Alerts: disk, PlanReviews: []PlanReview{{N: 1, Tasks: []string{"T1"}, Verdict: VerdictPass, At: now, Accepted: now, Run: &ReviewRun{Kind: RoundPlan, Round: 1, RunID: "plan-1"}}}},
@@ -191,8 +191,8 @@ func TestJ15PlanReviewProjectRows(t *testing.T) {
 			Settings: on, Now: now, PlanRun: Run{State: RunWorking},
 		}},
 		{"report accepted with run id cleared stays J14", "J14", nil, ProjectIn{
-			Project:  Project{Started: true, Run: idle, PlanReviews: []PlanReview{{N: 1, Tasks: []string{"T1"}, Verdict: VerdictChanges, At: now, Findings: []PlanFinding{{Kind: "delete", Task: "T1", Why: "opt"}}, Run: &ReviewRun{Kind: RoundPlan, Round: 1}}}},
-			Tasks:    unrev, Settings: on, Now: now,
+			Project: Project{Started: true, Run: idle, PlanReviews: []PlanReview{{N: 1, Tasks: []string{"T1"}, Verdict: VerdictChanges, At: now, Findings: []PlanFinding{{Kind: "delete", Task: "T1", Why: "opt"}}, Run: &ReviewRun{Kind: RoundPlan, Round: 1}}}},
+			Tasks:   unrev, Settings: on, Now: now,
 		}},
 	} {
 		if r, d := FirstMatch(ProjectRows, c.in); r.ID != c.wantRow || !slices.Equal(d.Asked, c.wantAsk) {

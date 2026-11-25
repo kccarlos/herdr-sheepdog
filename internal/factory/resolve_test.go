@@ -192,6 +192,7 @@ func TestLaunchWaitsBeforeWorktreeAndUsesProbedModels(t *testing.T) {
 		flow.RoleCoordinator: {{CLI: "claude", Model: "coordinator-model", Effort: "high"}},
 		flow.RoleWorker:      {{CLI: "claude", Model: "worker-model", Effort: "low"}},
 	}
+	st.Settings.PlanReviewRounds = 0
 	st.Project.RunTokenHash = tokenHash("tok")
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)

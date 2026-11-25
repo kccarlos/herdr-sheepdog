@@ -78,6 +78,7 @@ func newRestartWorld(t *testing.T, goal string) *restartWorld {
 		t.Fatal(err)
 	}
 	w.id = w.eng.projectDirs()[0].Name()
+	w.edit(func(s *flow.State) { s.Settings.PlanReviewRounds = 0 })
 	return w
 }
 

@@ -60,6 +60,7 @@ func TestWorkerKilledMidTurnResumedAndTaskFinishes(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()
+	noPlanReview(t, paths, id)
 	eng.passProject(ctx, id, false) // J7 coordinator
 	stInit, _ := LoadState(paths.State(id))
 	srv.SetStatus(stInit.Project.RunID, &hc.Status{App: "claude-code", State: "working"})
@@ -191,6 +192,7 @@ func TestResumeFailedFallsBackToHandoffNote(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()
+	noPlanReview(t, paths, id)
 	eng.passProject(ctx, id, false) // coordinator
 	if err := eng.Report(runs[0].Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: handoff","brief":"Write widget.go.",`+testPlanJSON+`}]}`)); err != nil {
 		t.Fatal(err)
@@ -264,6 +266,7 @@ func TestWorkerRestartsBackoffSlotsAndCoordinatorWake(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()
+	noPlanReview(t, paths, id)
 	eng.passProject(ctx, id, false)
 	stCoord, _ := LoadState(paths.State(id))
 	srv.SetStatus(stCoord.Project.RunID, &hc.Status{App: "claude-code", State: "working"})
@@ -445,6 +448,7 @@ func TestParkUnparkAndAmendRequestRestartUncounted(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()
+	noPlanReview(t, paths, id)
 	eng.passProject(ctx, id, false) // coordinator
 	coordTok := runs[0].Env["SHEEPDOG_RUN_TOKEN"]
 	if err := eng.Report(coordTok, "plan apply", []byte(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: park","brief":"Parkable.",`+testPlanJSON+`}]}`)); err != nil {
@@ -948,6 +952,7 @@ func TestSessionIDSavedBeforeLaunchAndKeptAcrossCrash(t *testing.T) {
 			preCommitState, _ = os.ReadFile(paths.State(id))
 		}
 	}
+	noPlanReview(t, paths, id)
 	eng.passProject(ctx, id, false) // coordinator
 	if err := eng.Report(runs[0].Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: crash",`+testPlanJSON+`}]}`)); err != nil {
 		t.Fatal(err)
@@ -993,6 +998,7 @@ func TestResumableFalseWhenLaunchFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()
+	noPlanReview(t, paths, id)
 	eng.passProject(ctx, id, false) // coordinator
 	if err := eng.Report(runs[0].Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: launch",`+testPlanJSON+`}]}`)); err != nil {
 		t.Fatal(err)
