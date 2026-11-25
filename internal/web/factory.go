@@ -278,7 +278,11 @@ func writeFactoryRefusal(w http.ResponseWriter, err error) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	writeJSON(w, refusalStatus(ref.Code), map[string]string{"code": ref.Code, "error": ref.Error()})
+	body := map[string]string{"code": ref.Code, "error": ref.Why}
+	if ref.Fix != "" {
+		body["fix"] = ref.Fix
+	}
+	writeJSON(w, refusalStatus(ref.Code), body)
 }
 
 // checksOf is the page's form of the start checks (the setup wizard's Check).

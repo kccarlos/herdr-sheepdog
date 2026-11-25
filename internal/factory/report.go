@@ -29,7 +29,7 @@ import (
 
 // Refusal is a report or command the acceptance table turned down
 // (design.md 7.2): a code and one plain sentence. Nothing changed.
-type Refusal struct{ Code, Why string }
+type Refusal struct{ Code, Why, Fix string }
 
 func (r *Refusal) Error() string { return r.Code + ": " + r.Why }
 
@@ -833,9 +833,9 @@ func (e *Engine) acceptVerdictLocked(ctx context.Context, id string, s *flow.Sta
 	})
 }
 
-func (e *Engine) refuse(project, code, why string) error {
+func (e *Engine) refuse(project, code, why string, fix ...string) error {
 	e.logEvent("factory.refused", map[string]string{"project": project, "code": code, "why": why})
-	return &Refusal{Code: code, Why: why}
+	return &Refusal{Code: code, Why: why, Fix: append(fix, "")[0]}
 }
 
 // tokenHash is all state.json keeps of a run token: its SHA-256, hex.

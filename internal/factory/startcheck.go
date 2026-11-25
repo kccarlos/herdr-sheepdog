@@ -153,9 +153,9 @@ func checkStartCLIs(ctx context.Context, o DoctorOptions, r startRepo, inHC bool
 		}
 		switch cli {
 		case "claude":
-			probed[cli] = checkStartCLI(ctx, o, "claude", "Claude Code", "run: claude auth login", claudeLoggedIn, "claude", "auth", "status", "--json")
+			probed[cli] = checkStartCLI(ctx, o, "claude", claudeLoggedIn, "claude", "auth", "status", "--json")
 		case world.CodexCLI:
-			probed[cli] = checkStartCLI(ctx, o, "codex", "Codex CLI", "run: codex login", codexLoggedIn, "codex", "login", "status")
+			probed[cli] = checkStartCLI(ctx, o, "codex", codexLoggedIn, "codex", "login", "status")
 		case world.AgyCLI:
 			probed[cli] = checkStartAgy(ctx, o)
 		}
@@ -202,33 +202,37 @@ func checkStartCLIs(ctx context.Context, o DoctorOptions, r startRepo, inHC bool
 	return out
 }
 
+func cliAuthFix(cli string, installed bool) string {
+	p := map[string][2]string{"claude": {"Claude Code", "run: claude auth login"}, world.CodexCLI: {"Codex CLI", "run: codex login"}, world.AgyCLI: {"Antigravity CLI (agy)", "run agy without arguments and sign in"}}[cli]
+	return map[bool]string{true: p[1], false: "install " + p[0] + ", then " + p[1]}[installed]
+}
+
 func checkStartAgy(ctx context.Context, o DoctorOptions) onboard.Result {
-	const name, signInFix = "start agy", "run agy without arguments and sign in"
+	const name = "start agy"
 	c := o.run(ctx, o.TempDir, world.AgyCLI, "models")
 	switch {
 	case c.Exit == 127 || errors.Is(c.Err, exec.ErrNotFound):
-		return resFail(name, "agy is not installed", "install Antigravity CLI (agy), then "+signInFix)
+		return resFail(name, "agy is not installed", cliAuthFix(world.AgyCLI, false))
 	case cmdOK(c) && len(parseAgyModels(c.Stdout)) > 0:
 		return resOK(name, "agy is signed in")
 	case agySignedOut(c):
-		return resFail(name, "agy is not signed in", signInFix)
+		return resFail(name, "agy is not signed in", cliAuthFix(world.AgyCLI, true))
 	default:
 		return resWarn(name, "agy sign-in unknown ("+agyUnreadableReason(c)+")", "run agy models in a terminal and check herdr-core")
 	}
 }
 
-func checkStartCLI(ctx context.Context, o DoctorOptions, cli, pkg, loginFix string,
-	ok func(CommandOutput) bool, argv ...string) onboard.Result {
+func checkStartCLI(ctx context.Context, o DoctorOptions, cli string, ok func(CommandOutput) bool, argv ...string) onboard.Result {
 	name, env := "start "+cli, map[bool][]string{true: {"DISABLE_AUTOUPDATER=1"}}[cli == "claude"]
 	cCtx, cancel := context.WithTimeout(ctx, o.AuthTimeout)
 	c := o.RunCommand(cCtx, o.TempDir, env, argv...)
 	cancel()
 	if c.Exit == 127 || errors.Is(c.Err, exec.ErrNotFound) {
-		return resFail(name, cli+" is not installed", "install "+pkg+", then "+loginFix)
+		return resFail(name, cli+" is not installed", cliAuthFix(cli, false))
 	} else if why, unk := authProbeUnknown(c); unk {
 		return resWarn(name, cli+" sign-in "+why, "run: "+strings.Join(argv, " "))
 	} else if !ok(c) {
-		return resFail(name, cli+" is not signed in", loginFix)
+		return resFail(name, cli+" is not signed in", cliAuthFix(cli, true))
 	}
 	return resOK(name, cli+" is signed in")
 }
