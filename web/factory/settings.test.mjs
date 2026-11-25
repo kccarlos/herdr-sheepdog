@@ -819,3 +819,14 @@ test('Keep current notice on a multi-candidate models row joins candidates with 
   rev().querySelectorAll('button').find((b) => b.textContent.trim() === 'Keep current').click(); await page.flush();
   assert.equal(rev().querySelector('[role="status"]')?.textContent.trim(), 'Kept at claude/opus/medium then claude/sonnet/medium. Nothing changed.');
 });
+
+test('style.css does not let .sname inside column-flex .srow-models inherit a pixel flex-basis height', () => {
+  const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+  const modelsColFlex = /\.srow-models[^{]*\{[^}]*flex-direction:\s*column/.test(css);
+  const unscopedSnamePx = /(?:^|[\n},])\s*\.sname\s*\{[^}]*flex(?:-basis)?:\s*[^;]*\d+px/.test(css);
+  const modelsSnameOverride = /\.srow-models(?:\s*>\s*|\s+)\.sname(?:\s*,[^{]*)?\s*\{[^}]*flex(?:-basis)?:\s*(?:none|auto|0(?:\s+\d+)?\s+auto|0\s*[;}])/.test(css);
+  assert.ok(
+    !modelsColFlex || !unscopedSnamePx || modelsSnameOverride,
+    '.sname inside column-flex .srow-models must not inherit a pixel flex-basis height (scope pixel flex-basis to .srow-top > .sname or reset .srow-models .sname { flex: none })',
+  );
+});

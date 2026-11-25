@@ -59,15 +59,16 @@ export function createAskFlow(deps) {
     const r = await deps.fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
     return { r, body: await r.json().catch(() => ({})) };
   };
+  const fail = (r, b) => ({ ok: false, status: r.status, code: b.code, name: b.name || '', fix: b.fix || '', results: b.results, message: b.error || b.message || `Could not complete request (${r.status}).` });
   const send = async (url, payload) => {
     let { r, body } = await post(url, payload);
     if (r.ok) return { ok: true, ...body };
     const authNeeded = r.status === 401 || (r.status === 403 && (body.code === 'proof_required' || body.error === 'proof_required'));
-    if (!authNeeded) return { ok: false, status: r.status, code: body.code, fix: body.fix || '', message: body.error || `Could not complete request (${r.status}).` };
+    if (!authNeeded) return fail(r, body);
     const auth = await reauth();
     if (!auth.ok) return { ok: false, needsPairing: true, message: auth.message || PAIR_HINT };
     ({ r, body } = await post(url, payload));
-    return r.ok ? { ok: true, ...body } : { ok: false, status: r.status, code: body.code, fix: body.fix || '', message: body.error || `Could not complete request (${r.status}).` };
+    return r.ok ? { ok: true, ...body } : fail(r, body);
   };
   return {
     reauth, send,
