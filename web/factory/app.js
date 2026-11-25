@@ -90,19 +90,27 @@ async function poll() {
       Object.assign(logUI, { task: '', observations: false, hasObservations: false, error: '' });
       if (askUI.pending?.kind === 'project') clearPair();
     }
+    const routeTask = !sp && !npUI.open && want === p ? (task || '') : '';
     let graph = null, log = [], problem = '';
     if (p) {
       setP = get(`/api/factory/projects/${enc(p)}/settings`).then((b) => ({ rows: b.rows || [] }), (e) => ({ error: e.message || 'error', http: e.http, needsPairing: e.needsPairing, pairMessage: e.pairMessage }));
-      const logTask = task || logUI.task, logQs = `n=100${logTask ? `&task=${enc(logTask)}` : ''}${logUI.observations ? '&observations=1' : ''}`;
-      const logP = get(`/api/factory/projects/${enc(p)}/log?${logQs}`).then((b) => ({ lines: b.lines || [], hasObs: Boolean(b.has_observations) }), (e) => ({ error: e.message || 'error', http: e.http, needsPairing: e.needsPairing, pairMessage: e.pairMessage }));
+      const fetchLog = (lt) => {
+        const qs = `n=100${lt ? `&task=${enc(lt)}` : ''}${logUI.observations ? '&observations=1' : ''}`;
+        return get(`/api/factory/projects/${enc(p)}/log?${qs}`).then((b) => ({ lines: b.lines || [], hasObs: Boolean(b.has_observations) }), (e) => ({ error: e.message || 'error', http: e.http, needsPairing: e.needsPairing, pairMessage: e.pairMessage }));
+      };
+      const prevKnown = !data?.graph || data.p !== p || data.graph.tasks?.some((x) => x.ref === routeTask);
+      const initTask = (routeTask && prevKnown ? routeTask : '') || logUI.task;
+      const logP = fetchLog(initTask);
       try {
         let lr;
         [graph, lr] = await Promise.all([get(`/api/factory/projects/${enc(p)}/graph`), logP]);
+        const realTask = routeTask && graph?.tasks?.some((x) => x.ref === routeTask) ? routeTask : logUI.task;
+        if (realTask !== initTask) lr = await fetchLog(realTask);
         if (lr.lines) { log = lr.lines; logUI.hasObservations = lr.hasObs; logUI.error = ''; }
         else { logUI.error = lr.error; if (lr.needsPairing) Object.assign(askUI, { needsPairing: true, pairMessage: lr.pairMessage || '' }); }
       } catch (e) { if (!e.http) throw e; if (e.needsPairing) Object.assign(askUI, { needsPairing: true, pairMessage: e.pairMessage || '' }); problem = e.message; }
     }
-    next = { projects, asks, p, task, graph, log: log || [], problem };
+    next = { projects, asks, p, task: routeTask, graph, log, problem };
   } catch (e) {
     if (e.http) { if (e.needsPairing) Object.assign(askUI, { needsPairing: true, pairMessage: e.pairMessage || '' }); next = { projects: [], asks: [], p: '', task, graph: null, log: [], problem: e.message }; }
     else off = true;
@@ -418,7 +426,7 @@ $('board').addEventListener('keydown', (e) => {
 });
 const openModelCands = (r, raw) => parseModelCandidates(raw, r.clis[0]).map((c) => ({ ...c, cli: r.clis.includes(c.cli) ? c.cli : r.clis[0] }));
 $('board').addEventListener('click', (e) => {
-  if (e.target.closest('button[data-log-show]')) { logUI.observations = true; return poll(); }
+  if (e.target.closest('button[data-log-show]')) { logUI.observations = true; $('log-obs')?.focus({ preventScroll: true }); return poll(); }
   const vw = e.target.closest('button[data-view]');
   if (vw) { taskView = vw.dataset.view === 'graph' ? 'graph' : 'list'; try { globalThis.sessionStorage?.setItem('factory-view', taskView); } catch {} return render(); }
   if (e.target.closest('button[data-new-project]')) return openNewProject();

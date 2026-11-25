@@ -32,13 +32,13 @@ function dayHeading(d, today, yest) {
   return k === today ? `Today, ${label}` : k === yest ? `Yesterday, ${label}` : label;
 }
 
-function lineHTML(l, repoURL) {
+function lineHTML(l, repoURL, forTask) {
   const d = new Date(l.at), mark = MARKS[l.kind];
   const by = l.kind === 'yours' ? '' : (l.by === 'owner' ? 'you' : l.by);
   const why = l.by === 'owner' && l.decision === 'started' && l.why ? goalTitle(l.why, '') : l.why;
   const parts = [
     by && `<span class="muted">${esc(by)}</span>`,
-    l.task && `<code>${esc(l.task)}</code>`,
+    !forTask && l.task && `<code>${esc(l.task)}</code>`,
     l.decision && `<span class="b">${tidy(l.decision, repoURL)}</span>`,
     why && `<span class="muted">${tidy(why, repoURL)}</span>`,
   ].filter(Boolean).join(' ');
@@ -66,7 +66,7 @@ export function renderLogHTML(lines = [], ui = {}, repoURL = '') {
     for (const l of list.slice().reverse()) {
       const d = new Date(l.at), dk = isNaN(d) ? '' : dayKey(d);
       if (dk && dk !== curDay) { curDay = dk; items += `<li class="day" role="heading" aria-level="3">${esc(dayHeading(d, today, yest))}</li>`; }
-      items += lineHTML(l, repoURL);
+      items += lineHTML(l, repoURL, ui.forTask);
     }
     body = `<ol class="log">${items}</ol>${list.length >= limit ? `<p class="small muted">The newest ${limit} lines.</p>` : ''}`;
   }
