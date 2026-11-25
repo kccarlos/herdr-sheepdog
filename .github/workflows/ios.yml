@@ -197,7 +197,7 @@ jobs:
             if (Number(process.env.JOB_TOTAL) <= 1) { core.info('this job builds'); return core.setOutput('build', 'true') }
             const list = new (Object.getPrototypeOf(async function () {}).constructor)(process.env.LIST_ARTIFACTS)
             const prefix = process.env.CLAIM_PREFIX, mine = `${prefix}${process.env.JOB_NAME}.txt`
-            let artifacts = []
+            let artifacts
             for (const end = Date.now() + 60_000; ;) {
               artifacts = await list()
               if (artifacts.some(a => a.name === process.env.BUILD_ARTIFACT || a.name === mine) || Date.now() > end) break
@@ -206,7 +206,7 @@ jobs:
             const built = artifacts.some(a => a.name === process.env.BUILD_ARTIFACT)
             const first = artifacts.filter(a => a.name.startsWith(prefix))
               .sort((a, b) => Number(a.database_id) - Number(b.database_id))[0]
-            const build = !built && (!first || first.name === mine)
+            const build = !built && (!artifacts.some(a => a.name === mine) || first.name === mine)
             core.info(build ? 'this job builds' : built ? `${process.env.BUILD_ARTIFACT} already uploaded` : `${first.name} builds`)
             core.setOutput('build', String(build))
 
