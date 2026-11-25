@@ -69,6 +69,32 @@ type LogEntry struct {
 	Task     string    `json:"task,omitempty"`
 	Decision string    `json:"decision,omitempty"`
 	Why      string    `json:"why,omitempty"`
+	Kind     string    `json:"kind,omitempty"`
+}
+
+var askLogKind = map[string]string{
+	flow.AskMarkDone:    "merged",
+	flow.AskNotifyOwner: "asked_you", flow.AskOpenGate: "asked_you", flow.AskOpenN24: "asked_you", flow.AskOwnerNoRecap: "asked_you",
+	flow.AskOpenRecap: "needs_decision", flow.AskSizeRecap: "needs_decision", flow.AskCIRecap: "needs_decision", flow.AskTimeRecap: "needs_decision", flow.AskFailUpdate: "needs_decision",
+}
+
+func logKind(l LogLine) string {
+	switch {
+	case l.Decision == "":
+		return "observation"
+	case l.By == "owner":
+		return "yours"
+	}
+	best := ""
+	for _, a := range l.Asked {
+		k, _, _ := strings.Cut(a, "@")
+		if v := askLogKind[k]; v == "merged" {
+			return v
+		} else if v == "asked_you" || (v != "" && best == "") {
+			best = v
+		}
+	}
+	return best
 }
 
 func ProjectsView(states []flow.State) []ProjectView {
@@ -181,18 +207,18 @@ func graphViewOf(s flow.State, lastRow map[string]LogLine) GraphView {
 	return GraphView{Protocol: 1, Project: s.Project.ID, Folder: s.Project.Folder, Tasks: tasks}
 }
 
-func LogView(lines []LogLine, n int) []LogEntry {
+func LogView(lines []LogLine, n int, observations ...bool) []LogEntry {
 	if n <= 0 {
 		n = DefaultLogLimit
 	}
-	if n = min(n, MaxLogLimit); len(lines) > n {
-		lines = lines[len(lines)-n:]
+	n, showObs := min(n, MaxLogLimit), len(observations) > 0 && observations[0]
+	out := make([]LogEntry, 0, min(len(lines), n))
+	for _, l := range lines {
+		if k := logKind(l); showObs || k != "observation" {
+			out = append(out, LogEntry{At: l.At, By: l.By, Task: l.Task, Decision: l.Decision, Why: l.Why, Kind: k})
+		}
 	}
-	out := make([]LogEntry, len(lines))
-	for i, l := range lines {
-		out[i] = LogEntry{At: l.At, By: l.By, Task: l.Task, Decision: l.Decision, Why: l.Why}
-	}
-	return out
+	return out[max(0, len(out)-n):]
 }
 
 func (e *Engine) Projects() []ProjectView {
@@ -219,12 +245,15 @@ func (e *Engine) Graph(project string) (GraphView, error) {
 	return GraphViewOf(s, logs), nil
 }
 
-func (e *Engine) LogLines(project string, n int) ([]LogEntry, error) {
+func (e *Engine) LogLines(project string, n int, task string, observations bool) ([]LogEntry, error) {
 	_, logs, err := e.loadProjectCopy(project)
 	if err != nil {
 		return nil, err
 	}
-	return LogView(logs, n), nil
+	if task != "" {
+		logs = slices.DeleteFunc(logs, func(l LogLine) bool { return l.Task != task })
+	}
+	return LogView(logs, n, observations), nil
 }
 
 func (e *Engine) loadProjectCopy(project string) (flow.State, []LogLine, error) {

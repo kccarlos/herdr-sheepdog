@@ -19,7 +19,7 @@ import (
 type Factory interface {
 	Projects() []factory.ProjectView
 	Graph(project string) (factory.GraphView, error)
-	LogLines(project string, n int) ([]factory.LogEntry, error)
+	LogLines(project string, n int, task string, observations bool) ([]factory.LogEntry, error)
 	Start(folder, goal string, maxRunning int) error
 	Stop(project string) error
 	Report(token, verb string, args json.RawMessage) error
@@ -103,15 +103,22 @@ func (s *Server) handleFactoryView(kind string) http.HandlerFunc {
 				v = map[string]any{"tasks": append([]factory.TaskStatus{}, tasks...)}
 			}
 		default:
-			n := 0
-			if raw := r.URL.Query().Get("n"); raw != "" {
+			q, n := r.URL.Query(), 0
+			if raw := q.Get("n"); raw != "" {
 				if n, err = strconv.Atoi(raw); err != nil || n < 0 {
 					writeError(w, http.StatusBadRequest, "invalid n")
 					return
 				}
 			}
-			lines, lerr := s.deps.Factory.LogLines(id, n)
-			err, v = lerr, map[string]any{"protocol": 1, "project": id, "lines": append([]factory.LogEntry{}, lines...)}
+			task, obs := q.Get("task"), q.Get("observations") == "1" || q.Get("observations") == "true"
+			lines, lerr := s.deps.Factory.LogLines(id, n, task, obs)
+			body := map[string]any{"protocol": 1, "project": id, "lines": append([]factory.LogEntry{}, lines...)}
+			if lerr == nil && !obs && len(lines) == 0 {
+				if all, aerr := s.deps.Factory.LogLines(id, 1, task, true); aerr == nil && len(all) > 0 {
+					body["has_observations"] = true
+				}
+			}
+			err, v = lerr, body
 		}
 		if errors.Is(err, factory.ErrProjectNotFound) {
 			writeError(w, http.StatusNotFound, err.Error())

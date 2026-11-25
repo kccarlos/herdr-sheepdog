@@ -1303,16 +1303,16 @@ test('project goal title, collapsible markdown goal, task brief, project card, l
     const page = await bootFactoryPage(st, daemon);
     const mainEl = page.doc.getElementById('main');
 
-    const items = mainEl.querySelectorAll('ul.log li');
+    const items = mainEl.querySelectorAll('ol.log li.ll');
     assert.equal(items.length, 2, 'expected 2 log entries');
-    const startedItem = items.find((li) => li.textContent.includes('owner') && li.textContent.includes('started'));
+    const startedItem = items.find((li) => li.textContent.includes('you') && li.textContent.includes('started'));
     const otherItem = items.find((li) => li.textContent.includes('coordinator') && li.textContent.includes('planned'));
     assert.ok(startedItem, 'expected owner started log item');
     assert.ok(otherItem, 'expected coordinator planned log item');
 
-    assert.equal(startedItem.querySelector('.muted')?.textContent, 'Speed up the factory view');
+    assert.equal(startedItem.querySelectorAll('.muted').at(-1)?.textContent, 'Speed up the factory view');
     assert.ok(!startedItem.textContent.includes('Keep tasks above the fold'), 'owner started log line must not include full goal body');
-    assert.equal(otherItem.querySelector('.muted')?.textContent, otherWhy);
+    assert.equal(otherItem.querySelectorAll('.muted').at(-1)?.textContent, otherWhy);
   });
 
   await t.test('Test 6: hostile goal and task brief produce zero raw script, img, or javascript: href in #main and #projects', async (st) => {
