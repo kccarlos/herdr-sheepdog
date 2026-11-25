@@ -8,9 +8,7 @@ the same job ([development.md](../../../docs/dev/development.md#cicd),
 [status.md](status.md#running-the-tests)). Until 2026-10-21 a **PR**
 workflow also tested every pull request here; it was removed when the tests
 moved to GitHub Actions. The app lives in `ios/` of the sheepdog repository (until
-2026-10-15 it was the separate `herdr-sheepdog-ios` repository; the switch
-of the workflows is in
-[xcode-cloud-monorepo.md](../../../docs/dev/xcode-cloud-monorepo.md), and the
+2026-10-15 it was the separate `herdr-sheepdog-ios` repository, and the
 old `v*` tags are now `ios-v*`). Xcode
 Cloud minutes are included in the Apple Developer Program.
 

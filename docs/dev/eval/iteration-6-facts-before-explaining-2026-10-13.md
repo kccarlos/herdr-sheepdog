@@ -1,6 +1,6 @@
 # Harness iteration 6: facts before explaining, 2026-10-13
 
-Harness iteration 6 (docs/dev/handover-2026-10-04.md, "Harness iteration, from 2026-10-11"), the first of the CEO's product notes. The note: when the user asks for more detail ("tell me more", "explain exactly what happened", "具体讲讲"), the orchestrator gets the facts first (read_screen with the screen or the session, or investigate) and thinks before it explains. It does not have to answer at once. If the look takes a while, the voice says "let me look" first.
+Harness iteration 6 (from 2026-10-11), the first of the CEO's product notes. The note: when the user asks for more detail ("tell me more", "explain exactly what happened", "具体讲讲"), the orchestrator gets the facts first (read_screen with the screen or the session, or investigate) and thinks before it explains. It does not have to answer at once. If the look takes a while, the voice says "let me look" first.
 
 ## Baseline: is there a gap?
 

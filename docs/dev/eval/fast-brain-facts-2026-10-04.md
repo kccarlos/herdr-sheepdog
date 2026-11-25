@@ -1,6 +1,6 @@
 # Fast brain toward facts: prompt v5 A/B (2026-10-04 night)
 
-Item 1 of the overnight plan (docs/dev/handover-2026-10-04.md). PR #141.
+Item 1 of the 2026-10-04 overnight plan. PR #141.
 Design: docs/dev/design/dual-brain.md ("The fast-brain prompt", v5, and
 the briefing payload). Raw reports, the analysis script and its output:
 [`fast-brain-facts-2026-10-04/`](fast-brain-facts-2026-10-04/).

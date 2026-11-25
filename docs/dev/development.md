@@ -139,8 +139,8 @@ slow on a cloud Mac).
 iPhone tests (`ci-plan.sh check`, tested by `ci-plan_test.sh`), so a new
 class cannot be skipped silently.
 
-Every Mac job is a test job (one Mac, one simulator), six with the
-shards: GitHub runs five macOS jobs of an account at once, so the sixth
+Every iOS Mac job is a test job (one Mac, one simulator), six with the
+shards (plus the `macos` job below, seven Mac jobs in all): GitHub runs five macOS jobs of an account at once, so the sixth
 waits for a slot, and a separate build job beside the test jobs could
 wait for a slot while they wait for it. One
 of them, the first to get a Mac (each job that finds no build yet
@@ -217,7 +217,7 @@ require in the branch protection of `main`; the per-job `tests (…)` checks
 come and go with the tier and must not be required.
 
 The iPhone app lives in [`ios/`](../../ios/README.md); Xcode Cloud only
-archives its TestFlight builds ([xcode-cloud-monorepo.md](xcode-cloud-monorepo.md)). A `changes`
+archives its TestFlight builds ([ios/docs/dev/xcode-cloud.md](../../ios/docs/dev/xcode-cloud.md)). A `changes`
 job in `ci.yml` (dorny/paths-filter) tells the other jobs whether anything
 outside `ios/` changed. On an ios-only PR every required check still starts
 and passes, but skips its heavy steps; only the policy guard and the docs

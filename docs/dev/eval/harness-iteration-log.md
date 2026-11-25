@@ -1,6 +1,6 @@
 # Harness iteration log
 
-One row per iteration of the harness loop (docs/dev/handover-2026-10-04.md, "Harness iteration, from 2026-10-11"): one labelled change (prompt, information or rail), measured at tier 1 and/or tier 2 against main, judged by Claude Sonnet at segment level, merged or dropped. Newest last. Each row links its report; the eval index (README.md) has the same row in its table.
+One row per iteration of the harness loop (from 2026-10-11): one labelled change (prompt, information or rail), measured at tier 1 and/or tier 2 against main, judged by Claude Sonnet at segment level, merged or dropped. Newest last. Each row links its report; the eval index (README.md) has the same row in its table.
 
 | # | Date | Change (label) | Tier, n | Segment Understood (Δ, 95 % CI) | Safe | Targeted metric | Decision | Report |
 |---|---|---|---|---|---|---|---|---|

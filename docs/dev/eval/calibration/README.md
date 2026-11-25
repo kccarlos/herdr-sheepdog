@@ -1,6 +1,6 @@
 # Judge calibration
 
-Step 1 of "Evals first" (docs/dev/handover-2026-10-04.md). Before the suite
+Step 1 of "Evals first". Before the suite
 grows, we measure how often the LLM judge agrees with the CEO, one rubric
 item at a time. Items where they disagree get fixed before anyone
 trusts their numbers.
@@ -113,7 +113,7 @@ both directions.
 
 ## Ground truth and the judge bake-off (2026-10-06)
 
-Queue item 1 of the night of 2026-10-06 (docs/dev/handover-2026-10-04.md).
+Queue item 1 of the night of 2026-10-06.
 Full write-up with every number: [judge-bakeoff-2026-10-06.md](../judge-bakeoff-2026-10-06.md).
 
 **Ground truth** is `truth.json` (above). The CEO's review overturned the

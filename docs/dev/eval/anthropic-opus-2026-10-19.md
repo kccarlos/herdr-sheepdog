@@ -1,6 +1,6 @@
 # Claude Opus 5.5 orchestrator against DeepSeek, 2026-10-19
 
-Step 5 of [plan-model-setup.md](../plan-model-setup.md): the tier-1 workday suite for the new Anthropic orchestrator ([anthropic-adapter.md](../anthropic-adapter.md)) against DeepSeek, before the setup page shows any number for Opus. Raw data, scripts and logs: [../bench/results/2026-10-19-opus/](../bench/results/2026-10-19-opus/).
+Tier-1 workday suite for the new Anthropic orchestrator ([anthropic-adapter.md](../anthropic-adapter.md)) against DeepSeek, before the setup page shows any number for Opus. Raw data, scripts and logs: [../bench/results/2026-10-19-opus/](../bench/results/2026-10-19-opus/).
 
 ## Setup
 

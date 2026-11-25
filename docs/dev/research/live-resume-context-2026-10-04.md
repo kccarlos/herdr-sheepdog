@@ -1,6 +1,6 @@
 # Gemini Live context retention across resumes (2026-10-04)
 
-Work item "Gemini Live context retention across resumes" (docs/dev/handover-2026-10-04.md).
+Work item: "Gemini Live context retention across resumes".
 Measurement and information only: nothing here changes a product rule; the
 CEO decides what to do.
 

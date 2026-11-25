@@ -1,7 +1,7 @@
 # Explanation evals: baseline (arm A) on main, 2026-10-05
 
 Step 1 of "Next: unified roles, explaining in detail, explanation evals"
-in [handover-2026-10-04.md](../handover-2026-10-04.md). The CEO's
+(2026-10-05). The CEO's
 complaint from the morning phone test: the voice feels lazy. In the
 events of 2026-10-05 18:02–18:05Z the orchestrator's `spoken` had four
 sentences with reasons and an example, the voice said two, and on

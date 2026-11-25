@@ -1,6 +1,6 @@
 # Clustered events on workday-scale-ten: where the time goes (2026-10-12)
 
-Harness iteration 3 (docs/dev/handover-2026-10-04.md, "Harness iteration, from 2026-10-11"). Phase A: analysis of existing tier-1 event logs, no new runs. Question: why does `workday-scale-ten` (10 workers, a burst of events) fail at run level, 0/5 on DeepSeek flash in the 10-08 re-baseline and with brain fallbacks on Gemini (10-11), when the other workday scenarios rarely fall back?
+Harness iteration 3 (from 2026-10-11). Phase A: analysis of existing tier-1 event logs, no new runs. Question: why does `workday-scale-ten` (10 workers, a burst of events) fail at run level, 0/5 on DeepSeek flash in the 10-08 re-baseline and with brain fallbacks on Gemini (10-11), when the other workday scenarios rarely fall back?
 
 Data (all tier 1, `workday-scale-ten` x5 each unless noted):
 

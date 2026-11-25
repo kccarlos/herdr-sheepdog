@@ -10,8 +10,7 @@ one non-blocking tool), optionally does something to the session (an
 and grades the answers by keywords. It measures; nothing reacts to the
 result and no exit code depends on it.
 
-Work item: "Gemini Live context retention across resumes"
-(docs/dev/handover-2026-10-04.md, part B). Results and the write-up:
+Work item: "Gemini Live context retention across resumes". Results and the write-up:
 docs/dev/research/live-resume-context-2026-10-04.md; raw JSONL in
 docs/dev/research/live-resume-context-results/.
 
