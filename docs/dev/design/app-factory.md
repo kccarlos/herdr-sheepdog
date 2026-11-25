@@ -1,7 +1,8 @@
 # The factory in the app and in voice: integration design
 
-Status: step 1 of 2, revision 4 (2026-11-25), accepted after four rounds
-of independent review. This page is the integration design only. No UI board is drawn
+Status: step 1 of 2, revision 6 (2026-11-25). Revision 4 was accepted
+after four rounds of independent review; revision 5 applied the owner's
+answers to the decisions, and revision 6 corrects it after a fifth review. This page is the integration design only. No UI board is drawn
 yet: the boards (Part 5 of the [design canvas](canvas/README.md)) come
 after this page is accepted.
 
@@ -10,31 +11,34 @@ sample project is called `notes`.
 
 ## Decisions
 
-| # | Decision |
-|---|---|
-| D1 | The owner sees three levels: **project** (headed by its coordinator), **task**, and the task's **worker or reviewer**. Ordinary agents stay as they are. |
-| D2 | A project is named by the last part of its folder's path, everywhere: app, `/factory`, speech, pushes. The daemon computes it. On a tie the orchestrator asks which; a name never changes because another project appeared. |
-| D3 | **The agent table is left alone.** On `main` it already holds no worker or reviewer, and the coordinator only while it is blocked. The app's grouping comes from the **engine** (the project view and the graph's live runs), not from the agent table. A factory terminal is read through the screen reads, which learn to read a pane the engine names. **Read-only.** In the app's first version a worker or reviewer is a line under its task; only the coordinator has a window. |
-| D4 | The orchestrator's roster has **one row per project**, with a unique alias and a spoken name that may be shared. A blocked coordinator's real row merges into it. One helper in code says what each tool does on a project row. |
-| D5 | The owner's instruction reaches the coordinator through **`Engine.Say`**, which exists and has no caller. No new voice tool and no new orchestrator tool: `prompt` on a project row is carried out as `Say`. A device route does the same for a text box on the phone. |
-| D6 | `Say` carries **instructions**. Questions about a project are answered by the orchestrator from the board's facts: `read_screen` on a project row returns text built in code from the graph. |
-| D7 | First version of the path: a spoken confirmation, asks arriving as cards, and questions answered from the board. A reply built from the log (`say_reply`) is a later PR. |
-| D8 | Asks keep their routes and proofs. The phone gets **stop and resume** per project. Voice stop and start stay as they are (every project), and speak names. New goal, reopen, new project and settings stay on the Mac. Nothing gated can be reached through `Say`. |
-| D9 | Per-worker narration stays off. A stuck worker is the engine's to handle and is not shown as a needs-you card. |
+| # | Decision | Owner |
+|---|---|---|
+| D1 | The owner sees three levels: **project** (headed by its coordinator), **task**, and the task's **worker or reviewer**. Ordinary agents stay as they are. | OK |
+| D2 | A project is named by the last part of its folder's path, everywhere. The daemon computes it. On a tie the orchestrator asks which; a name never changes because another project appeared. | — |
+| D3 | **The project head is a permanent contact.** As long as a project exists (running, stopped or finished), its head is in the app's list. It is where the owner asks questions and passes on decisions, as with the orchestrator today. The head is the **project**, not a terminal: coordinators are replaced, the project stays. In the orchestrator's roster, running and stopped projects are rows; a finished project is not listed but is still found by name. The agent table is left alone; the head and its tasks come from the engine. | asked for |
+| D4 | In the roster the head is one row per project, with a unique alias and a spoken name that may be shared. A blocked coordinator's real row merges into it. One helper in code says what each tool does on it. | — |
+| D5 | **Decisions and instructions** reach the coordinator through `Engine.Say`, which exists and has no caller: `prompt` on the project row, and a device route for a text box on the phone. | OK |
+| D6 | **Questions have two layers, and neither touches the coordinator.** Status ("how is notes?", "what is T8 waiting for?") is answered from the board's facts, which carry each task's last decision and its why. Judgement ("why did you split T8?", "would a different design be better?") goes through the existing ask-an-agent tool, `investigate` with its default source: a fresh read-only agent in the project's folder, pointed at the project's log and board. **It answers from what the coordinator recorded, not from the coordinator's memory.** Asking a copy of the coordinator's own session is a described later step; the engine cannot do it today. | OK, with this condition |
+| D7 | No separate reply mechanism. `say_reply` is dropped: after an instruction the owner hears a confirmation, sees asks as cards, and asks "what did it do, and why?" through D6. | OK |
+| D8 | **The phone can do everything `/factory` can**: stop, resume, new goal, reopen, settings with models per role, and new project. Every route it needs is already open to a paired device, and every proof and read-back the daemon requires stays in code. | asked for |
+| D9 | Per-worker narration stays off. A stuck worker is the engine's to handle and is not shown as a needs-you card. | OK |
 
 ## Questions that remain for the owner
 
-1. **Answered: the list is clean on v0.1.31** (step 0, section 10). The
-   clutter the owner saw was v0.1.30 behaviour; updating the daemon
-   removes it.
-2. **Answers come from the board, not from the coordinator.** "Why is T8
-   slow?" gets the task's stage and its waiting reason, as the engine
-   records them. It does not get the coordinator's opinion. That comes
-   with the later reply PR, if wanted.
-3. **A text box on the project head.** It types straight to the
-   coordinator through the device `say` route, so it also works with the
-   orchestrator off. If the project head should be voice only, the route
-   and the box are dropped.
+1. **Records, not memory.** A judgement question is answered by a fresh
+   read-only agent that reads the project's log, plan and code. Every
+   coordinator act is in that log with its reason, so "why did you split
+   T8?" has an answer. What it cannot give is what the coordinator was
+   thinking and did not write down. Getting that means asking a copy of
+   the coordinator's own session, which needs engine work first (6.6) and
+   replays a long Opus session on your Claude quota for each question. Is
+   the first version enough to start with?
+
+Settled in this revision, as the review recommends: a question never
+starts a stopped project; a new project on the phone picks its folder from
+the folders sheepdog knows and does not type one; finished projects stay,
+folded into the closed "Done" group. **A "remove" (or archive) for
+projects follows later**: nothing else ever shrinks the list.
 
 ## 1. The problem, as it is on `main`
 
@@ -112,9 +116,54 @@ computer
   their task, as one line: role, model, how long. They are not addressed
   by voice. They get no window in the app's first version.
 - A stopped or finished project has no terminals but is still a project,
-  with Resume on a stopped one.
+  and its head is still there (3.1).
 
-**The name (D2).** The project view gets a `name`: the last part of the
+### 3.1 The head is a permanent contact (D3)
+
+The owner's model is the orchestrator: one contact that answers questions
+and takes decisions, always there. A project gets the same.
+
+**What is natural from the engine's side.** The engine runs exactly one
+coordinator per project. The coordinator owns the plan, holds the context,
+and is the only role that takes the owner's words (`Say`, delivered as a
+wake). But a coordinator *terminal* is not permanent: the engine gives the
+coordinator a fresh session at idle moments, replaces it after a failure,
+and stops it with the project. What is permanent is the project and its
+stored state. So the contact is the **project head**, backed by whichever
+coordinator run is current, and by the stored plan and log when none is.
+A row tied to the coordinator's terminal would vanish on every rotation.
+
+**What the head does in each state:**
+
+| Project | A decision or instruction | A status question | A judgement question |
+|---|---|---|---|
+| Running | `Say`: delivered when the coordinator is idle | the board's facts | a fresh read-only agent reads the log, the board and the code (6.5) |
+| Coordinator being replaced | `Say`: held, delivered to the next one | the same | the same |
+| Stopped | `Say`: held until Resume; the owner is told so | the same | the same. **A question never starts a project**: starting spends quota and launches workers; only Resume or a new goal does. |
+| Finished | refused: "notes is finished. Give it a new goal." A new goal is the decision that reopens it (section 8) | the same | the same |
+
+Questions work alike in every state and for every coordinator CLI, because
+they read stored state and never need a terminal.
+
+**The list only grows.** Nothing removes a project, and the engine lists
+every project folder it has. So:
+
+- in the orchestrator's roster, running and stopped projects are rows; a
+  finished project is not listed (it would be prompt text on every turn)
+  but still resolves by name, so "ask the notes factory why …" and "give
+  notes a new goal" still find it;
+- in the app, finished projects fold into the "Done" group, closed by
+  default;
+- a remove or archive follows later.
+
+In the app the head is always in the Agents list: with the working agents
+while running, with a Resume button while stopped, and in the closed
+"Done" group when finished. A stuck coordinator's dialog shows on the
+head, as its needs-you card.
+
+### 3.2 The name (D2)
+
+**The name.** The project view gets a `name`: the last part of the
 folder's path, the id when there is no folder. One project's own state is
 enough to compute it. It is the rule `/factory` already uses in the page;
 it moves into the daemon so every surface agrees.
@@ -130,6 +179,10 @@ it moves into the daemon so every surface agrees.
   whichever came first. A unit test on the resolver pins this: with two
   projects named notes, "the notes factory" resolves to neither, including
   the one started first.
+- **A listed project wins.** A finished project is found by name but not
+  listed in the roster (3.1). It is matched only when no listed row
+  matches, so a finished `notes` beside a running `notes` is not a tie the
+  roster cannot show. The resolver test covers this case too.
 - The app shows the folder under the name, so two cards with one name can
   be told apart. No project is renamed because a second one appeared.
 - Ask lines say the project's name and the task ("notes, T1: …"). Today
@@ -215,7 +268,8 @@ no "finished" notification for a worker.
 
 ### 5.1 The row
 
-`Agents()` and `Resolve` return one synthetic `AgentInfo` per project:
+`Resolve` returns one synthetic `AgentInfo` per project, and `Agents()`
+lists those of running and stopped projects (3.1):
 pane `factory:<id>`, alias and spoken name from section 3, state and task
 line from the project view and the open asks. It exists whether or not any
 terminal does, so a stopped project can still be told something. It goes
@@ -263,7 +317,8 @@ by itself and returns early.
 | `prompt` | carried out as `Say` (section 6) |
 | `read_screen` | text built in code from the graph (5.3). `source: session` is refused. There is no way to read the coordinator's terminal through the orchestrator in the first version: a stuck dialog's question and options are already on the row as its pending prompt, and questions are answered from the board. A third `source` value would change the tool's declaration and need its own eval. |
 | `send_keys` | while the coordinator is blocked on a dialog: to its terminal, under the one rail, as today. **When it is not blocked: refused, nothing sent.** The orchestrator's own check lets a call through when a row has no pending prompt and leaves it to the host; the host must refuse here, because there is no row and no prompt to revive. |
-| `interrupt`, closing, renaming (`note` with a name), `run_cli`, `promise`, `investigate` | refused in code (`brain.rail_blocked`): "That works on an agent, not on a factory project." Stopping is "stop the factory", or Stop on the phone. |
+| `investigate` | the default source (`cli`): a fresh read-only agent in the project's folder, with the board text itself and the path of the project's log in its question (6.5). `source: worker` is refused in the first version: "the notes coordinator's own session cannot be asked yet; ask without source". `investigate` starts from an agent row today (workspace, alias, session, remote check), so it needs a target that is not a row. |
+| `interrupt`, closing, renaming (`note` with a name), `run_cli`, `promise` | refused in code (`brain.rail_blocked`): "That works on an agent, not on a factory project." Stopping is "stop the factory", or Stop on the phone. |
 
 Without the helper these tools would reach host methods with a pane that
 is not a terminal. There is no rule for worker terminals, because a worker
@@ -274,17 +329,32 @@ never resolves.
 The orchestrator has no tool that reads a graph or a log, and the
 coordinator's screen rarely says why a task is slow. So `read_screen` on a
 project row returns text built in code from the graph: the project's state
-and counts, each open task with its stage and its waiting reason, and the
-open asks. No new tool. For a stopped project it is the only thing there
+and counts, the last few project-level lines the coordinator wrote, each
+task with its stage and its waiting reason, and the open asks. Dropped and
+closed tasks are shown too: they are where "why" is asked most. No new tool. For a stopped project it is the only thing there
 is to read.
 
 ```
 notes: running. 3 working, 1 waiting on you, 9 of 14 done.
+Coordinator, plan amended: "T11 added: sync was missing from the goal".
+T6 feat: storage — split; why: "two changes over 400 lines".
 T7 feat: search — review, round 2 of 2.
-T8 feat: tags — working, codex, 31 min.
-T9 feat: export to PDF — waiting on others: after T8.
+T8 feat: tags — working, codex, 31 min. Last: sent back; why: "the tag index must be case-insensitive".
+T9 feat: export to PDF — dropped; why: "owner said to skip the export".
 T10 feat: import — waiting on you: "Delete the old notes table in the migration?"
+T11 feat: sync — waiting on others: after T8.
 ```
+
+Each task line carries its **last decision and its why**: the last log
+line for that task whose `by` is the coordinator or the owner, with its
+decision and why. This is a new, small selection over the log. The
+existing `LastDecision` field is not it: that keeps only lines of the
+engine's own task rules ("start a reviewer"), and a coordinator's act is
+logged under its verb (`task drop`, `task send-back`, `recap decide`). A
+plan-level act such as `plan amend` carries no task, so it appears under
+the header, not on a task's line; a split decided at a recap is on the
+parent task's line. Many "why" questions are then answered from this text with no model on the factory
+side.
 
 The text goes back inside the same untrusted-text wrapper every screen
 read gets (`wrapWorker`): task titles and ask questions are written by
@@ -356,7 +426,7 @@ What is said at once, by case:
 | Running | "Told the notes factory." | the coordinator acts; an ask arrives as a card |
 | Stopped | "notes is stopped. It gets this when you resume it." | the wake is held |
 | Coordinator not running (being replaced, signed out) | "The notes coordinator is not running. It gets this when it is back." | the wake is held |
-| Finished | "notes is finished. Give it a new goal on your Mac." | `Say` refuses; nothing is queued |
+| Finished | "notes is finished. Give it a new goal." | `Say` refuses; nothing is queued |
 | No such project | "No factory project called that. You have notes and recipes." | nothing |
 
 ### 6.2 From the phone, and with the orchestrator off
@@ -377,7 +447,7 @@ text box on the project head: `POST /api/factory/projects/{id}/say`.
   1,000 characters) and refused when longer. The same holds for the voice
   path.
 - **Refusals the app shows:** finished (`closed`: "notes is finished. Give
-  it a new goal on your Mac."), empty text, too long, project not found,
+  it a new goal."), empty text, too long, project not found,
   no paired-device identity.
 
 ### 6.3 Why `Say` cannot pass a gate
@@ -421,7 +491,10 @@ That is true today and not this design's doing. What this design adds is a
 channel that arrives labelled "owner said" through a model: with a release
 ask open, a relayed "yes, go ahead" could be read as the answer. Three
 things close most of it: the heard words attached by code (6.1), the
-prompt sentence of 6.4, and one eval scenario (section 10, step 3).
+prompt sentence of 6.4, and one eval scenario: an ask is open and the
+owner answers in free words the fast path does not match; the
+orchestrator must point to the card or the spoken option, and must not
+`prompt` the project with the answer.
 
 ### 6.4 The coordinator's prompt must change
 
@@ -438,37 +511,117 @@ to an open ask**: only the card answers an ask. That is a prompt change and
 needs its own evidence on the factory side, like every line of that file.
 The "owner said" marking is built in code and does not depend on it.
 
-### 6.5 Questions are not relayed (D6)
+### 6.5 Questions: two layers (D6)
 
-"How is notes?", "why is T8 slow?", "what is it waiting for?" are answered
-by the orchestrator from the roster row and the board text of 5.3. They
-are not sent through `Say`. This is prompt guidance for the orchestrator,
-which is acceptable because it is not a safety property: a question that
-does get relayed is still only an instruction that changes nothing.
+**Status, and the common "why", from the board.** "How is notes?", "what
+is T8 waiting for?", "why was T9 dropped?" are answered from the roster
+row and the board text of 5.3. Fast, no model on the factory side, the
+same in every project state.
 
-### 6.6 Later: a reply built from the log (`say_reply`)
+**Judgement, from the record, through the tool that exists.** The
+orchestrator already has a tool that asks an agent a question in the
+background: `investigate`. Its default source starts a fresh read-only
+agent in a folder. On a project row that folder is the project's, and the
+question carries the board text itself (it is built in code and has no
+file) and the path of the project's log. The
+daemon already points a plain read-only agent at a file in this way, when
+a worker's session cannot be asked.
 
-Not in the first version. When it is built, after the `Say` path has run
-on a real project:
+```
+owner: "ask the notes factory why it split T8"
+   │
+   ▼
+orchestrator: investigate(notes factory, "Why was T8 split …")
+   │   says at once: "Looking into notes, about half a minute."
+   ▼
+daemon: a fresh read-only agent in the project's folder
+   │   reads: the project log (every coordinator act, with its why),
+   │          the board text, the plan, the code
+   │   the coordinator is not involved: not woken, not asked, not copied
+   ▼
+its answer ──► investigation result ──► event turn ──► spoken at the next pause
+                                         follow-ups resume the same agent
+```
 
-- **Text:** the log lines with `by == coordinator` and a sequence number
-  after the line that records the delivery of the owner wakes, up to the
-  end of that turn. Worded as what the coordinator did in the turn that
-  read the words. With no such line: "The notes coordinator read it and
-  changed nothing."
-- **One stored value:** the sequence number at delivery.
-- **When:** only in the branch of `reconcileCoordWakes` where the
-  coordinator is idle and its turn advanced; that function returns true
-  for an ended run too, and the two are told apart by the run's state. Its
-  requeue branch produces no reply; a requeued wake gets its reply after
-  it is delivered again.
-- **Delivery:** `Changes()` can drop, so the reply text is stored in the
-  project's state and the supervisor re-reads it, as it re-reads asks.
-- **To prove first:** that the coordinator's turn counter advances alike
-  for a Claude, a Codex and an agy coordinator.
-- **The coordinator's own sentence,** if wanted then: one read of its
-  screen at the end of the turn.
-- No push for it.
+- **The owner's condition.** A question cannot make the coordinator act,
+  because the coordinator never sees it. That the answering agent cannot
+  act on the factory either rests on two different things. On the Claude
+  backend it has `Read`, `Grep`, `Glob` and `WebSearch` only: no shell.
+  On the Codex backend, which the default source picks when Codex is
+  installed, it is a shell in a read-only sandbox, and a local command
+  with no run token is treated as the owner's CLI (6.6). This is how every
+  investigation of an ordinary agent already runs. **A test in this step
+  pins it:** from a default-source investigation on the Codex backend,
+  `sheepdog factory stop` does not reach the daemon. If it does, project
+  investigations are pinned to the Claude backend, which the
+  investigation query can already name.
+- **It works everywhere:** project running, stopped or finished; Claude,
+  Codex or agy coordinator. It costs the small cap of an ordinary
+  investigation.
+- **How the answer returns.** As for any agent: a background job, an
+  acknowledgement with a rough time, the result as an event turn the voice
+  speaks at the next pause, tagged to the request, kept in the ledger
+  `recall` searches. One live investigation per project; "stop" cancels
+  it. The answer is a model's prose and goes back inside the
+  untrusted-text wrapper.
+- **What the owner must know: records, not memory.** The answer comes from
+  what the coordinator **recorded**: each act and its why in the log, the
+  plan, the briefs, the code. It does not come from the coordinator's own
+  memory. For "why did you split T8?" the log line says why. For "would a
+  different design be better?" the agent reasons from the plan and the
+  code like a well-informed colleague; it is not the coordinator
+  answering, and the voice should say "from the project's record".
+- **A decision is not a question.** "Tell it to use a different design" is
+  `prompt`, which is `Say`. "Would a different design be better?" is
+  `investigate`. Choosing between them is orchestrator guidance, so it is
+  in the eval list beside the `Say` scenarios. A wrong choice is harmless
+  one way (a question sent as `Say` changes nothing, by the prompt
+  sentence of 6.4) and visible the other (the read-only agent cannot act).
+
+### 6.6 Later: asking the coordinator's own session
+
+This is what gives "what the coordinator itself was thinking". It is the
+`source: worker` form of `investigate`, which forks a session read-only.
+For a coordinator it does not exist today. Before it can:
+
+| Missing today | In code |
+|---|---|
+| **No coordinator session id is recorded, for any CLI.** | A Claude coordinator is launched with an empty session, so no `--session-id` is passed and the run record's session stays empty. Codex and agy sessions are discovered after launch for workers only. Recording one is engine work on the launch path and on how a run is adopted after a restart. |
+| **Nothing survives a stop or a rotation.** | `Stop` clears the whole coordinator run record; a rotation replaces it. The project needs its own "last coordinator session" value that neither clears. |
+| **A Codex coordinator's session is in a private home.** | Every Codex run of the engine gets its own `CODEX_HOME`. The daemon's fork runs with the daemon's environment and would not find the session; the runner cannot set that home today. A Claude fork must likewise read the Claude config directory the engine launched with. |
+| **agy** | keeps no transcript the daemon can read: never forkable. |
+
+**Why a fork would be read-only, stated correctly.** What protects is the
+fork's **tools**, not a missing run token. The Claude fork is given
+`Read`, `Grep`, `Glob` and `WebSearch` and nothing else: it has no shell
+and cannot run any command. The Codex fork runs in a read-only sandbox but
+has a shell. A local command with **no** run token is treated as the
+owner's own CLI: the loopback start and stop routes act on it with no
+proof. So a process with a shell and no token could stop or start the
+factory. Revision 5 of this page had this backwards. The test that
+matters before any Codex coordinator is forked: from inside a Codex fork,
+`sheepdog factory stop` does not reach the daemon. If it does, a Codex
+coordinator is not forkable under the owner's condition. An answer to a
+gated ask stays safe either way: it needs a proof no loopback route gives.
+
+**Cost.** The Claude fork has no model flag: it continues with the
+session's own model, capped at 10 USD per run. A coordinator is Opus by
+default and its session is long, so each question replays that context on
+the owner's Claude quota. If this step is built, it needs a stated bound,
+and the existing fallback (on hitting the cap, ask a plain read-only agent
+pointed at the transcript) applies.
+
+**`say_reply` stays dropped (D7).**
+
+| Need | Served by |
+|---|---|
+| "Did it get my instruction?" | the spoken confirmation of 6.1 |
+| "What did it do, and why?" | the board text (5.3): each task's last decision and its why |
+| A longer "why" | `investigate` on the project (6.5), from the log |
+| It needs a decision from me | an ask, as a card |
+
+What `say_reply` would have added is an *unprompted* report after each
+instruction: narration the owner did not ask for, on new engine state.
 
 ## 7. What is narrated and what stays quiet (D9)
 
@@ -478,43 +631,66 @@ on a real project:
 | An override result (exists) | Review rounds and verdicts, retro rounds, plan review |
 | The coordinator stuck on a dialog (exists) | CI passing, a PR opening, a merge |
 | The confirmation that an instruction was passed on (new) | The coordinator's routine wakes, recaps and decisions |
-| Anything, when asked: "how is the notes factory?" (new: roster row and board text) | A model handoff, a retry, a rotation; heartbeats and sweeps |
+| Anything, when asked: status from the roster row and board text; judgement from a read-only agent on the project's record (new) | A model handoff, a retry, a rotation; heartbeats and sweeps |
 
-## 8. Asks, stop and resume (D8)
+## 8. Everything `/factory` does, on the phone (D8)
 
-The owner asked for stop and resume on the phone in the first version, and
-did not ask for new goal there.
+Every route `/factory` uses for these is already open to a paired device
+(`accessDevice` in `internal/web/server.go`). The phone needs **no new
+daemon route** for parity. What the daemon requires today stays as it is.
 
-| Action | Phone | Voice | Authority, in code |
-|---|---|---|---|
-| Answer an ask | tap an option on the question card (exists) | say the option (exists) | answer proof from a paired-device tap or a live voice answer |
-| Stop a project | `POST /api/factory/projects/stop` with the project, behind a confirmation | "stop the factory": every running project, as today | phone: the paired device's identity (the route refuses without it). Voice: live voice input only, as today |
-| Resume | `POST /api/factory/projects/start` with the folder and goal the project view sent | "start the factory": every stopped project, as today | same |
-| New goal, reopen, new project, settings | on the Mac | no | — |
+| Action | Routes (all exist, all device access) | What the daemon requires, in code |
+|---|---|---|
+| Answer an ask | `POST /api/factory/asks/{id}/answer`; the question card (exists in the app) | an answer proof, minted from a paired-device tap or a live voice answer |
+| Stop | `POST /api/factory/projects/stop` with the project | a paired-device identity (`proof_required` without it). The app adds a confirmation. |
+| Resume | `POST /api/factory/projects/start` with the folder and the stored goal | the same identity; the start checks run and can refuse with their results |
+| New goal | the same route with the folder and a new goal: the engine treats a different goal on a known folder as a new goal and wakes the coordinator with it | the same |
+| Reopen a finished project | the same route with a new goal. The same goal on a finished project is refused (`closed`). | the same |
+| Read settings, models per role included | `GET /api/factory/projects/{id}/settings`: each row with its value and default, and for model rows the CLIs to choose from | — |
+| Change a setting or a role's models | `POST /api/factory/projects/{id}/settings` with name and value. This changes nothing by itself: it opens a `rule` ask that reads back the new and current value ("Save" / "Keep current"). The change is made only when that ask is answered. | the identity to propose; an answer proof to save. A `rule` ask can never be answered by a delegation rule. The read-back ask reaches the phone as a question card like any gated ask. |
+| New project: pick the folder | `GET /api/spaces` (the folders sheepdog knows on that computer, each marked git or not), plus the folders of existing projects, as the page does | — |
+| New project: defaults | `GET /api/factory/settings` | — |
+| New project: check | `POST /api/factory/projects/check` with the folder and chosen settings: runs the start checks **on the daemon's computer** and returns each result with its fix | — |
+| New project: start | `POST /api/factory/projects/start` with folder, goal and chosen settings | the identity; the start checks run again and a failing check refuses the start. **The chosen settings apply at start with the device identity alone, with no read-back**, exactly as on `/factory`. The read-back is for changing a setting of a project that exists: there the start route refuses any value that differs from the stored one. |
 
-- **Voice stop and start stay as they are.** "Stop the factory" stops
-  every running project and "start the factory" resumes every stopped one.
-  With one project that is exact; with several, stopping all is a safe
-  first version, and the phone stops or resumes one. What is spoken back
-  uses names, not ids. Matching a project name in these phrases is left
-  for when two projects at once is common. When it is built, a tie on the
-  name has no way to be told apart by voice: it stops or starts neither
-  and points to the phone.
-- **A failed start check on resume.** Start runs the start checks and can
-  refuse with their results. The phone shows the failing lines and their
-  fixes as the daemon wrote them, and says they are fixed on the Mac.
-- Refusals the phone shows plainly: no paired-device identity (pair this
-  phone again), project gone, and the factory not available on this
-  computer (it needs herdr-core).
+Notes:
+
+- **Folders are picked, not typed** in the first version
+  ([owner question 2](#questions-that-remain-for-the-owner)). The routes
+  accept any folder string from a paired device today, as they do from the
+  page, so typing would add no authority; it is left out because it is
+  error-prone on a phone. When herdr cannot be reached the list is empty;
+  the app says so and points to the Mac.
+- **Start-check fixes are text.** A failing check shows its fix as the
+  daemon wrote it. Fixes that are commands (`run: …`) are run in a
+  terminal on the Mac; the phone offers Copy and "Check again", not a Run
+  button.
+- **The models rule stays in code:** reviewers must differ from the
+  worker, and a CLI a role cannot launch is refused, by the daemon, with
+  its sentence shown under the row.
+- **Voice** keeps what it has: answering asks, and "stop the factory" and
+  "start the factory" for every project, with names spoken instead of ids.
+  New goal, settings and new project by voice are not designed here: a
+  misheard goal re-plans a project. Matching one project's name in the
+  stop and start phrases is later; on a name tie it would stop or start
+  neither and point to the phone.
+- **Refusals the phone shows plainly:** no paired-device identity (pair
+  this phone again), project gone, finished with the same goal, a setting
+  the daemon refuses, a failed start check, and the factory not available
+  on this computer (it needs herdr-core).
+- The words on the phone are the words of `/factory`
+  ([slice14-wording.md](canvas/slice14-wording.md)).
 
 ## 9. Reused, new, left out
 
 **Reused as it is:** the agent table and the quiet rule, untouched; the
 ask bridge, answer proofs, question cards, override results; held wakes;
-the project log; the device routes for projects, graph, log, asks, start
-and stop; `ProjectView`, `GraphView`, `TaskView`; the words and stage
+the project log; every device route of `/factory` (projects, check, start,
+stop, graph, log, settings, asks) and `GET /api/spaces`; the settings
+read-back ask; investigations with their default source, their ledger and
+how their answers are spoken; `ProjectView`, `GraphView`, `TaskView`; the words and stage
 names of `/factory`; `to_supervisor`, `prompt`, `read_screen`,
-`list_agents`, `send_keys` and the name matcher; the rule that action
+`list_agents`, `send_keys`, `investigate` and the name matcher; the rule that action
 tools run only in the owner's turn.
 
 **New**
@@ -528,7 +704,8 @@ tools run only in the owner's turn.
 | A fake `Factory` in the eval simulator | `internal/inject`, `internal/eval` (neither has any factory code today) |
 | The synthetic project row; the blocked coordinator merged into it; the helper of 5.2; the board text of 5.3 | `internal/supervisor/brainhost.go`, `internal/brain/tools.go` |
 | `prompt` on a project as `Say`; the heard-words parameter; owner wakes first; the device `say` route; one sentence in `coordinator.md` | `internal/supervisor`, `internal/factory`, `internal/web` |
-| The app: projects in Agents, the board, the task view, the coordinator's snapshot window, the text box, stop, resume, the states | `ios/`; drawn in step 2 |
+| `investigate` on a project row: a target that is not an agent row (the project's folder, name and log path from the engine); each task's last decision and why in the board text | `internal/supervisor/investigate.go`, `internal/supervisor/factory.go`, `internal/factory/view.go` |
+| The app: the permanent project head in Agents, the board, the task view, the coordinator's snapshot window, the text box, stop, resume, new goal, reopen, settings and models, new project, the states | `ios/`; drawn in step 2 |
 
 **Left out, or later**
 
@@ -537,8 +714,11 @@ tools run only in the owner's turn.
   app; input on any run's window.
 - Reading the coordinator's terminal through the orchestrator.
 - A project name in voice stop and start.
-- `say_reply` (6.6) and the coordinator's own sentence.
-- New goal and reopen on the phone or by voice.
+- `say_reply`, dropped. Asking the coordinator's own session (6.6), later.
+- Removing or archiving a project: follows; until then finished projects
+  are folded on the phone and unlisted in the roster.
+- New goal, settings and new project by voice; a typed folder path on the
+  phone; a Run button for start-check fixes.
 - A `factory` entry in `/api/state`, until the boards say it is needed.
 - The project log screen on the phone; the task graph on the iPhone (the
   iPad gets list and graph).
@@ -548,20 +728,37 @@ tools run only in the owner's turn.
   and the space-page factory section of Part 3 (`FactoryPage` and its
   states), which predates `/factory`.
 
-## 10. Plan
+## 10. Plan (provisional)
 
-| Step | What | Checks |
-|---|---|---|
-| 0 | **Reproduce on `main`.** A daemon built from `main`, a project running, the phone's Agents list. Expected: clean. No PR. **Result (2026-11-25): clean.** A daemon built from `main` at v0.1.31 ran a two-task project on the test repository with agy coordinator, workers and reviewers; `GET /api/state` was sampled every 15 s through implementing and two review rounds per task. No worker or reviewer ever appeared in `agents`; the coordinator appeared in one sample, while blocked. The flat list the owner saw is v0.1.30 behaviour. | the list, on the device; if workers show, stop and revise this page |
-| 1 | The project name everywhere, the blocked coordinator's included; the muted marker; the coordinator's pane on the project view; the screen reads' read-only lookup | `make test`, with a test that a task's `terminal` from the graph is the pane id the screen read takes on herdr-core; the conformance suite on both herdr backends; an installed app build against the new daemon |
-| 2a | The eval simulator learns the factory: a fake `Factory` | `make test`; no behaviour change |
-| 2 | The project row with its unique alias, the merged blocked coordinator, the helper, the board text | `make test` with the golden test of 5.1 and a resolver test for two projects with one name; `make eval` with a project's row in the roster, including at least 15 scale-ten runs: the last roster wording change was held to that bar ([eval/README.md](../eval/README.md), standing safety lesson and the 11-03 row) |
-| 3 | `prompt` on a project as `Say` with the heard words; owner wakes first; the `coordinator.md` sentence; the device `say` route; a test for `Say` on a stopped project | `make test`; `make eval` scenarios for one project, two projects with one name, stopped, finished, and a daemon-started turn that must not `Say`, and an open ask that the owner answers in free words the fast path does not match (the orchestrator must point to the card or the spoken option, and must not `prompt` the project with the answer); factory-side evidence for the prompt sentence; an end-to-end run on a test project |
-| 3b | `say_reply` (6.6), after step 3 has run on a real project | `make test`; the turn counter proved on Claude, Codex and agy coordinators |
-| 5, 6 | The app, after the boards | unit and UI tests with a stub daemon; the accessibility checks |
-| 7 | Docs: [factory.md](../../factory.md), [iphone-app.md](../../iphone-app.md), [safety.md](../../safety.md), [ws-contract.md](../ws-contract.md), [roles.md](../roles.md), [ios architecture](../../../ios/docs/dev/architecture.md) | `go test ./internal/docscheck` |
+The order and the PR split are settled after the decisions above are. In
+outline, daemon first, none of it waiting for the boards:
 
-Steps 0 to 3 do not depend on the boards.
+- **Done: reproduce on `main`. Result (2026-11-25): clean.** A daemon
+  built from `main` at v0.1.31 ran a two-task project on the test
+  repository with agy coordinator, workers and reviewers; `GET /api/state`
+  was sampled every 15 s through implementing and two review rounds per
+  task. No worker or reviewer ever appeared in `agents`; the coordinator
+  appeared in one sample, while blocked. The flat list the owner saw is
+  v0.1.30 behaviour.
+- The project name everywhere; the muted marker; the coordinator's pane
+  on the project view; the read-only screen lookup.
+- The eval simulator learns the factory.
+- The project row, its helper, the board text. Roster wording is held to
+  the scale-ten bar of [eval/README.md](../eval/README.md).
+- `Say` behind `prompt`, the device `say` route, the `coordinator.md`
+  sentence with its own evidence.
+- `investigate` on a project row with its default source, with the
+  loopback reach test on the Codex backend; eval scenarios for choosing
+  `investigate` or `prompt` on a project.
+- The app, after the boards. Parity (section 8) needs no daemon work. If
+  the boards need an order: stop, resume and the text box; then new goal
+  and reopen; then settings; then new project.
+- Later, each on its own: the coordinator session fork (6.6); a remove or
+  archive for projects.
+- Docs: [factory.md](../../factory.md), [iphone-app.md](../../iphone-app.md),
+  [safety.md](../../safety.md), [ws-contract.md](../ws-contract.md),
+  [roles.md](../roles.md),
+  [ios architecture](../../../ios/docs/dev/architecture.md).
 
 ## 11. The reviews, and what changed
 
@@ -601,19 +798,51 @@ in code:
 | The say route: cap the voice path too, one line | 6.1 and 6.2. |
 | Defer the project name in voice stop and start; leave run windows out of the app's first version | Done (sections 4, 8, 10). |
 
+**The owner's answers** (revision 5):
+
+| Answer | What changed |
+|---|---|
+| D1, D5, D7, D9: OK | — |
+| "Shouldn't the coordinator always be in the list? Who do I go to with a question or a design change?" | D3 and 3.1: the project head is permanent in the app in every project state; in the roster running and stopped projects are listed and a finished one is found by name. |
+| Questions: OK, but the orchestrator already has a tool that asks an agent | D6 and 6.5: judgement questions go through `investigate` (in revision 6: its default source, from the project's record). 6.6: `say_reply` is dropped, because that one mechanism serves both. |
+| "Can the phone do all of it?" | D8 and section 8: parity with `/factory`. Every route was checked to be device access already. |
+| Settle the points before the plan | Section 10 is an outline, marked provisional. |
+
+**Review 5** (revision 6):
+
+| Finding | Answer |
+|---|---|
+| The coordinator session fork does not exist: no session id for any CLI, a stop clears the run, Codex has a private home | True, each read in code. 6.5 is now `investigate` with its default source; the fork is 6.6, later, with what the engine must record first. |
+| "No run token" was the wrong reason: a local command without a token is the owner's CLI | True (`internal/web/factory.go`, the loopback start and stop). 6.6 states the tools as the protection and names the test that matters. |
+| The fork's cost was not mentioned | 6.6. |
+| The board text can carry the last decision and its why | 5.3. |
+| Finished projects as roster rows only grow | 3.1: unlisted in the roster, still resolved by name; folded on the phone; a remove follows. |
+| On a new project the settings apply at start without a read-back | Section 8. |
+| The three owner questions | Adopted. One short question is left: records, not memory. |
+
+The tables of reviews 1 to 3 above describe earlier revisions; where they
+differ from sections 1 to 10, the owner's answers and review 5 supersede
+them.
+
 ## 12. Not verified
 
-- **No daemon built from `main` was run with a project.** Section 1 rests
-  on the code and the tests. Step 0 is that run.
+- Whether a Codex read-only sandbox can reach the daemon on loopback.
+  This matters for the first version (6.5), where the test sits.
+- Whether a Claude fork finds a session under the engine's Claude config
+  directory (the later step of 6.6 only).
+- How large a real project's log gets, and whether a read-only agent finds
+  a task's lines in it quickly.
+- Proposing a setting on a stopped or finished project.
+- What a `rule` read-back ask looks like as a question card in the app
+  today.
+- What `GET /api/spaces` returns when herdr-core runs but no space is
+  open.
 - Whether a task's `terminal` in the graph is the pane id the screen read
   takes on a real herdr-core. By reading it is: the run's address, which a
-  local herdr-core uses as the pane id unchanged. Step 1 pins it with a
-  test.
+  local herdr-core uses as the pane id unchanged. A test pins it.
 - How a coordinator behaves on an "owner said" wake while an ask is open
   (6.3). That is from the prompt text and the ask kinds, not from a run.
 - Where the owner saw the flat list. The second review found the live
   daemon on v0.1.30; nobody looked at the phone.
-- That the coordinator's turn counter advances alike for Claude, Codex and
-  agy coordinators (needed only for step 3b).
 - `Say` on a stopped project end to end: the code keeps the wake; there is
   no test yet.
