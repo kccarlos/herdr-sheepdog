@@ -75,9 +75,13 @@ func projectViewOf(s flow.State) ProjectView {
 	for _, tv := range GraphViewOf(s, nil).Tasks {
 		counts[tv.Stage]++
 	}
-	if n := len(s.Project.PlanReviews); n > 0 {
-		if pr := s.Project.PlanReviews[n-1]; pr.Accepted.IsZero() && pr.Verdict == "" && pr.Run != nil && flow.RunLive(pr.Run.RunID, pr.Run.Run) {
-			status = "Plan review"
+	if s.Project.Started && !s.Project.Finished && !flow.ProjectFinished(s.Project, s.Tasks) {
+		if open := len(flow.OpenPlanFindings(s.Project)); open > 0 {
+			status = fmt.Sprintf("%d plan findings open, waiting on the coordinator", open)
+		} else if n := len(s.Project.PlanReviews); n > 0 {
+			if pr := s.Project.PlanReviews[n-1]; pr.Accepted.IsZero() && pr.Verdict == "" && pr.Run != nil && flow.RunLive(pr.Run.RunID, pr.Run.Run) {
+				status = "Plan review"
+			}
 		}
 	}
 	return ProjectView{ID: s.Project.ID, Folder: s.Project.Folder, Goal: s.Project.Goal, Running: s.Project.Started, Status: status, Counts: counts}

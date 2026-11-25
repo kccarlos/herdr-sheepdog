@@ -1,10 +1,11 @@
 // The factory page (design.md 12.1, the FactoryWeb* boards): polls the factory
-// views and delegates ask answers and browser pairing to asks.js.
+// views and delegates ask answers, setting proposals and browser pairing to asks.js & settings.js.
 import { esc, isOwnerAsk, renderAskCardsHTML, createAskFlow, browserAskDeps } from './asks.js';
+import { renderSettingsHTML, proposeSetting } from './settings.js';
 import { renderMarkdown } from '../static/markdown.js';
 import { goalTitle } from './goal.js';
 
-const POLL_MS = 3000, GIVE_UP_MS = 8000;
+const POLL_MS = 3000, GIVE_UP_MS = 8000, NOTICE_MS = 5000;
 const $ = (id) => document.getElementById(id);
 const enc = encodeURIComponent;
 const clock = (t, sec) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: sec ? '2-digit' : undefined });
@@ -15,10 +16,22 @@ const STAGE = { owner_gate: ['needs your approval', 'blocked', true], owner_answ
 const ORDER = ['owner_gate', 'owner_answer', 'blocked_or_failed', 'ci', 'working', 'waiting_on_dep', 'queued'];
 // A stage this page does not know yet shows under its raw name rather than vanishing.
 const stage = (t) => STAGE[t.stage] || [t.stage || 'unknown', 'idle'];
-let data = null, down = false, lastOK = 0, timer = 0, busy = false, again = false;
-const started = Date.now();
+let data = null, down = false, lastOK = 0, timer = 0, busy = false, again = false, curNarrow = true;
+const started = Date.now(), noticeTimers = new Map();
+const mq = globalThis.matchMedia?.('(max-width: 760px)') || null;
 const askFlow = createAskFlow(browserAskDeps());
-const askUI = { busyId: '', error: '', errorAskId: '', needsPairing: false, pairMessage: '', pairError: '', pairingBusy: false, pending: null };
+const askUI = { busyId: '', error: '', errorAskId: '', needsPairing: false, pairDone: false, pairMessage: '', pairError: '', pairCode: '', pairingBusy: false, pending: null };
+const setUI = { project: '', rows: null, error: '', busy: '', edits: {}, errors: {}, notices: {} };
+const pairRow = () => askUI.pending?.kind === 'setting' ? askUI.pending.name : (askUI.pending?.row || '');
+const setState = () => ({ ...setUI, pairRow: pairRow(), askBusyId: askUI.busyId, pairState: askUI });
+const clearPair = () => Object.assign(askUI, { needsPairing: false, pairDone: false, pending: null, pairError: '', pairCode: '' });
+const findRow = (n) => n && [...$('settings').querySelectorAll('[data-row]')].find((x) => x.dataset.row === n);
+const findCtrl = (n) => n && [...$('settings').querySelectorAll('[data-setting]')].find((x) => x.dataset.setting === n);
+const focusRow = (n, r = findRow(n)) => (r?.querySelector('button[data-propose], button[data-default], button[data-ask-id]') || r?.querySelector('[data-setting]'))?.focus({ preventScroll: true });
+const setNotice = (n, txt) => {
+  clearTimeout(noticeTimers.get(n)); setUI.notices[n] = txt;
+  noticeTimers.set(n, setTimeout(() => { delete setUI.notices[n]; noticeTimers.delete(n); if (data) render(); }, NOTICE_MS));
+};
 
 async function get(url, retried = false) {
   const r = await fetch(url, { cache: 'no-store', signal: AbortSignal.timeout(2 * POLL_MS) });
@@ -44,12 +57,17 @@ async function poll() {
   if (busy) { again = true; return; }
   busy = true; again = false;
   const [want, task] = route();
-  let next = data, off = false;
+  let next = data, off = false, setP = null;
   try {
     const [{ projects = [] }, { asks = [] }] = await Promise.all([get('/api/factory/projects'), get('/api/factory/asks')]);
     const p = projects.some((x) => x.id === want) ? want : (projects[0]?.id || '');
+    if (setUI.project !== p) {
+      noticeTimers.forEach(clearTimeout); noticeTimers.clear();
+      Object.assign(setUI, { project: p, rows: null, error: '', busy: '', edits: {}, errors: {}, notices: {} });
+    }
     let graph = null, log = [], problem = '';
     if (p) {
+      setP = get(`/api/factory/projects/${enc(p)}/settings`).then((b) => ({ rows: b.rows || [] }), (e) => ({ error: e.message || 'error', http: e.http, needsPairing: e.needsPairing, pairMessage: e.pairMessage }));
       try {
         [graph, { lines: log }] = await Promise.all([get(`/api/factory/projects/${enc(p)}/graph`), get(`/api/factory/projects/${enc(p)}/log?n=100`)]);
       } catch (e) { if (!e.http) throw e; if (e.needsPairing) Object.assign(askUI, { needsPairing: true, pairMessage: e.pairMessage || '' }); problem = e.message; }
@@ -59,24 +77,42 @@ async function poll() {
     if (e.http) { if (e.needsPairing) Object.assign(askUI, { needsPairing: true, pairMessage: e.pairMessage || '' }); next = { projects: [], asks: [], p: '', task, graph: null, log: [], problem: e.message }; }
     else off = true;
   }
-  busy = false;
-  if (again) return poll();
+  const prev = data;
   data = next; down = off;
   if (!off) lastOK = Date.now();
-  timer = setTimeout(poll, POLL_MS);
   render();
+  if (setP && !off) {
+    const sr = await setP;
+    if (sr.rows) { setUI.rows = sr.rows; setUI.error = ''; }
+    else if (sr.http || !setUI.rows) { setUI.error = sr.error; if (sr.needsPairing) Object.assign(askUI, { needsPairing: true, pairMessage: sr.pairMessage || '' }); }
+    else down = true;
+    const prevPr = prev?.p === next?.p && prev?.projects.find((x) => x.id === next.p), nextPr = prevPr && next.projects.find((x) => x.id === next.p);
+    if (prevPr && nextPr && (prevPr.state ? prevPr.state === 'running' : prevPr.running) && (nextPr.state ? nextPr.state === 'finished' : !nextPr.running)) {
+      for (const a of prev.asks || []) if (a.status === 'open' && a.set && (!a.project || a.project === next.p) && !setUI.notices[a.set.name]
+        && !next.asks.some((x) => x.id === a.id || (x.status === 'open' && x.project === next.p && x.set?.name === a.set.name))
+        && (setUI.rows || []).find((r) => r.name === a.set.name)?.value !== a.set.value) {
+        setNotice(a.set.name, 'Not saved: the project finished before you answered, so this change was cancelled. You can make it again.');
+      }
+    }
+    render();
+  }
+  busy = false;
+  if (again) return poll();
+  timer = setTimeout(poll, POLL_MS);
 }
 
 // set replaces an element's HTML only when it changed, then reopens the <details>
-// that were open and puts keyboard focus back on the same link or summary.
-const key = (e) => e.tagName + (e.getAttribute('href') || e.className || e.parentElement.className);
+// that were open and puts keyboard focus back on the same control.
+const key = (e) => [e.tagName, e.dataset?.setting || e.id || e.getAttribute('href') || e.dataset?.askId || e.closest?.('[data-row]')?.dataset.row || e.closest?.('[data-ask-id]')?.dataset.askId || '', e.dataset?.option || e.getAttribute('aria-label') || e.className || e.parentElement?.className || e.textContent?.slice(0, 24) || ''].join(':');
 function set(el, html) {
   if (el._html === html) return;
   const open = [...el.querySelectorAll('details[open]')].map(key);
-  const focus = el.contains(document.activeElement) && key(document.activeElement);
+  const active = el.contains(document.activeElement) ? document.activeElement : null;
+  const focus = active && key(active), sel = active ? [active.selectionStart, active.selectionEnd] : null;
   el.innerHTML = html; el._html = html;
   for (const d of el.querySelectorAll('details')) d.open = open.includes(key(d));
-  if (focus) [...el.querySelectorAll('a, button, summary')].find((x) => key(x) === focus)?.focus({ preventScroll: true });
+  const hit = focus && [...el.querySelectorAll('a, button, summary, input, select, textarea')].find((x) => key(x) === focus);
+  if (hit) { hit.focus({ preventScroll: true }); if (sel && sel[0] != null && hit.setSelectionRange) { try { hit.setSelectionRange(sel[0], sel[1]); } catch {} } }
 }
 
 function render() {
@@ -91,9 +127,19 @@ function render() {
   $('board').hidden = waiting;
   if (waiting) return;
   const tasks = data.graph ? [...data.graph.tasks].sort((a, b) => a.layer - b.layer) : [];
-  const t = data.task && tasks.find((x) => x.ref === data.task);
-  $('aside').hidden = !!t;
-  set($('main'), t ? taskHTML(t) : boardHTML(tasks));
+  const t = data.task && tasks.find((x) => x.ref === data.task), pr = data.projects.find((x) => x.id === data.p);
+  const narrow = !t && Boolean(mq ? mq.matches : globalThis.innerWidth <= 760);
+  if (curNarrow !== narrow && $('main').after) {
+    if (narrow) { $('main').before($('asks')); $('projects').after($('settings')); }
+    else { $('main').after($('settings')); $('projects').after($('asks')); }
+    curNarrow = narrow;
+  }
+  $('aside').hidden = !!t; $('asks').hidden = !!t; $('tasks-top').hidden = !narrow;
+  set($('tasks-top'), narrow ? boardHTML(tasks, 'top') : '');
+  set($('main'), t ? taskHTML(t) : boardHTML(tasks, narrow ? 'body' : ''));
+  $('settings').hidden = !!t || !pr || !!data.problem;
+  $('settings').className = setUI.error ? 'card dashed' : 'card';
+  if (!$('settings').hidden) set($('settings'), renderSettingsHTML(setUI.rows, data.asks, setState()));
   set($('projects'), `<h2>projects</h2>${data.projects.map(projHTML).join('') || '<p class="muted">None yet.</p>'}`);
   const asks = (data.asks || []).filter(isOwnerAsk);
   set($('asks'), `<div class="head"><h2>asks for you</h2>${asks.length ? `<span>${asks.length} open</span>` : ''}</div>${renderAskCardsHTML(asks, askUI)}`);
@@ -106,24 +152,24 @@ const counts = (c = {}) => Object.entries(c).map(([k, n]) => `${n} ${(STAGE[k] |
 const projHTML = (pr) => `<a class="proj" href="#${enc(pr.id)}"${pr.id === data.p ? ' aria-current="true"' : ''}><span class="proj-title">${esc(goalTitle(pr.goal, pr.id))}</span>` +
   `<span class="muted">${pr.error ? esc(pr.error) : (pr.running ? 'running' : 'stopped') + (counts(pr.counts) ? ' · ' + esc(counts(pr.counts)) : '')}</span></a>`;
 
-function boardHTML(tasks) {
-  const pr = data.projects.find((x) => x.id === data.p);
-  const done = tasks.filter((x) => x.stage === 'done');
-  let h = `<div class="head"><h1>tasks</h1>${pr ? `<span>${done.length} of ${tasks.length} done</span>` : ''}</div>`;
-  if (data.problem) return h + `<section class="card" role="status"><h2>can't show the factory</h2><p class="muted">${esc(data.problem)}</p></section>`;
-  if (!pr) return h + `<section class="card" aria-label="No tasks"><h2>nothing running</h2><p class="muted">No factory projects on this computer. Start one in a terminal with <code>sheepdog factory start &lt;folder&gt; --goal "…"</code>; it shows here within seconds.</p></section>`;
-  const title = goalTitle(pr.goal, pr.id);
-  h += `<p class="goal-title">${esc(title)}</p>`;
-  const rawGoal = (pr.goal || '').trim();
-  if (rawGoal && rawGoal !== title) h += `<details class="goal-full"><summary>full project goal</summary><div class="md-body">${renderMarkdown(pr.goal)}</div></details>`;
-  if (!tasks.length) h += `<section class="card" aria-label="No tasks"><h2>no tasks yet</h2><p class="muted">The coordinator has not planned this project yet.</p></section>`;
-  const other = [...new Set(tasks.map((x) => x.stage))].filter((s) => s !== 'done' && !ORDER.includes(s));
-  for (const s of [...ORDER, ...other]) {
-    const rows = tasks.filter((x) => x.stage === s), [rawLabel, , alert] = stage(rows[0] || { stage: s }), label = esc(rawLabel);
-    if (rows.length) h += `<section class="group" aria-label="${label}"><h2${alert ? ' class="alert"' : ''}>${label} <span class="count">${rows.length}</span></h2><div class="rows${alert ? ' alert' : ''}">${rows.map(rowHTML).join('')}</div></section>`;
+function boardHTML(tasks, part) {
+  const pr = data.projects.find((x) => x.id === data.p), done = tasks.filter((x) => x.stage === 'done');
+  let top = `<div class="head"><h1>tasks</h1>${pr ? `<span>${done.length} of ${tasks.length} done</span>` : ''}</div>`, body = '';
+  if (data.problem) body = `<section class="card" role="status"><h2>can't show the factory</h2><p class="muted">${esc(data.problem)}</p></section>`;
+  else if (!pr) body = `<section class="card" aria-label="No tasks"><h2>nothing running</h2><p class="muted">No factory projects on this computer. Start one in a terminal with <code>sheepdog factory start &lt;folder&gt; --goal "…"</code>; it shows here within seconds.</p></section>`;
+  else {
+    const title = goalTitle(pr.goal, pr.id), rawGoal = (pr.goal || '').trim();
+    top += `<p class="goal-title">${esc(title)}</p>` + (rawGoal && rawGoal !== title ? `<details class="goal-full"><summary>full project goal</summary><div class="md-body">${renderMarkdown(pr.goal)}</div></details>` : '');
+    if (!tasks.length) body += `<section class="card" aria-label="No tasks"><h2>no tasks yet</h2><p class="muted">The coordinator has not planned this project yet.</p></section>`;
+    const other = [...new Set(tasks.map((x) => x.stage))].filter((s) => s !== 'done' && !ORDER.includes(s));
+    for (const s of [...ORDER, ...other]) {
+      const rows = tasks.filter((x) => x.stage === s), [rawLabel, , alert] = stage(rows[0] || { stage: s }), label = esc(rawLabel);
+      if (rows.length) body += `<section class="group" aria-label="${label}"><h2${alert ? ' class="alert"' : ''}>${label} <span class="count">${rows.length}</span></h2><div class="rows${alert ? ' alert' : ''}">${rows.map(rowHTML).join('')}</div></section>`;
+    }
+    if (done.length) body += `<details class="done"><summary>${done.length} done · show them</summary><div class="rows">${done.map(rowHTML).join('')}</div></details>`;
+    body += logHTML(data.log, 'log');
   }
-  if (done.length) h += `<details class="done"><summary>${done.length} done · show them</summary><div class="rows">${done.map(rowHTML).join('')}</div></details>`;
-  return h + logHTML(data.log, 'log');
+  return part === 'top' ? top : part === 'body' ? body : top + body;
 }
 
 function rowHTML(t) {
@@ -158,37 +204,108 @@ function taskHTML(t) {
     kv('layer', String(t.layer)) + '</section></aside></div>';
 }
 
-async function submitAnswer(askId, option) {
+async function submitSetting(project, name, value) {
+  setUI.busy = name; delete setUI.errors[name]; delete setUI.notices[name];
+  if (!askUI.pairDone) clearPair();
+  render();
+  const res = await proposeSetting(askFlow, project, name, value).catch((e) => ({ ok: false, message: e.message || 'Network error.' }));
+  setUI.busy = '';
+  if (res.ok) { delete setUI.edits[name]; clearPair(); await poll(); return focusRow(name); }
+  if (res.needsPairing) {
+    Object.assign(askUI, { needsPairing: false, pairDone: false, pairMessage: res.message, pending: { kind: 'setting', project, name, value } });
+    render(); return $('settings').querySelector('input[name="code"]')?.focus({ preventScroll: true });
+  }
+  clearPair(); setUI.errors[name] = res.message || 'Could not change setting.'; render(); focusRow(name);
+}
+
+async function submitAnswer(askId, option, inRow = '') {
+  const ask = (data?.asks || []).find((a) => a.id === askId);
   Object.assign(askUI, { busyId: askId, error: '', errorAskId: '', pairError: '' });
+  if (!askUI.pairDone) Object.assign(askUI, { needsPairing: false, pending: null });
   render();
   const res = await askFlow.answer(askId, option).catch((e) => ({ ok: false, message: e.message || 'Network error.' }));
   askUI.busyId = '';
-  if (res.ok) { Object.assign(askUI, { needsPairing: false, pending: null }); render(); return poll(); }
-  if (res.needsPairing) Object.assign(askUI, { needsPairing: true, pairMessage: res.message, pending: { askId, option } });
-  else Object.assign(askUI, { error: res.message || 'Could not record answer.', errorAskId: askId });
+  if (res.ok) {
+    clearPair();
+    if (ask?.set) {
+      const n = ask.set.name; delete setUI.edits[n]; delete setUI.errors[n];
+      setNotice(n, option === 'Save' ? (n.startsWith('models.') ? 'Saved. The next agent started for this role uses it. Running agents keep their model.' : 'Saved. The engine uses it from now on.') : `Kept at ${ask.set.was || 'not set'}. Nothing changed.`);
+    }
+    await poll();
+    return (inRow ? findCtrl(inRow) : $('asks').querySelector('button[data-ask-id], a, summary'))?.focus({ preventScroll: true });
+  }
+  if (res.needsPairing) {
+    Object.assign(askUI, { needsPairing: !inRow, pairDone: false, pairMessage: res.message, pending: { kind: 'ask', askId, option, row: inRow } });
+    render(); return (inRow ? $('settings') : $('asks')).querySelector('input[name="code"]')?.focus({ preventScroll: true });
+  }
+  clearPair();
+  const msg = ask?.set && res.code === 'out_of_range' ? `Not saved: another setting changed after you asked. ${res.message}` : (res.message || 'Could not record answer.');
+  if (ask?.set) setUI.errors[ask.set.name] = msg;
+  if (!inRow) Object.assign(askUI, { error: msg, errorAskId: askId });
   render();
+  [...(inRow ? findRow(inRow) || $('settings') : $('asks')).querySelectorAll('button[data-ask-id]')].find((b) => b.dataset.askId === askId && b.dataset.option === option)?.focus({ preventScroll: true });
 }
 
-$('asks').addEventListener('click', (e) => {
-  const btn = e.target.closest('button[data-ask-id][data-option]');
-  if (btn && !askUI.busyId) submitAnswer(btn.dataset.askId, btn.dataset.option);
+const syncEdit = (e) => {
+  const ctrl = e.target.closest?.('[data-setting]');
+  if (ctrl && data) {
+    const n = ctrl.dataset.setting, row = (setUI.rows || []).find((r) => r.name === n);
+    if (row && ctrl.value === row.value) delete setUI.edits[n]; else setUI.edits[n] = ctrl.value;
+    clearTimeout(noticeTimers.get(n)); noticeTimers.delete(n);
+    delete setUI.errors[n]; delete setUI.notices[n];
+    const html = renderSettingsHTML(setUI.rows, data.asks, setState()), tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    const srow = ctrl.closest('[data-row]'), nextRow = [...tmp.querySelectorAll('[data-row]')].find((x) => x.dataset.row === n);
+    const top = srow?.querySelector('.srow-top'), nextTop = nextRow?.querySelector('.srow-top'), nextCtrl = nextTop?.querySelector('[data-setting]');
+    if (top && nextTop && nextCtrl && srow.appendChild) {
+      ctrl.className = nextCtrl.className;
+      ctrl.setAttribute('aria-describedby', nextCtrl.getAttribute('aria-describedby'));
+      top.querySelector('button')?.remove();
+      const btn = nextTop.querySelector('button'); if (btn) top.appendChild(btn);
+      while (top.nextElementSibling) top.nextElementSibling.remove();
+      while (nextTop.nextElementSibling) srow.appendChild(nextTop.nextElementSibling);
+      $('settings')._html = html;
+    } else render();
+  } else if (e.target.name === 'code') askUI.pairCode = e.target.value;
+};
+$('board').addEventListener('input', syncEdit);
+$('board').addEventListener('change', syncEdit);
+$('board').addEventListener('keydown', (e) => {
+  const ctrl = e.key === 'Enter' && e.target.closest?.('input[data-setting]'), n = ctrl?.dataset.setting;
+  if (ctrl && setUI.edits[n] !== undefined) {
+    e.preventDefault();
+    if (!setUI.busy && !(data?.asks || []).some((a) => a.status === 'open' && a.set?.name === n && (!a.project || a.project === data.p)) && (!ctrl.reportValidity || ctrl.reportValidity())) submitSetting(data.p, n, ctrl.value);
+  }
 });
-$('asks').addEventListener('submit', async (e) => {
+$('board').addEventListener('click', (e) => {
+  const opt = e.target.closest('button[data-ask-id][data-option]');
+  if (opt && !askUI.busyId) return submitAnswer(opt.dataset.askId, opt.dataset.option, opt.closest('[data-row]')?.dataset.row || '');
+  const prop = e.target.closest('button[data-propose]');
+  if (prop && !setUI.busy) {
+    const n = prop.dataset.propose, ctrl = findCtrl(n);
+    if (!ctrl?.reportValidity || ctrl.reportValidity()) submitSetting(data.p, n, setUI.edits[n] ?? ctrl?.value ?? '');
+    return;
+  }
+  const def = e.target.closest('button[data-default]');
+  if (def && !setUI.busy) submitSetting(data.p, def.dataset.default, (setUI.rows || []).find((r) => r.name === def.dataset.default)?.default ?? '');
+});
+$('board').addEventListener('submit', async (e) => {
   const form = e.target.closest('form[data-pair-form]');
   if (!form || askUI.pairingBusy) return;
   e.preventDefault();
   const code = form.elements.code?.value || '';
-  Object.assign(askUI, { pairingBusy: true, pairError: '' });
-  render();
+  Object.assign(askUI, { pairingBusy: true, pairError: '', pairCode: code }); render();
   const res = await askFlow.pairWithCode(code).catch((err) => ({ ok: false, message: err.message || 'Pairing failed.' }));
   askUI.pairingBusy = false;
-  if (!res.ok) { askUI.pairError = res.message || 'Pairing failed.'; return render(); }
+  if (!res.ok) { askUI.pairError = res.message || 'Pairing failed.'; render(); return (pairRow() ? $('settings') : $('asks')).querySelector('input[name="code"]')?.focus({ preventScroll: true }); }
   const pending = askUI.pending;
-  Object.assign(askUI, { needsPairing: false, pending: null });
-  render();
-  if (pending) await submitAnswer(pending.askId, pending.option); else poll();
+  Object.assign(askUI, { pairDone: Boolean(pending), pairError: '', pairCode: '' });
+  if (pending?.kind === 'setting') await submitSetting(pending.project, pending.name, pending.value);
+  else if (pending?.askId) await submitAnswer(pending.askId, pending.option, pending.row || '');
+  else { clearPair(); render(); await poll(); }
 });
-
+if (mq?.addEventListener) mq.addEventListener('change', () => data && render());
+else addEventListener('resize', () => data && render());
 $('retry').addEventListener('click', poll);
 addEventListener('hashchange', () => { scrollTo(0, 0); poll(); });
 poll();

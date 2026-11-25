@@ -562,6 +562,7 @@ func TestEngineTaskLoopN11ThenN23OnceAndReady(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	id := eng.projectDirs()[0].Name()
+	noPlanReview(t, paths, id)
 
 	// Pass 1: coordinator J7 starts; no tasks yet.
 	eng.passProject(ctx, id, false)
@@ -818,6 +819,7 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 		t.Fatal(err)
 	}
 	id1 := eng1.projectDirs()[0].Name()
+	noPlanReview(t, eng1.Paths, id1)
 	eng1.passProject(ctx, id1, false)
 	if err := eng1.Report(runs1[0].Env["SHEEPDOG_RUN_TOKEN"], "plan apply", []byte(`{"tasks":[{"id":"t1","estimate_lines":50,"title":"feat: x",`+testPlanJSON+`}]}`)); err != nil {
 		t.Fatal(err)
@@ -879,6 +881,7 @@ func TestEngineFailedExecutorsAskOnceAndDoNotSpin(t *testing.T) {
 		t.Fatal("start did not wake the engine")
 	}
 	id3 := eng3.projectDirs()[0].Name()
+	noPlanReview(t, eng3.Paths, id3)
 	eng3.passProject(ctx, id3, false)
 	var coordRun hc.RunParams
 	select {
@@ -1105,6 +1108,7 @@ func TestEngineReviewLoopChangesThenPass(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()
+	noPlanReview(t, paths, id)
 
 	// Coordinator starts and applies 1-task plan; N11 creates worktree; N23 starts worker.
 	eng.passProject(ctx, id, false)
@@ -1633,6 +1637,7 @@ func TestEngineRejectCarriesToNextReviewerAndMergesAfterTwoPasses(t *testing.T) 
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()
+	noPlanReview(t, paths, id)
 
 	eng.passProject(ctx, id, false) // J7 coordinator
 	coordTok := runs[0].Env["SHEEPDOG_RUN_TOKEN"]
@@ -1837,6 +1842,7 @@ func TestReviewerPromptIncludesProofsTouchedSkippedAndRule(t *testing.T) {
 		t.Fatal(err)
 	}
 	id := eng.projectDirs()[0].Name()
+	noPlanReview(t, paths, id)
 	eng.passProject(ctx, id, false) // coordinator
 	coordTok := runs[0].Env["SHEEPDOG_RUN_TOKEN"]
 	plan := `{"tasks":[{"id":"T1","estimate_lines":50,"title":"feat: proofs","brief":"Check proofs.",` + testScopeJSON + `,"outcomes":[` +

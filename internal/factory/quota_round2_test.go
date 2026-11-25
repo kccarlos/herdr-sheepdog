@@ -944,6 +944,7 @@ func TestQuotaCooldownBlocksAcrossProjectsAndNeverShortens(t *testing.T) {
 	}
 	stB.Settings.Models = codexCoordOnly
 	stB.Settings.PoolMinutes = 3
+	stB.Settings.PlanReviewRounds = 0
 	if err := SaveState(q.paths.State(idB), stB); err != nil {
 		t.Fatal(err)
 	}

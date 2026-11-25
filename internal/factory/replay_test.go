@@ -160,6 +160,9 @@ func TestTemplatesShortAndSourced(t *testing.T) {
 			t.Errorf("%s: filled prompt keeps %q:\n%s", role, m, p)
 		}
 	}
+	if !strings.Contains(coordinatorTemplate, "{sheepdog} factory plan reject") {
+		t.Errorf("coordinator.md missing `{sheepdog} factory plan reject` (prompts.md 5.1, plan.md 11.3)")
+	}
 }
 
 // TestRetroTemplateCauseSetMatchesFlow checks design.md 7.2, prompts.md 5.5,

@@ -75,6 +75,7 @@ func newLanding(t *testing.T) *landing {
 	setIdle(t, srv, l.client, l.worker, "idle")
 	srv.Add(hc.Terminal{Address: "coord-elsewhere", Name: "coord-elsewhere", State: "live", Labels: testCoordLabels(l.id, "run-elsewhere"), Status: &hc.Status{App: "claude-code", State: "working"}})
 	l.edit(func(s *flow.State) {
+		s.Settings.PlanReviewRounds = 0
 		s.Project.RunID = "coord-elsewhere" // the coordinator is not this test's business
 		s.Tasks = []flow.Task{{ID: "T1", Title: "feat: x", EstimateLines: 50, Attempts: []flow.Attempt{{SizeCap: 100,
 			BaseCommit: base, Branch: l.branch, Worktree: l.wt, PR: 7, RunID: l.worker,

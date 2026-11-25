@@ -20,7 +20,8 @@ strings; a test's expected string is the **Text** column
   sentence are examples: "review rounds 3 (now 2)" stands for any row.
 - A setting's name on screen is its key with spaces for underscores
   (`review_rounds` → "review rounds"). A models row is `<role> models`.
-- Headings are lowercase; buttons start with a capital.
+- Headings are lowercase; buttons start with a capital (one exception: the
+  header's `needs you: N` button, see `ni.btn`).
 
 
 ## Projects and the way in
@@ -273,6 +274,26 @@ strings; a test's expected string is the **Text** column
 | `gr.node` | screen-reader text | T7, Search box on the notes page, working, after T3 and T4 | a node's label |
 | `gr.scroll` | hint | The graph is wider than the window. Scroll it sideways, or switch to the list. | above the box, whenever it scrolls |
 
+## Project overview and the needs-you indicator (14.10)
+
+| Id | Kind | Text | Where and when |
+|---|---|---|---|
+| `ov.h` | heading | projects | h1 of the overview: what /factory opens when there are two or more projects and none is chosen |
+| `ov.needs` | mark | needs you: 2 | on a project card, only when the project has open asks for you; amber outline, the number is the count |
+| `ov.progress` | card text | 3 of 6 done | done tasks of all tasks |
+| `ov.notasks` | card text | no tasks yet | a project the coordinator has not planned yet |
+| `ov.name` | card text | notes | the project's name: the last part of its folder's path (the project's id when it has no folder); in mono above the goal, and before the goal in the needs-you list |
+| `ov.card` | screen-reader text | notes, A notes page with search, running, needs you: 2, 2 of 8 done | a card's label; the whole card is one link into the project |
+| `ov.err` | mark | can't read project | a project whose stored state the daemon cannot read; icon: triangle; danger colour. The card shows the project id, this mark, the hint and the daemon's error; no state word and no progress; it is not a link; it sorts last |
+| `ov.err.hint` | sentence | Its state file could not be read. | under the mark; the daemon's error sentence follows as secondary text |
+| `ov.order` | behaviour | (no words) | cards in this order: projects that need you, then running, stopped, finished, then those that cannot be read; inside a group as the daemon lists them |
+| `ov.all` | link | all projects | only when there are two or more projects. On a project's board: the back link, in place of the aside's projects card. On the new-project form: in place of 'board' (never two back links). The task view keeps 'board', which returns to its project |
+| `ni.btn` | button | needs you: 3 | in the header on every page, counting every project; not shown when the count is 0, nor before the first load. Lowercase on purpose (it sits beside "sheepdog factory · live" and matches the card mark): the one exception to buttons starting with a capital. Screen-reader labels "needs you: 3 asks in 2 projects", "needs you: 2 asks in 1 project", "needs you: 1 ask in 1 project"; aria-expanded. While the link is lost it stays, with the last known asks |
+| `ni.h` | heading | needs you | heading of the list the button opens. The list is part of the page, directly under the header: it pushes the page down and covers nothing |
+| `ni.item` | link | Delete the old notes table in the migration? | one link per open ask, under its project's heading (name · goal). Activating it closes the list and opens that project with the ask's card scrolled into view and focused; when that project is already shown, the page does not reload: the list closes and the card is scrolled to and focused |
+| `ni.inproj` | card text | 2 open | inside a project the asks-for-you card counts and lists only that project (exists; now per project) |
+| `ni.none` | empty state | No open asks right now. | the asks card of a project with none (exists), even while the header's count shows another project's |
+
 ## Marks: never colour alone
 
 | Mark | Icon | Word | Colour (token) |
@@ -294,6 +315,10 @@ strings; a test's expected string is the **Text** column
 | settings row changed | — | changed | `working` on `working-soft` |
 | settings row not allowed | — | not allowed | `danger` on `danger-bg` |
 | settings row not used | — | not used | `muted-on-fill` on `code` |
+| needs you, header button | speech bubble | needs you: 3 | `fg` on `primary-soft`, `blocked` outline |
+| needs you, on a project card | — | needs you: 2 | `fg` on `primary-soft`, `blocked` outline; the card's outline is `blocked` too |
+| project state | dot | running, stopped, finished | dot `working`, `idle`, `done`; the word in `fg` on `code` |
+| project cannot be read | triangle | can't read project | `danger` |
 
 ## Tab order and screen-reader labels
 
@@ -412,6 +437,19 @@ is `role="status"`. Focus survives the 3 s poll.
 | 3 | PR links and commit ids | link "PR #7, opens GitHub"; a short commit id is text with the whole id as its title |
 | 4 | Show them | button, only in the only-routine-checks state |
 
+### Overview and the needs-you indicator
+
+| # | Control | Screen-reader label and notes |
+|---|---|---|
+| 1 | needs you: 3 | button in the header, first control of every page; "needs you: 3 asks in 2 projects" (singular forms "1 ask", "1 project"), expanded or collapsed. Escape closes the list and focus returns to the button |
+| 2 | the open list | directly after the button, in the page under the header: per project a heading "notes · A notes page with search", then a link per ask reading the question |
+| 3 | an ask link, activated | the list closes; the ask's project opens and focus lands on that ask's card under asks for you. If that project is already shown nothing reloads: the list closes, the card is scrolled into view and focused |
+| 4 | focus across the 3 s poll | each ask link carries its ask's id, so focus stays on the same ask when the list is redrawn, also when two asks lead to the same project |
+| 5 | all projects | link "all projects", first control of the main column on a project's board and on the new-project form, with two or more projects |
+| 6 | board | link "board" on the task view, unchanged; on the new-project form only with no project or one |
+| 7 | project cards | link per card: "notes, A notes page with search, running, needs you: 2, 2 of 8 done"; a project that cannot be read is a group, not a link: "old-importer, can't read project, …" |
+| 8 | New project | button, after the cards |
+
 ## Which board draws which state
 
 | Flow (plan.md, PR 14.0) | Board | Panels |
@@ -428,6 +466,7 @@ is `role="status"`. Focus survives the 3 s poll.
 | Log (14.7) | `FactoryWebLog`, `FactoryWebTaskLife` | the log (day headings, marks, tidied line, PR link) · show routine checks on · filtered to one task · empty · only routine checks so far · a long line · a PR number with no address · cannot load · the task view's own log |
 | Step bar (14.8) | `FactoryWebTaskLife` | the task view (named steps) · the compact bar on board rows · sent back from review · with a retro step · review skipped by your override · merged · ended without merging: dropped · ended without merging: closed · parked · where plan review will sit |
 | Task graph (14.9) | `FactoryWebGraph` | 20 tasks in 5 layers · focus or hover on a node: its own edges stand out · a wide layer of 8 · one task: no graph offered · the switch, on list · 360 px: `FactoryWebGraph360` |
+| Project overview and the needs-you indicator (14.10) | `FactoryWebOverview` | two or more projects: the overview (with a finished project and one that cannot be read) · the indicator, open · several projects, none needs you · inside a project · inside a project that needs nothing, while another does · the task view keeps "board" · the new-project form, with two or more projects · one project: no overview · no project |
 | The narrow layout | `FactoryWebLifeHome360` | asks directly after the project bar; projects before settings |
 | The whole page | `FactoryWebLifeHome` | every new part in its place on a running project |
 

@@ -41,8 +41,8 @@ const owner = "owner"
 var verbRoles = map[string]string{
 	"start": owner, "stop": owner,
 	"plan apply": flow.RoleCoordinator, "recap decide": flow.RoleCoordinator,
-	"plan amend": flow.RoleCoordinator, "task": flow.RoleCoordinator,
-	"ready": flow.RoleWorker, "review": flow.RoleReviewer, "retro": flow.RoleRetro, "ask": "", "answer": flow.RoleCoordinator,
+	"plan amend": flow.RoleCoordinator, "plan reject": flow.RoleCoordinator, "task": flow.RoleCoordinator,
+	"ready": flow.RoleWorker, "review": flow.RoleReviewer, "retro": flow.RoleRetro, "plan-review": flow.RolePlanReviewer, "ask": "", "answer": flow.RoleCoordinator,
 }
 
 // Report is the acceptance step for everything a run's terminal sends: the
@@ -77,6 +77,10 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 		return e.acceptReviewLocked(id, &s, role, ti, args)
 	case "retro":
 		return e.acceptRetroLocked(id, &s, role, ti, args)
+	case "plan-review":
+		return e.acceptPlanReviewLocked(id, &s, role, args)
+	case "plan reject":
+		return e.acceptPlanRejectLocked(id, &s, role, args)
 	case "ask":
 		return e.acceptAskLocked(id, &s, role, ti, runID, args)
 	case "answer":
@@ -531,6 +535,93 @@ func (e *Engine) acceptRetroLocked(id string, s *flow.State, role string, ti int
 		Rule: "retro", Decision: rnd.Verdict,
 		Why: fmt.Sprintf("round %d (retro, %s) at %s: %s (%d major(s), cause %s)", rnd.N, rnd.Reviewer.Model, rnd.Head, rnd.Verdict, rnd.Majors, cause),
 	})
+}
+
+func (e *Engine) acceptPlanReviewLocked(id string, s *flow.State, role string, args json.RawMessage) error {
+	n := len(s.Project.PlanReviews)
+	if n == 0 || !s.Project.PlanReviews[n-1].Accepted.IsZero() || s.Project.PlanReviews[n-1].Verdict != "" || s.Project.PlanReviews[n-1].Run == nil {
+		return e.refuse(id, "already_closed", "No open plan review accepts a verdict for this project.")
+	}
+	var req struct {
+		Verdict  string `json:"verdict"`
+		Code     string `json:"code"`
+		Findings string `json:"findings"`
+	}
+	if len(bytes.TrimSpace(args)) == 0 || decodeStrict(args, &req) != nil {
+		return e.refuse(id, "invalid_report", "Plan review report JSON is invalid.")
+	}
+	pr, verdict := &s.Project.PlanReviews[n-1], strings.TrimSpace(req.Verdict)
+	if verdict != flow.VerdictPass && verdict != flow.VerdictChanges {
+		return e.refuse(id, "invalid_report", fmt.Sprintf("Invalid verdict %q; must be %q or %q.", verdict, flow.VerdictPass, flow.VerdictChanges))
+	}
+	if strings.TrimSpace(req.Code) != pr.Run.Code {
+		return e.refuse(id, "invalid_report", "Wrong code: does not match this plan review's one-time code.")
+	}
+	if len(req.Findings) > maxReviewFindingsBytes {
+		return e.refuse(id, "invalid_report", fmt.Sprintf("findings is longer than %d bytes.", maxReviewFindingsBytes))
+	}
+	findings, err := flow.ParsePlanFindings(req.Findings, pr.Tasks)
+	if err != nil {
+		return e.refuse(id, "invalid_report", err.Error())
+	}
+	if (verdict == flow.VerdictPass && len(findings) != 0) || (verdict == flow.VerdictChanges && len(findings) == 0) {
+		return e.refuse(id, "invalid_report", fmt.Sprintf("verdict %s does not match %d parsed finding(s).", verdict, len(findings)))
+	}
+	now, bin := e.now(), cmp.Or(e.Bin, "sheepdog")
+	var open []string
+	for i := range findings {
+		if ti := slices.IndexFunc(s.Tasks, func(t flow.Task) bool { return t.ID == findings[i].Task }); ti >= 0 && flow.Ended(s.Tasks[ti]) {
+			findings[i].Closed = flow.PlanClosedDropped
+		} else {
+			open = append(open, findings[i].Kind+": "+findings[i].Task+" "+findings[i].Why)
+		}
+	}
+	pr.Verdict, pr.Findings, pr.At, pr.Run.RunTokenHash = verdict, findings, now, ""
+	why := fmt.Sprintf("round %d (%s): %s (%d finding(s))", pr.N, pr.Reviewer.Model, verdict, len(findings))
+	if verdict == flow.VerdictPass {
+		pr.Accepted = now
+		for i := range s.Tasks {
+			s.Tasks[i].Unreviewed = s.Tasks[i].Unreviewed && !slices.Contains(pr.Tasks, s.Tasks[i].ID)
+		}
+	} else if len(open) > 0 {
+		holdProjectWake(s, fmt.Sprintf("plan_review@%d", pr.N), fmt.Sprintf("plan review %d asked for changes (%d open finding(s))", pr.N, len(open)),
+			fmt.Sprintf("findings: %s; close each finding with `%s factory task drop <task> --why \"<why>\"`, `%s factory plan amend <file>` (changes title, brief, outcomes, estimate_lines, after, priority or request, not scope fields; closes non-delete findings), or `%s factory plan reject <task> --why \"<why>\"`", strings.Join(open, "; "), bin, bin, bin), now)
+	}
+	return e.commitLocked(id, s, LogLine{By: role, Input: map[string]any{"verb": "plan-review", "round": pr.N, "model": pr.Reviewer.Model, "verdict": verdict, "findings": len(findings)}, Rule: "plan-review", Decision: verdict, Why: why})
+}
+
+func (e *Engine) acceptPlanRejectLocked(id string, s *flow.State, role string, args json.RawMessage) error {
+	var req struct {
+		Task string `json:"task"`
+		Why  string `json:"why"`
+	}
+	if len(bytes.TrimSpace(args)) == 0 || decodeStrict(args, &req) != nil || strings.TrimSpace(req.Task) == "" {
+		return e.refuse(id, "invalid_report", "A plan reject command must carry task and why.")
+	}
+	taskID, n := strings.TrimSpace(req.Task), len(s.Project.PlanReviews)
+	if n == 0 || !s.Project.PlanReviews[n-1].Accepted.IsZero() || !slices.ContainsFunc(s.Project.PlanReviews[n-1].Findings, func(f flow.PlanFinding) bool { return f.Task == taskID && f.Closed == "" }) {
+		return e.refuse(id, "nothing_to_reject", fmt.Sprintf("Task %q has no open plan review finding to reject.", taskID))
+	}
+	why, err := e.cleanWhy(id, req.Why, "plan reject", "--why")
+	if err != nil {
+		return err
+	}
+	for i := range s.Project.PlanReviews[n-1].Findings {
+		if f := &s.Project.PlanReviews[n-1].Findings[i]; f.Task == taskID && f.Closed == "" {
+			f.Closed, f.RejectWhy = flow.PlanClosedRejected, why
+		}
+	}
+	return e.commitLocked(id, s, LogLine{By: role, Task: taskID, Input: map[string]any{"verb": "plan reject", "why": why}, Rule: "plan reject", Decision: "rejected", Why: why})
+}
+
+func closePlanFindings(p *flow.Project, taskID, how string, includeDelete bool) {
+	if n := len(p.PlanReviews); n > 0 && p.PlanReviews[n-1].Accepted.IsZero() {
+		for i := range p.PlanReviews[n-1].Findings {
+			if f := &p.PlanReviews[n-1].Findings[i]; f.Task == taskID && f.Closed == "" && (includeDelete || f.Kind != "delete") {
+				f.Closed = how
+			}
+		}
+	}
 }
 
 // cleanWhy cleans a free-text reason and refuses it when empty or over the cap.
@@ -1170,6 +1261,7 @@ func (e *Engine) acceptTaskLocked(id string, s *flow.State, role string, args js
 		t.Parked = req.Action == "park"
 	case "drop":
 		t.Dropped = &flow.Dropped{Why: why}
+		closePlanFindings(&s.Project, t.ID, flow.PlanClosedDropped, true)
 		var waiting []string // nothing is unblocked silently: they keep waiting on the dropped id
 		for _, o := range s.Tasks {
 			if slices.Contains(o.After, t.ID) && !flow.Ended(o) {
@@ -1489,6 +1581,7 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 		if len(what) == 0 {
 			continue
 		}
+		closePlanFindings(&s.Project, t.ID, flow.PlanClosedAmended, false)
 		done = append(done, t.ID+" ("+strings.Join(what, ", ")+")"+capNote)
 		workerWhat := slices.DeleteFunc(slices.Clone(what), func(f string) bool { return f == "request" })
 		if a != nil && a.RunID != "" && len(workerWhat) > 0 {

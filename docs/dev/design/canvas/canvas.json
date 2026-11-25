@@ -1062,30 +1062,6 @@
    "title": "Engine — the settings",
    "page": "engine"
   },
-  "FactoryWebMain.dc.html": {
-   "x": 0,
-   "y": 30682,
-   "w": 1440,
-   "h": 1840,
-   "title": "Factory web — home, light",
-   "expand": "fill"
-  },
-  "FactoryWebTask.dc.html": {
-   "x": 3510,
-   "y": 30682,
-   "w": 1440,
-   "h": 1320,
-   "title": "Factory web — one task",
-   "expand": "fill"
-  },
-  "FactoryWebEmpty.dc.html": {
-   "x": 5030,
-   "y": 30682,
-   "w": 1280,
-   "h": 900,
-   "title": "Factory web — empty, no tasks",
-   "expand": "fill"
-  },
   "FactoryWebLoading.dc.html": {
    "x": 6390,
    "y": 30682,
@@ -1098,24 +1074,8 @@
    "x": 7750,
    "y": 30682,
    "w": 1440,
-   "h": 1900,
+   "h": 2213,
    "title": "Factory web — link lost after load",
-   "expand": "fill"
-  },
-  "FactoryWebPhone.dc.html": {
-   "x": 3040,
-   "y": 30682,
-   "w": 390,
-   "h": 3900,
-   "title": "Factory web — home on a phone",
-   "expand": "fill"
-  },
-  "FactoryWebHomeDark.dc.html": {
-   "x": 1520,
-   "y": 30682,
-   "w": 1440,
-   "h": 1840,
-   "title": "Factory web — home, dark",
    "expand": "fill"
   },
   "FactoryWebLifeHome.dc.html": {
@@ -1380,6 +1340,30 @@
    "w": 360,
    "h": 3083,
    "title": "Factory web, life cycle — the task graph, 360 px wide",
+   "expand": "fill"
+  },
+  "FactoryWebOverview.dc.html": {
+   "x": 17520,
+   "y": 35062,
+   "w": 1440,
+   "h": 2778,
+   "title": "Factory web, life cycle — project overview and the needs-you indicator, light",
+   "expand": "fill"
+  },
+  "FactoryWebOverviewDark.dc.html": {
+   "x": 17520,
+   "y": 40011,
+   "w": 1440,
+   "h": 2778,
+   "title": "Factory web, life cycle — project overview and the needs-you indicator, dark",
+   "expand": "fill"
+  },
+  "FactoryWebOverview360.dc.html": {
+   "x": 17520,
+   "y": 44960,
+   "w": 360,
+   "h": 5824,
+   "title": "Factory web, life cycle — project overview and the needs-you indicator, 360 px wide",
    "expand": "fill"
   }
  },
@@ -1704,13 +1688,8 @@
   "EngineRun.dc.html",
   "EngineAcceptance.dc.html",
   "EngineSettings.dc.html",
-  "FactoryWebMain.dc.html",
-  "FactoryWebTask.dc.html",
-  "FactoryWebEmpty.dc.html",
   "FactoryWebLoading.dc.html",
   "FactoryWebOffline.dc.html",
-  "FactoryWebPhone.dc.html",
-  "FactoryWebHomeDark.dc.html",
   "FactoryWebLifeHome.dc.html",
   "FactoryWebLifeHomeDark.dc.html",
   "FactoryWebLifeHome360.dc.html",
@@ -1743,7 +1722,10 @@
   "FactoryWebLog360.dc.html",
   "FactoryWebGraph.dc.html",
   "FactoryWebGraphDark.dc.html",
-  "FactoryWebGraph360.dc.html"
+  "FactoryWebGraph360.dc.html",
+  "FactoryWebOverview.dc.html",
+  "FactoryWebOverviewDark.dc.html",
+  "FactoryWebOverview360.dc.html"
  ],
  "pages": [
   {
