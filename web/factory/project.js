@@ -1,4 +1,4 @@
-// New-project form, start checks and start/check requests for /factory (plan.md PR 14.5).
+// New-project form, project actions, start checks and start/stop/check requests (plan.md PR 14.5 & 14.6).
 import { esc, pairBoxHTML, ERR_ICO, OK_ICO } from './asks.js';
 import { MODELS_HINT, fixHTML, rowHTML, parseModelCandidates } from './settings.js';
 
@@ -6,6 +6,9 @@ const ico14 = (d) => `<svg width="14" height="14" viewBox="0 0 24 24" fill="none
 export const PLUS_ICO = ico14('M12 5v14M5 12h14');
 const FAIL_ICO = ico14('M6 6l12 12M18 6L6 18'), SKIP_ICO = ico14('M5 12h14');
 const CK_ST = { ok: ['pass', 'ck-ok', OK_ICO], warn: ['warning', 'ck-warn', ERR_ICO], fail: ['fail', 'ck-fail', FAIL_ICO], skip: ['skipped', 'ck-skip', SKIP_ICO] };
+const ST_DOT = Object.assign(Object.create(null), { running: 'working', stopped: 'idle', finished: 'done' });
+const NG_GO = Object.assign(Object.create(null), { running: 'Give it this goal', stopped: 'Start with this goal', finished: 'Reopen with this goal' });
+export const projectState = (pr) => pr?.state || (pr?.running ? 'running' : 'stopped');
 export const CK_CANT = "Can't run the start checks: sheepdog did not answer in time. Check that sheepdog is running, then check again.";
 export const EMPTY_CARD_HTML = `<section class="card" aria-label="No project"><h2>no project yet</h2><p class="muted">A project is one folder with a git repository and one goal. The coordinator plans the tasks, workers build them, reviewers check them, and you are asked only for decisions.</p><div class="ask-opts"><button type="button" class="ask-opt pri" data-new-project="1">${PLUS_ICO}New project</button></div></section>`;
 
@@ -30,6 +33,7 @@ export async function checkProject(folder, set = {}, fetchFn = globalThis.fetch,
 }
 
 export const startProject = (flow, folder, goal, set = {}) => flow.send('/api/factory/projects/start', { folder, goal, set });
+export const stopProject = (flow, project) => flow.send('/api/factory/projects/stop', { project });
 
 const SUGG_CAP = 6;
 function suggestionsOf(spaces, projects) {
@@ -47,15 +51,47 @@ export function renderChecksHTML(results, ui = {}) {
   else if (!Array.isArray(results) || !results.length) body = '<p class="small muted">Every check must pass before a project can start. A warning does not stop it.</p>';
   else {
     const nFail = results.filter((r) => r.status === 'fail').length, nWarn = results.filter((r) => r.status === 'warn').length, nOk = results.filter((r) => r.status === 'ok').length;
-    if (nFail > 0) body += `<p class="ask-err" role="alert">${ERR_ICO}<span>${nFail === 1 ? '1 check failed. Fix it, then check again.' : `${nFail} checks failed. Fix them, then check again.`}</span></p><p class="small muted">Is a failed check for a CLI you do not use? Change the models above, then check again.</p>`;
+    if (ui.noSummary) body += '<p class="small muted">Is the failed check for a CLI you do not use? Change the models in settings below.</p>';
+    else if (nFail > 0) body += `<p class="ask-err" role="alert">${ERR_ICO}<span>${nFail === 1 ? '1 check failed. Fix it, then check again.' : `${nFail} checks failed. Fix them, then check again.`}</span></p> <p class="small muted">Is a failed check for a CLI you do not use? Change the models above, then check again.</p>`;
     else if (nWarn > 0) body += `<p class="set-ok" role="status">${OK_ICO}<span>${nOk} pass, ${nWarn} warning${nWarn === 1 ? '' : 's'}. You can start.</span></p>`;
     else body += `<p class="set-ok" role="status">${OK_ICO}<span>All ${results.length} checks pass.</span></p>`;
-    body += `<ul class="ck-list">${results.map((r) => {
+    body += ` <ul class="ck-list">${results.map((r) => {
       const [word, cls, ico] = (Object.hasOwn(CK_ST, r.status) && CK_ST[r.status]) || [r.status || 'unknown', 'ck-skip', SKIP_ICO];
-      return `<li class="srow ck-row"><div class="ck-head"><span class="ck-st ${cls}">${ico}${esc(word)}</span><span class="ck-name">${esc(r.name)}</span></div>${r.detail ? `<p class="small muted">${esc(r.detail)}</p>` : ''}${r.fix ? fixHTML(r.fix, ui.copied) : ''}</li>`;
-    }).join('')}</ul>`;
+      return `<li class="srow ck-row"><div class="ck-head"><span class="ck-st ${cls}">${ico}${esc(word)}</span> <span class="ck-name">${esc(r.name)}</span></div>${r.detail ? ` <p class="small muted">${esc(r.detail)}</p>` : ''}${r.fix ? ' ' + fixHTML(r.fix, ui.copied) : ''}</li>`;
+    }).join(' ')}</ul>`;
   }
-  return `<section class="card" aria-label="start checks"><h2>start checks</h2>${body}</section>`;
+  return `<section class="card" aria-label="start checks"><h2>start checks</h2> ${body}</section>`;
+}
+
+export function renderProjectActionsHTML(project, ui = {}) {
+  const st = projectState(project), fin = st === 'finished', canStop = st === 'running' || (fin && Boolean(project?.live));
+  const dis = ui.busy ? ' disabled' : '';
+  const note = st === 'stopped' ? 'Stopped. No agent is running. Resume goes on with the same goal.'
+    : (fin ? (project?.live ? 'Finished. An agent is still running.' : 'Finished. To go on, reopen it with a new goal.') : '');
+  const btns = [
+    canStop && `<button type="button" class="ask-opt" data-pa="stop" aria-label="Stop this project"${dis}>Stop</button>`,
+    st === 'stopped' && `<button type="button" class="ask-opt" data-pa="resume" aria-label="Resume this project"${dis}>${ui.busy === 'resume' ? 'Starting…' : 'Resume'}</button>`,
+    `<button type="button" class="ask-opt" data-pa="newgoal"${dis}>${fin ? 'Reopen with a new goal' : 'New goal'}</button>`,
+  ].filter(Boolean).join(' ');
+  let extra = '';
+  if (ui.mode === 'stop' && canStop) {
+    const what = fin ? 'Its last running agent ends now. The project stays finished.' : 'Its running agents end now. Resume goes on with the same goal.';
+    extra = ` <div class="card pa-confirm" role="group" aria-labelledby="pa-stop-q"><h3 id="pa-stop-q">Stop this project?</h3> <p>${what}</p> ` +
+      `<div class="ask-opts"><button type="button" class="ask-opt" data-pa="stop-no"${dis}>Keep it running</button> ` +
+      `<button type="button" class="ask-opt danger" data-pa="stop-yes"${dis}>${ui.busy === 'stop' ? 'Stopping…' : 'Stop the project'}</button></div></div>`;
+  } else if (ui.mode === 'newgoal') {
+    const hint = fin ? 'The folder and the settings stay as they are. To change a model first, use settings below.' : 'The folder and the settings stay as they are. The coordinator plans the new goal.';
+    const inErr = Boolean(ui.error && !ui.checks);
+    extra = ` <div class="card"><div class="np-field"><label class="np-lbl" for="pa-goal">new goal</label> <span id="pa-goal-hint" class="small muted">${hint}</span> ` +
+      `<textarea id="pa-goal" name="goal" class="set-in full${inErr ? ' bad' : ''}" rows="3" aria-describedby="pa-goal-hint${inErr ? ' pa-goal-err' : ''}">${esc(ui.goal || '')}</textarea>` +
+      `${inErr ? ` <p id="pa-goal-err" class="ask-err" role="alert">${ERR_ICO}<span>${esc(ui.error)}</span></p>` : ''}</div> ` +
+      `<div class="ask-opts"><button type="button" class="ask-opt rec" data-pa="ng-go"${dis}>${ui.busy === 'newgoal' ? 'Starting…' : (NG_GO[st] || 'Give it this goal')}</button> ` +
+      `<button type="button" class="ask-opt" data-pa="ng-cancel"${dis}>Cancel</button></div></div>`;
+  }
+  if (ui.error && (ui.checks || ui.mode !== 'newgoal')) extra += ` <p class="ask-err" role="alert">${ERR_ICO}<span>${esc(ui.error)}</span></p>`;
+  if (Array.isArray(ui.checks) && ui.checks.length) extra += ' ' + renderChecksHTML(ui.checks, { noSummary: true, copied: ui.copied });
+  if (ui.pairState?.pending?.kind === 'project' && ui.pairState.pending.project === project?.id) extra += ' ' + pairBoxHTML(ui.pairState, 'pair-code-pa');
+  return `<section class="proj-bar" aria-label="This project"><div class="pa-st"><span class="pill"><span class="dot ${ST_DOT[st] || 'idle'}" aria-hidden="true"></span>${esc(st)}</span>${note ? ` <span class="small muted">${note}</span>` : ''}</div> <div class="ask-opts">${btns}</div>${extra}</section>`;
 }
 
 export function renderNewProjectHTML(rows, ui = {}) {
