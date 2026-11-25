@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -12,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/eventlog"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
@@ -36,7 +38,7 @@ func (f *stubFactory) Projects() []factory.ProjectView { return nil }
 func (f *stubFactory) Graph(string) (factory.GraphView, error) {
 	return factory.GraphView{}, factory.ErrProjectNotFound
 }
-func (f *stubFactory) LogLines(string, int) ([]factory.LogEntry, error) {
+func (f *stubFactory) LogLines(string, int, string, bool) ([]factory.LogEntry, error) {
 	return nil, factory.ErrProjectNotFound
 }
 
@@ -445,5 +447,163 @@ func TestFactoryStartHTTPUsesEngineStartChecks_KB_STA_18(t *testing.T) {
 	}
 	if got := eng.Projects(); len(got) != 0 {
 		t.Fatalf("refused HTTP start created project state: %+v", got)
+	}
+}
+
+// TestFactoryLogRouteTaskAndObservationsFilter verifies plan.md PR 14.7 on
+// GET /api/factory/projects/{id}/log: kind projection without rule leakage,
+// observations excluded by default so n counts visible lines, ?observations=1,
+// ?task= returning an older task's own lines past 100 newer lines, and an
+// observation-only project returning an empty JSON array by default.
+func TestFactoryLogRouteTaskAndObservationsFilter(t *testing.T) {
+	dir := t.TempDir()
+	elog, err := eventlog.Open(dir, eventlog.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = elog.Close() })
+	st, err := state.Open(filepath.Join(dir, "state.json"), state.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = st.Close() })
+
+	paths := factory.Paths{DataDir: dir}
+	t0 := time.Date(2026, 11, 24, 12, 0, 0, 0, time.UTC)
+	var lines []factory.LogLine
+	var seq int64
+	add := func(by, task, rule string, asked []string, dec, why string) {
+		seq++
+		lines = append(lines, factory.LogLine{
+			Seq: seq, At: t0.Add(time.Duration(seq) * time.Second), Project: "proj-log",
+			By: by, Task: task, Rule: rule, Asked: asked, Decision: dec, Why: why,
+		})
+	}
+	add("owner", "", "start", nil, "started", "ship readable log")
+	add("engine", "T1", "N23", []string{flow.AskStartWorker}, "started worker", "claude sonnet")
+	add("engine", "T1", "pr_snapshot", nil, "", "the PR snapshot changed")
+	add("engine", "T1", "N28", []string{flow.AskOpenRecap + "@review"}, "opened recap", "max rounds")
+	add("engine", "T1", "A2", []string{flow.AskNotifyOwner}, "asked you", "Delete the old table?")
+	add("engine", "T1", "N2", []string{flow.AskMarkDone}, "done: PR #7 merged", "the PR is merged")
+	add("engine", "T1", "pr_snapshot", nil, "", "the PR snapshot changed")
+	for i := 1; i <= 55; i++ {
+		add("engine", "T2", "N23", []string{flow.AskStartWorker}, fmt.Sprintf("t2-step-%d", i), "working")
+		add("engine", "T2", "pr_snapshot", nil, "", "the PR snapshot changed")
+	}
+	add("engine", "T2", "pr_snapshot", nil, "", "the PR snapshot changed")
+
+	if err := factory.SaveState(paths.State("proj-log"), flow.State{
+		Seq: seq, Settings: flow.DefaultSettings(),
+		Project: flow.Project{ID: "proj-log", Folder: "/tmp/log", Goal: "ship readable log", Started: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, l := range lines {
+		if err := factory.AppendLog(paths.Log("proj-log"), l); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := factory.SaveState(paths.State("proj-obs"), flow.State{
+		Seq: 2, Settings: flow.DefaultSettings(),
+		Project: flow.Project{ID: "proj-obs", Folder: "/tmp/obs", Goal: "obs only", Started: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for i := int64(1); i <= 2; i++ {
+		if err := factory.AppendLog(paths.Log("proj-obs"), factory.LogLine{
+			Seq: i, At: t0.Add(time.Duration(i) * time.Second), Project: "proj-obs",
+			By: "engine", Task: "T1", Rule: "pr_snapshot", Why: "the PR snapshot changed",
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	eng := factory.New(paths, nil)
+	srv, err := New(Deps{Log: elog, Store: st, DataDir: dir, Factory: eng})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	getLog := func(path string) []map[string]any {
+		t.Helper()
+		r := httptest.NewRequest(http.MethodGet, path, nil)
+		r.RemoteAddr, r.Host = "127.0.0.1:5000", "127.0.0.1:7777"
+		w := httptest.NewRecorder()
+		srv.Handler().ServeHTTP(w, r)
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET %s = %d %s, want 200", path, w.Code, w.Body.String())
+		}
+		var resp struct {
+			Protocol int              `json:"protocol"`
+			Project  string           `json:"project"`
+			Lines    []map[string]any `json:"lines"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil || resp.Lines == nil {
+			t.Fatalf("GET %s bad JSON or nil lines: %s (err=%v)", path, w.Body.String(), err)
+		}
+		for _, ln := range resp.Lines {
+			for _, forbidden := range []string{"rule", "asked", "input", "facts", "seq", "project"} {
+				if _, leaked := ln[forbidden]; leaked {
+					t.Errorf("GET %s leaked %q: %v", path, forbidden, ln)
+				}
+			}
+		}
+		return resp.Lines
+	}
+
+	// Default n=2 skips trailing observations and returns 2 visible lines.
+	vis2 := getLog("/api/factory/projects/proj-log/log?n=2")
+	if len(vis2) != 2 || vis2[0]["decision"] != "t2-step-54" || vis2[1]["decision"] != "t2-step-55" {
+		t.Errorf("?n=2 = %v, want [t2-step-54, t2-step-55]", vis2)
+	}
+	// ?observations=0 behaves the same as omitting observations.
+	vis0 := getLog("/api/factory/projects/proj-log/log?n=2&observations=0")
+	if len(vis0) != 2 || vis0[1]["decision"] != "t2-step-55" {
+		t.Errorf("?n=2&observations=0 = %v, want [t2-step-54, t2-step-55]", vis0)
+	}
+	// ?observations=1 includes trailing observations with kind="observation".
+	obs2 := getLog("/api/factory/projects/proj-log/log?n=2&observations=1")
+	if len(obs2) != 2 || obs2[0]["kind"] != "observation" || obs2[1]["kind"] != "observation" {
+		t.Errorf("?n=2&observations=1 = %v, want 2 observation lines", obs2)
+	}
+
+	// ?task=T1 recovers T1's lines older than T2's >100 newer lines, without observations.
+	t1Vis := getLog("/api/factory/projects/proj-log/log?task=T1")
+	if len(t1Vis) != 4 {
+		t.Fatalf("?task=T1 len = %d (%v), want 4 visible T1 lines", len(t1Vis), t1Vis)
+	}
+	wantKinds := []any{nil, "needs_decision", "asked_you", "merged"}
+	for i, want := range wantKinds {
+		got, hasKind := t1Vis[i]["kind"]
+		if t1Vis[i]["task"] != "T1" {
+			t.Errorf("?task=T1[%d].task = %v, want T1", i, t1Vis[i]["task"])
+		}
+		if want == nil {
+			if hasKind && got != "" {
+				t.Errorf("?task=T1[%d].kind = %v, want empty/omitted", i, got)
+			}
+		} else if got != want {
+			t.Errorf("?task=T1[%d].kind = %v, want %v", i, got, want)
+		}
+	}
+
+	// ?task=T1&observations=1 includes T1's 2 observations too.
+	t1All := getLog("/api/factory/projects/proj-log/log?task=T1&observations=1")
+	if len(t1All) != 6 || t1All[1]["kind"] != "observation" || t1All[5]["kind"] != "observation" {
+		t.Errorf("?task=T1&observations=1 = len %d (%v), want 6 T1 lines with observations", len(t1All), t1All)
+	}
+
+	// ?task=T1&n=2 returns T1's newest 2 non-observation lines.
+	t1Two := getLog("/api/factory/projects/proj-log/log?task=T1&n=2")
+	if len(t1Two) != 2 || t1Two[0]["kind"] != "asked_you" || t1Two[1]["kind"] != "merged" {
+		t.Errorf("?task=T1&n=2 = %v, want [asked_you, merged]", t1Two)
+	}
+
+	// Observation-only project returns empty array by default and observations when asked.
+	if got := getLog("/api/factory/projects/proj-obs/log"); len(got) != 0 {
+		t.Errorf("proj-obs default len = %d (%v), want 0", len(got), got)
+	}
+	if got := getLog("/api/factory/projects/proj-obs/log?observations=1"); len(got) != 2 || got[0]["kind"] != "observation" {
+		t.Errorf("proj-obs ?observations=1 = %v, want 2 observation lines", got)
 	}
 }

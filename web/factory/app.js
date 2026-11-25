@@ -6,6 +6,7 @@ import { renderNewProjectHTML, renderProjectActionsHTML, loadNewProject, checkPr
 import { renderMarkdown } from '../static/markdown.js';
 import { goalTitle } from './goal.js';
 import { renderGraphSection, syncGraphBox, highlightGraph } from './graph.js';
+import { renderLogHTML } from './log.js';
 
 const POLL_MS = 3000, GIVE_UP_MS = 8000, NOTICE_MS = 5000;
 const $ = (id) => document.getElementById(id);
@@ -27,7 +28,7 @@ const askUI = { busyId: '', error: '', errorAskId: '', needsPairing: false, pair
 const setUI = { project: '', rows: null, error: '', busy: '', edits: {}, errors: {}, fixes: {}, notices: {}, editor: null, copied: '' };
 const emptyNP = () => ({ open: false, rows: null, spaces: null, spacesError: false, folder: '', goal: '', notGit: false, goalErr: false, edits: {}, errors: {}, fixes: {}, editor: null, checks: null, hasChecked: false, checking: false, checkError: '', starting: false, startError: '' });
 const emptyPA = () => ({ mode: '', goal: '', busy: '', error: '', checks: null });
-const npUI = emptyNP(), paUI = emptyPA();
+const npUI = emptyNP(), paUI = emptyPA(), logUI = { task: '', observations: false, hasObservations: false, error: '' };
 const pairRow = () => askUI.pending?.kind === 'setting' ? askUI.pending.name : (askUI.pending?.row || '');
 const setState = () => ({ ...setUI, pairRow: pairRow(), askBusyId: askUI.busyId, pairState: askUI });
 const npState = () => ({ ...npUI, projects: data?.projects || [], backProject: data?.p || '', copied: setUI.copied, pairState: askUI });
@@ -86,16 +87,30 @@ async function poll() {
       noticeTimers.forEach(clearTimeout); noticeTimers.clear();
       Object.assign(setUI, { project: p, rows: null, error: '', busy: '', edits: {}, errors: {}, fixes: {}, notices: {}, editor: null, copied: '' });
       ++paSeq; Object.assign(paUI, emptyPA());
+      Object.assign(logUI, { task: '', observations: false, hasObservations: false, error: '' });
       if (askUI.pending?.kind === 'project') clearPair();
     }
+    const routeTask = !sp && !npUI.open && want === p ? (task || '') : '';
     let graph = null, log = [], problem = '';
     if (p) {
       setP = get(`/api/factory/projects/${enc(p)}/settings`).then((b) => ({ rows: b.rows || [] }), (e) => ({ error: e.message || 'error', http: e.http, needsPairing: e.needsPairing, pairMessage: e.pairMessage }));
+      const fetchLog = (lt) => {
+        const qs = `n=100${lt ? `&task=${enc(lt)}` : ''}${logUI.observations ? '&observations=1' : ''}`;
+        return get(`/api/factory/projects/${enc(p)}/log?${qs}`).then((b) => ({ lines: b.lines || [], hasObs: Boolean(b.has_observations) }), (e) => ({ error: e.message || 'error', http: e.http, needsPairing: e.needsPairing, pairMessage: e.pairMessage }));
+      };
+      const prevKnown = !data?.graph || data.p !== p || data.graph.tasks?.some((x) => x.ref === routeTask);
+      const initTask = (routeTask && prevKnown ? routeTask : '') || logUI.task;
+      const logP = fetchLog(initTask);
       try {
-        [graph, { lines: log }] = await Promise.all([get(`/api/factory/projects/${enc(p)}/graph`), get(`/api/factory/projects/${enc(p)}/log?n=100`)]);
+        let lr;
+        [graph, lr] = await Promise.all([get(`/api/factory/projects/${enc(p)}/graph`), logP]);
+        const realTask = routeTask && graph?.tasks?.some((x) => x.ref === routeTask) ? routeTask : logUI.task;
+        if (realTask !== initTask) lr = await fetchLog(realTask);
+        if (lr.lines) { log = lr.lines; logUI.hasObservations = lr.hasObs; logUI.error = ''; }
+        else { logUI.error = lr.error; if (lr.needsPairing) Object.assign(askUI, { needsPairing: true, pairMessage: lr.pairMessage || '' }); }
       } catch (e) { if (!e.http) throw e; if (e.needsPairing) Object.assign(askUI, { needsPairing: true, pairMessage: e.pairMessage || '' }); problem = e.message; }
     }
-    next = { projects, asks, p, task, graph, log: log || [], problem };
+    next = { projects, asks, p, task: routeTask, graph, log, problem };
   } catch (e) {
     if (e.http) { if (e.needsPairing) Object.assign(askUI, { needsPairing: true, pairMessage: e.pairMessage || '' }); next = { projects: [], asks: [], p: '', task, graph: null, log: [], problem: e.message }; }
     else off = true;
@@ -215,7 +230,7 @@ function boardHTML(tasks, part) {
       }
       if (done.length) body += `<details class="done"><summary>${done.length} done · show them</summary><div class="rows">${done.map(rowHTML).join('')}</div></details>`;
     }
-    body += logHTML(data.log, 'log');
+    body += renderLogHTML(data.log, { tasks: tasks.map((x) => x.ref), task: logUI.task, observations: logUI.observations, hasObservations: logUI.hasObservations, error: logUI.error }, pr.repo_url);
   }
   return part === 'top' ? top : part === 'body' ? body : top + body;
 }
@@ -233,23 +248,18 @@ function rowHTML(t) {
 // t.rounds counts finished review rounds; why_waiting names the one running ("In review round 2").
 const roundsDone = (t) => t.rounds ? `${t.rounds} round${t.rounds > 1 ? 's' : ''} done` : '';
 
-const logWhy = (l) => (l.by === 'owner' && l.decision === 'started' && l.why ? goalTitle(l.why, '') : l.why);
-const logHTML = (lines, title, empty = 'Nothing logged yet.') => `<section class="card" aria-label="${title}"><h2>${title}</h2>` + (lines.length
-  ? `<ul class="log">${lines.slice().reverse().map((l) => `<li><time datetime="${esc(l.at)}">${clock(l.at, true)}</time> ${esc(l.by)}` +
-    `${l.task ? ` <code>${esc(l.task)}</code>` : ''} <b>${esc(l.decision)}</b> <span class="muted">${esc(logWhy(l))}</span></li>`).join('')}</ul>`
-  : `<p class="muted">${empty}</p>`) + '</section>';
-
 function taskHTML(t) {
   const [label, dot] = stage(t), kv = (k, v) => v ? `<div class="kv"><span>${k}</span><span>${esc(v)}</span></div>` : '';
   const det = [t.last_rule && `rule ${t.last_rule}`, t.terminal && `run ${t.terminal}`, t.layer != null && `layer ${t.layer}`].filter(Boolean).join(' · ');
   const verdictSub = t.rounds ? `review ${roundsDone(t)}` : (!t.last_rule ? 'No step logged for this task yet.' : '');
+  const repoURL = data.projects.find((x) => x.id === data.p)?.repo_url;
   return `<a class="back" href="#${enc(data.p)}">‹ board</a><div class="task-head"><div class="meta"><code>${esc(t.ref)}</code>` +
     `<span class="pill ${dot}"><span class="dot ${dot}" aria-hidden="true"></span>${esc(label)} · ${esc(t.why_waiting || label)}</span>` +
     `${t.terminal ? `<span>run ${esc(t.terminal)}</span>` : ''}</div><h1>${esc(t.title)}</h1></div><div class="cols"><div class="col-main">` +
     `${t.brief && t.brief.trim() ? `<section class="card" aria-label="Brief"><h2>brief</h2><div class="md-body">${renderMarkdown(t.brief)}</div></section>` : ''}` +
     `<section class="card" aria-label="Verdict"><h2>the ladder says: ${esc(t.last_decision || 'nothing yet')}</h2>${verdictSub ? `<span class="small muted">${esc(verdictSub)}</span>` : ''}` +
     `${det ? `<details class="task-details"><summary>details</summary><p class="small muted">${esc(det)}</p></details>` : ''}</section>` +
-    logHTML(data.log.filter((l) => l.task === t.ref), 'recent log', data.log.length ? 'No log lines for this task in the last 100.' : undefined) + `</div><aside><section class="card" aria-label="Who worked on it"><h2>agents</h2>` +
+    renderLogHTML(data.log.filter((l) => l.task === t.ref), { forTask: true, heading: 'log for this task', empty: 'Nothing logged for this task yet.', observations: logUI.observations, hasObservations: logUI.hasObservations, error: logUI.error }, repoURL) + `</div><aside><section class="card" aria-label="Who worked on it"><h2>agents</h2>` +
     kv('model', t.model || 'not started') + kv('waits on', t.why_waiting) + kv('after', t.after.join(', ')) + kv('unblocks', t.dependents.join(', ')) +
     kv('layer', String(t.layer)) + '</section></aside></div>';
 }
@@ -355,6 +365,8 @@ async function runStart() {
 }
 
 const syncEdit = (e) => {
+  if (e.target.dataset?.logTask) { if (logUI.task !== e.target.value) { logUI.task = e.target.value; return poll(); } return; }
+  if (e.target.dataset?.logObs) { if (logUI.observations !== Boolean(e.target.checked)) { logUI.observations = Boolean(e.target.checked); return poll(); } return; }
   if (e.target.id === 'pa-goal') {
     const dirty = Boolean(paUI.error || paUI.checks || askUI.pending?.kind === 'project');
     Object.assign(paUI, { goal: e.target.value, error: '', checks: null });
@@ -414,6 +426,7 @@ $('board').addEventListener('keydown', (e) => {
 });
 const openModelCands = (r, raw) => parseModelCandidates(raw, r.clis[0]).map((c) => ({ ...c, cli: r.clis.includes(c.cli) ? c.cli : r.clis[0] }));
 $('board').addEventListener('click', (e) => {
+  if (e.target.closest('button[data-log-show]')) { logUI.observations = true; $('log-obs')?.focus({ preventScroll: true }); return poll(); }
   const vw = e.target.closest('button[data-view]');
   if (vw) { taskView = vw.dataset.view === 'graph' ? 'graph' : 'list'; try { globalThis.sessionStorage?.setItem('factory-view', taskView); } catch {} return render(); }
   if (e.target.closest('button[data-new-project]')) return openNewProject();

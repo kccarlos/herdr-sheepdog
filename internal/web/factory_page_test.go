@@ -92,8 +92,8 @@ func TestFactoryPageWording(t *testing.T) {
 	if !strings.Contains(js, "round${t.rounds > 1 ? 's' : ''} done") || strings.Contains(js, "`round ${t.rounds}`") {
 		t.Error("the rounds chip must say how many rounds are done, not 'round n' next to 'In review round n+1'")
 	}
-	if !strings.Contains(js, "No log lines for this task in the last 100.") {
-		t.Error("an empty task log must say it only looked at the last 100 lines")
+	if !strings.Contains(js, "Nothing logged for this task yet.") {
+		t.Error("an empty task log must use slice14-wording's tk.log.empty sentence")
 	}
 	for _, line := range strings.Split(js, "\n") {
 		if strings.Contains(line, "decodeURIComponent") && !strings.Contains(line, "try {") {
