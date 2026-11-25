@@ -23,12 +23,12 @@ header .brand { display: flex; align-items: center; gap: .5rem; font-family: var
 .skeleton span, .set-sk { display: block; height: 160px; background: var(--code); border-radius: var(--radius); }
 .set-sk { height: 56px; }
 .cols { display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start; }
-#board.cols { flex-direction: column; align-items: stretch; }
-.cols > .col-main, .col-main > main, #tasks-top { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
+#board.cols { flex-direction: column; flex-wrap: nowrap; align-items: stretch; min-width: 0; }
+.cols > .col-main, .col-main > main, #tasks-top { min-width: 0; max-width: 100%; display: flex; flex-direction: column; gap: 14px; }
 .cols > .col-main { flex: 999 1 600px; }
 .cols > aside { flex: 1 1 340px; min-width: 0; display: flex; flex-direction: column; gap: 16px; }
 #board.cols > .col-main, #board.cols > aside { flex: none; }
-@media (min-width: 761px) { #board.cols { flex-direction: row; align-items: flex-start; } #board.cols > .col-main { flex: 999 1 600px; } #board.cols > aside { flex: 1 1 340px; } }
+@media (min-width: 761px) { #board.cols { flex-direction: row; flex-wrap: wrap; align-items: flex-start; } #board.cols > .col-main { flex: 999 1 600px; } #board.cols > aside { flex: 1 1 340px; } }
 .head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
 .head h1 { margin: 0; font-size: 24px; }
 .head span { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
@@ -143,3 +143,28 @@ fieldset.np-models > legend { padding: 0; margin-bottom: 4px; }
 .pa-confirm { border-color: var(--danger); }
 .pa-confirm h3 { font-size: 15px; font-weight: 600; }
 .ask-opt.danger { border-color: var(--danger); color: var(--danger); }
+.head-r { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.seg { display: inline-flex; padding: 3px; background: var(--code); border: 1px solid var(--line); border-radius: var(--radius-pill); }
+.seg button { min-height: 38px; min-width: 64px; padding: 0 14px; background: none; border: 0; border-radius: var(--radius-pill); color: var(--fg); font: inherit; font-size: 14px; cursor: pointer; }
+.seg button.on { background: var(--card); font-weight: 600; box-shadow: 0 1px 2px color-mix(in srgb, var(--ink) 14%, transparent); }
+.graph-hint { margin: 0; }
+.gbox { min-width: 0; max-width: 100%; box-sizing: border-box; overflow-x: auto; border: 1px solid var(--line); border-radius: var(--radius); background: var(--card); }
+.gbox svg { display: block; margin: 0 auto; }
+.gnode { text-decoration: none; }
+.gnode rect.box { fill: var(--card); stroke: var(--slate); stroke-width: 1; }
+.gnode.dim { opacity: .35; }
+.gnode.hot rect.box { stroke: var(--fg); stroke-width: 2; }
+.gnode.focus rect.box, .gnode:focus-visible rect.box { stroke: var(--focus); stroke-width: 3; }
+.gnode text { fill: var(--fg); font-family: var(--font-ui); font-size: 12px; }
+.gnode text.ref { fill: var(--muted); font-family: var(--font-mono); font-size: 12px; }
+.gnode text.st { fill: var(--muted); font-size: 12px; }
+.gmark.done { stroke: var(--done); }
+.gmark.working { fill: var(--working); }
+.gmark.blocked { fill: var(--blocked); }
+.gmark.idle { stroke: var(--idle); }
+.gedge { fill: none; stroke: var(--slate); stroke-width: 1.5; }
+.garrow { fill: var(--slate); }
+.gedge.dim, .garrow.dim { opacity: .25; }
+.gedge.hot { stroke: var(--fg); stroke-width: 2.5; }
+.garrow.hot { fill: var(--fg); }
+@media (min-width: 761px) { #board.cols.graph-view { flex-direction: column; flex-wrap: nowrap; align-items: stretch; } #board.cols.graph-view > .col-main, #board.cols.graph-view > aside { flex: none; } }
