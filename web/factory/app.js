@@ -1,7 +1,7 @@
 // The factory page (design.md 12.1, the FactoryWeb* boards): polls the factory
 // views and delegates ask answers, setting proposals and browser pairing to asks.js & settings.js.
 import { esc, isOwnerAsk, renderAskCardsHTML, createAskFlow, browserAskDeps } from './asks.js';
-import { renderSettingsHTML, proposeSetting, parseModelCandidates, editorAlertHTML } from './settings.js';
+import { renderSettingsHTML, proposeSetting, parseModelCandidates } from './settings.js';
 import { renderMarkdown } from '../static/markdown.js';
 import { goalTitle } from './goal.js';
 
@@ -79,6 +79,7 @@ async function poll() {
   }
   const prev = data;
   data = next; down = off;
+  if (setUI.editor && (next?.asks || []).some((a) => a.status === 'open' && a.set?.name === setUI.editor.row && (!a.project || a.project === next.p))) setUI.editor = null;
   if (!off) lastOK = Date.now();
   render();
   if (setP && !off) {
@@ -103,7 +104,7 @@ async function poll() {
 
 // set replaces an element's HTML only when it changed, then reopens the <details>
 // that were open and puts keyboard focus back on the same control.
-const key = (e) => [e.tagName, e.dataset?.setting || e.id || e.getAttribute('href') || e.dataset?.askId || e.closest?.('[data-row]')?.dataset.row || e.closest?.('[data-ask-id]')?.dataset.askId || '', e.dataset?.option || e.getAttribute('aria-label') || e.className || e.parentElement?.className || e.textContent?.slice(0, 24) || ''].join(':');
+const key = (e) => [e.tagName, e.dataset?.setting || e.id || e.getAttribute('href') || e.dataset?.askId || e.closest?.('[data-row]')?.dataset.row || e.closest?.('[data-ask-id]')?.dataset.askId || '', e.dataset?.option || e.dataset?.copy || e.getAttribute('aria-label') || e.className || e.parentElement?.className || e.textContent?.slice(0, 24) || ''].join(':');
 function set(el, html) {
   if (el._html === html) return;
   const open = [...el.querySelectorAll('details[open]')].map(key);
@@ -229,8 +230,10 @@ async function submitAnswer(askId, option, inRow = '') {
     clearPair();
     if (ask?.set) {
       const n = ask.set.name, isMod = (setUI.rows || []).find((r) => r.name === n)?.clis?.length > 0;
+      const was = isMod && ask.set.was ? parseModelCandidates(ask.set.was).map((c) => `${c.cli}/${c.model}/${c.effort}`).join(' then ') : (ask.set.was || 'not set');
+      if (setUI.editor?.row === n) setUI.editor = null;
       delete setUI.edits[n]; delete setUI.errors[n]; delete setUI.fixes[n];
-      setNotice(n, option === 'Save' ? (isMod ? 'Saved. The next agent started for this role uses it. Running agents keep their model.' : 'Saved. The engine uses it from now on.') : `Kept at ${ask.set.was || 'not set'}. Nothing changed.`);
+      setNotice(n, option === 'Save' ? (isMod ? 'Saved. The next agent started for this role uses it. Running agents keep their model.' : 'Saved. The engine uses it from now on.') : `Kept at ${was}. Nothing changed.`);
     }
     await poll();
     return (inRow ? (findCtrl(inRow) || findRow(inRow)?.querySelector('button[data-edit]')) : $('asks').querySelector('button[data-ask-id], a, summary'))?.focus({ preventScroll: true });
@@ -272,8 +275,8 @@ const syncEdit = (e) => {
     if (!c) return;
     c[f] = e.target.value; delete setUI.errors[n]; delete setUI.fixes[n];
     if (f !== 'model') return render();
-    const li = e.target.closest('li.cand'), al = e.target.closest('[data-row]')?.querySelector('.cand-alert'), tag = `${c.cli} ${c.model.trim() || 'model'}`;
-    e.target.classList.remove('bad'); li?.querySelector('[data-cand-up]')?.setAttribute('aria-label', `Move ${tag} up`); li?.querySelector('[data-cand-rm]')?.setAttribute('aria-label', `Remove ${tag}`);
+    const srow = e.target.closest('[data-row]'), li = e.target.closest('li.cand'), al = srow?.querySelector('.cand-alert'), tag = `${c.cli} ${c.model.trim() || 'model'}`;
+    srow?.querySelectorAll('.set-in.bad').forEach((x) => x.classList.remove('bad')); li?.querySelector('[data-cand-up]')?.setAttribute('aria-label', `Move ${tag} up`); li?.querySelector('[data-cand-rm]')?.setAttribute('aria-label', `Remove ${tag}`);
     if (al) al.innerHTML = ''; $('settings')._html = renderSettingsHTML(setUI.rows, data.asks, setState());
   } else if (e.target.name === 'code') askUI.pairCode = e.target.value;
 };
@@ -291,25 +294,24 @@ $('board').addEventListener('click', (e) => {
   const opt = e.target.closest('button[data-ask-id][data-option]');
   if (opt && !askUI.busyId) return submitAnswer(opt.dataset.askId, opt.dataset.option, opt.closest('[data-row]')?.dataset.row || '');
   const ed = e.target.closest('button[data-edit]');
-  if (ed) { const n = ed.dataset.edit, r = (setUI.rows || []).find((x) => x.name === n); if (r) { delete setUI.errors[n]; delete setUI.fixes[n]; setUI.editor = { row: n, cands: openModelCands(r, r.value || r.default) }; render(); findRow(n)?.querySelector('select, input')?.focus({ preventScroll: true }); } return; }
-  if (setUI.editor) {
+  if (ed && !setUI.busy) { const n = ed.dataset.edit, r = (setUI.rows || []).find((x) => x.name === n); if (r) { if (pairRow() === setUI.editor?.row) clearPair(); delete setUI.errors[n]; delete setUI.fixes[n]; setUI.editor = { row: n, cands: openModelCands(r, r.value || r.default) }; render(); findRow(n)?.querySelector('select, input')?.focus({ preventScroll: true }); } return; }
+  if (setUI.editor && !setUI.busy) {
     const n = setUI.editor.row, r = (setUI.rows || []).find((x) => x.name === n), cs = setUI.editor.cands, clr = () => { delete setUI.errors[n]; delete setUI.fixes[n]; };
-    if (e.target.closest('button[data-cand-add]') && r) { cs.push({ cli: r.clis[0], model: '', effort: 'medium' }); clr(); render(); return findRow(n)?.querySelectorAll('input')[cs.length - 1]?.focus({ preventScroll: true }); }
-    if (e.target.closest('button[data-cand-default]') && r) { setUI.editor.cands = openModelCands(r, r.default); clr(); render(); return findRow(n)?.querySelector('select, input')?.focus({ preventScroll: true }); }
+    if (e.target.closest('button[data-cand-add]') && r) { cs.push({ cli: r.clis[0], model: '', effort: 'medium' }); clr(); render(); return findRow(n)?.querySelectorAll('input[data-cand-field="model"]')[cs.length - 1]?.focus({ preventScroll: true }); }
+    if (e.target.closest('button[data-cand-default]') && r) { setUI.editor.cands = r.default ? openModelCands(r, r.default) : []; clr(); render(); return findRow(n)?.querySelector('select, input, button[data-cand-save]')?.focus({ preventScroll: true }); }
     const up = e.target.closest('button[data-cand-up]'), rm = e.target.closest('button[data-cand-rm]');
     if (up || (rm && cs.length > 1)) { if (up) { const i = +up.dataset.candUp; if (i > 0) [cs[i - 1], cs[i]] = [cs[i], cs[i - 1]]; } else cs.splice(+rm.dataset.candRm, 1); clr(); render(); if (!$('settings').contains(document.activeElement)) findRow(n)?.querySelector('select, input')?.focus({ preventScroll: true }); return; }
-    if (e.target.closest('button[data-cand-cancel]')) { setUI.editor = null; clr(); render(); return findRow(n)?.querySelector('button[data-edit]')?.focus({ preventScroll: true }); }
-    if (e.target.closest('button[data-cand-save]') && !setUI.busy) {
-      const emptyIdx = cs.findIndex((c) => !c.model.trim());
-      if (emptyIdx < 0) return submitSetting(data.p, n, cs.map((c) => `${c.cli}/${c.model.trim()}/${c.effort}`).join(', '));
-      setUI.errors[n] = 'Type a model name.'; delete setUI.fixes[n];
-      const srow = findRow(n), al = srow?.querySelector('.cand-alert'), mIn = srow?.querySelectorAll('input')[emptyIdx];
-      if (al) { al.innerHTML = editorAlertHTML('set-err-' + n.replace(/[^a-z0-9]+/gi, '-'), setUI.errors[n], ''); mIn?.classList.add('bad'); $('settings')._html = renderSettingsHTML(setUI.rows, data.asks, setState()); } else render();
-      return mIn?.focus({ preventScroll: true });
+    if (e.target.closest('button[data-cand-cancel]')) { if (pairRow() === n) clearPair(); setUI.editor = null; clr(); render(); return findRow(n)?.querySelector('button[data-edit]')?.focus({ preventScroll: true }); }
+    if (e.target.closest('button[data-cand-save]')) {
+      const emptyIdx = cs.findIndex((c) => !c.model.trim()), commaIdx = cs.findIndex((c) => c.model.includes(',')), badIdx = emptyIdx >= 0 ? emptyIdx : commaIdx;
+      if (badIdx < 0) return submitSetting(data.p, n, cs.map((c) => `${c.cli}/${c.model.trim()}/${c.effort}`).join(', '));
+      setUI.errors[n] = emptyIdx >= 0 ? 'Type a model name.' : `${r?.label || n}: a model name cannot hold a comma`;
+      delete setUI.fixes[n]; render();
+      return findRow(n)?.querySelectorAll('input[data-cand-field="model"]')[badIdx]?.focus({ preventScroll: true });
     }
   }
   const cp = e.target.closest('button[data-copy]');
-  if (cp) { navigator.clipboard?.writeText?.(cp.dataset.copy).catch(() => {}); setUI.copied = cp.dataset.copy; render(); setTimeout(() => { if (setUI.copied === cp.dataset.copy) { setUI.copied = ''; if (data) render(); } }, 2000); return; }
+  if (cp) return navigator.clipboard?.writeText?.(cp.dataset.copy)?.then(() => { setUI.copied = cp.dataset.copy; render(); setTimeout(() => { if (setUI.copied === cp.dataset.copy) { setUI.copied = ''; if (data) render(); } }, 2000); }, () => {});
   const prop = e.target.closest('button[data-propose]'), def = e.target.closest('button[data-default]');
   if (prop && !setUI.busy) { const n = prop.dataset.propose, ctrl = findCtrl(n); if (!ctrl?.reportValidity || ctrl.reportValidity()) submitSetting(data.p, n, setUI.edits[n] ?? ctrl?.value ?? ''); }
   else if (def && !setUI.busy) submitSetting(data.p, def.dataset.default, (setUI.rows || []).find((r) => r.name === def.dataset.default)?.default ?? '');

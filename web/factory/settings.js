@@ -10,34 +10,34 @@ export function parseModelCandidates(raw, fallbackCLI = '') {
 }
 function fixHTML(fix, copied = '') {
   if (!fix || !fix.startsWith('run:')) return fix ? `<p class="small"><b>Fix:</b> ${esc(fix)}</p>` : '';
-  const body = fix.slice(4).trim(), cuts = [body.indexOf(' ('), body.indexOf(', then ')].filter((i) => i >= 0), cut = cuts.length ? Math.min(...cuts) : body.length, cmd = body.slice(0, cut).trim(), rest = body.slice(cut).trim();
-  return `<div class="fix-blk"><span class="small"><b>Fix, in a terminal:</b></span><div class="cmd"><code>${esc(cmd)}</code><button type="button" class="ask-opt sm" data-copy="${esc(cmd)}" aria-label="${esc(`Copy the command ${cmd}`)}">${copied === cmd ? 'Copied' : 'Copy'}</button></div>${rest ? `<p class="small">${esc(rest)}</p>` : ''}</div>`;
+  const body = fix.slice(4).trim(), cuts = [body.indexOf(' ('), body.indexOf(', then ')].filter((i) => i >= 0), cut = cuts.length ? Math.min(...cuts) : body.length, cmd = body.slice(0, cut).trim(), rest = body.slice(cut).trim(), cp = copied === cmd;
+  return `<div class="fix-blk"><span class="small"><b>Fix, in a terminal:</b></span><div class="cmd"><code>${esc(cmd)}</code><button type="button" class="ask-opt sm" data-copy="${esc(cmd)}" aria-label="${esc(cp ? `Copied ${cmd}` : `Copy the command ${cmd}`)}">${cp ? 'Copied' : 'Copy'}</button>${cp ? '<span class="sr" role="status">Copied</span>' : ''}</div>${rest ? `<p class="small">${esc(rest)}</p>` : ''}</div>`;
 }
 export const editorAlertHTML = (errId, err, fix, copied = '') => err ? `<p id="${errId}" class="ask-err" role="alert">${ERR_ICO}<span>${esc(err)}</span></p>${fixHTML(fix, copied)}` : '';
 
-function modelsRowHTML(r, ask, ui, { slug, metaId, errId, sending, rowErr, marks, extra }) {
+function modelsRowHTML(r, ask, ui, { slug, metaId, errId, sending, rowErr, marks, extra, prior }) {
   if (ui.editor?.row === r.name && !ask) {
-    const cands = ui.editor.cands || [], knownSet = [...new Set(cands.map((c) => c.cli).filter((c) => r.models?.[c]?.length))], prior = [...parseModelCandidates(r.value), ...parseModelCandidates(r.default)];
+    const cands = ui.editor.cands || [], knownSet = [...new Set(cands.map((c) => c.cli).filter((c) => r.models?.[c]?.length))];
     const items = cands.map((c, i) => {
-      const ord = `${ORD[i] || `#${i + 1}`} choice`, cid = `set-${slug}-cli-${i}`, mid = `set-${slug}-model-${i}`, eid = `set-${slug}-eff-${i}`, known = r.models?.[c.cli];
-      const suggs = known?.length ? [...new Set([...known, ...prior.filter((p) => p.cli === c.cli && p.model).map((p) => p.model)])] : [], tag = `${c.cli} ${c.model.trim() || 'model'}`;
-      const cliBad = rowErr.startsWith(`${c.cli} is not `), modBad = (rowErr === 'Type a model name.' && !c.model.trim()) || Boolean(c.model && rowErr.includes(`does not offer ${c.model}`));
-      const btns = [i > 0 && `<button type="button" class="ask-opt sm" data-cand-up="${i}" aria-label="${esc(`Move ${tag} up`)}">Move up</button>`, cands.length > 1 && `<button type="button" class="ask-opt sm" data-cand-rm="${i}" aria-label="${esc(`Remove ${tag}`)}">Remove</button>`].filter(Boolean).join(' ');
+      const ord = `${ORD[i] || `#${i + 1}`} choice`, cid = `set-${slug}-cli-${i}`, mid = `set-${slug}-model-${i}`, eid = `set-${slug}-eff-${i}`, known = r.models?.[c.cli], m = c.model.trim();
+      const suggs = [...new Set([...(known || []), ...prior.filter((p) => p.cli === c.cli && p.model).map((p) => p.model)])], tag = `${c.cli} ${m || 'model'}`;
+      const cliBad = rowErr.startsWith(`${c.cli} is not `), modBad = (rowErr === 'Type a model name.' && !m) || (rowErr.endsWith(': a model name cannot hold a comma') && m.includes(',')) || Boolean(m && rowErr.startsWith(`${c.cli} does not offer ${m}.`));
+      const btns = [i > 0 && `<button type="button" class="ask-opt sm" data-cand-up="${i}" aria-label="${esc(`Move ${tag} up`)}"${sending ? ' disabled' : ''}>Move up</button>`, cands.length > 1 && `<button type="button" class="ask-opt sm" data-cand-rm="${i}" aria-label="${esc(`Remove ${tag}`)}"${sending ? ' disabled' : ''}>Remove</button>`].filter(Boolean).join(' ');
       return `<li class="cand"><div class="srow-top"><span class="small"><b>${esc(ord)}</b></span>${btns ? `<span class="ask-opts">${btns}</span>` : ''}</div><div class="cand-fields"><div class="cand-field"><label class="small" for="${cid}">CLI</label><select id="${cid}" class="set-in${cliBad ? ' bad' : ''}" aria-label="${esc(`CLI, ${ord}`)}" data-cand-idx="${i}" data-cand-field="cli">${r.clis.map((x) => `<option value="${esc(x)}"${x === c.cli ? ' selected' : ''}>${esc(x)}</option>`).join('')}</select></div>` +
-        `<div class="cand-field wide"><label class="small" for="${mid}">model</label><input id="${mid}" class="set-in${modBad ? ' bad' : ''}" type="text" aria-label="${esc(`model, ${ord}`)}" data-cand-idx="${i}" data-cand-field="model" value="${esc(c.model)}"${suggs.length ? ` list="${mid}-list"` : ''}>${suggs.length ? `<datalist id="${mid}-list">${suggs.map((m) => `<option value="${esc(m)}"></option>`).join('')}</datalist>` : ''}</div>` +
+        `<div class="cand-field wide"><label class="small" for="${mid}">model</label><input id="${mid}" class="set-in${modBad ? ' bad' : ''}" type="text" aria-label="${esc(`model, ${ord}`)}" data-cand-idx="${i}" data-cand-field="model" value="${esc(c.model)}"${suggs.length ? ` list="${mid}-list"` : ''}>${suggs.length ? `<datalist id="${mid}-list">${suggs.map((x) => `<option value="${esc(x)}"></option>`).join('')}</datalist>` : ''}</div>` +
         `<div class="cand-field"><label class="small" for="${eid}">effort</label><select id="${eid}" class="set-in" aria-label="${esc(`effort, ${ord}`)}" data-cand-idx="${i}" data-cand-field="effort">${EFFORTS.map((x) => `<option value="${x}"${x === c.effort ? ' selected' : ''}>${x}</option>`).join('')}</select></div></div>${!known?.length ? `<p class="muted small">sheepdog cannot list the models ${esc(c.cli)} offers. This name is checked when an agent starts.</p>` : ''}</li>`;
     }).join('');
-    return `<div class="srow" data-row="${esc(r.name)}"><div class="srow-top"><span class="sname">${esc(r.label)}</span></div><p class="muted small">${MODELS_HINT}</p><ol class="cand-ed">${items}</ol>` +
+    return `<div class="srow" data-row="${esc(r.name)}"><div class="srow-top"><span class="sname">${esc(r.label)}</span></div><p class="muted small">${MODELS_HINT}</p>${items ? `<ol class="cand-ed">${items}</ol>` : '<p class="muted small">not set</p>'}` +
       knownSet.map((c) => `<p class="muted small">Model names ${esc(c)} offers on this account: ${r.models[c].map(esc).join(' · ')}. The field also takes a typed name.</p>`).join('') +
-      `<div class="ask-opts"><button type="button" class="ask-opt sm" data-cand-add="${esc(r.name)}">Add a model</button> <button type="button" class="ask-opt sm" data-cand-default="${esc(r.name)}" aria-label="${esc(`Fill in the default ${r.label}`)}">Back to the default</button></div><div class="cand-alert">${editorAlertHTML(errId, rowErr, ui.fixes?.[r.name], ui.copied)}</div>` +
-      `<div class="ask-opts"><button type="button" class="ask-opt rec" data-cand-save="${esc(r.name)}" aria-label="${esc(`${ui.inForm ? 'Done editing' : 'Change'} ${r.label}`)}"${sending ? ' disabled' : ''}>${ui.inForm ? 'Done' : (sending ? 'Asking…' : 'Change')}</button> <button type="button" class="ask-opt" data-cand-cancel="${esc(r.name)}"${sending ? ' disabled' : ''}>Cancel</button></div>${ui.pairRow === r.name ? pairBoxHTML(ui.pairState, 'pair-code-' + slug) : ''}</div>`;
+      `<div class="ask-opts"><button type="button" class="ask-opt sm" data-cand-add="${esc(r.name)}"${sending ? ' disabled' : ''}>Add a model</button> <button type="button" class="ask-opt sm" data-cand-default="${esc(r.name)}" aria-label="${esc(`Fill in the default ${r.label}`)}"${sending ? ' disabled' : ''}>Back to the default</button></div><div class="cand-alert">${editorAlertHTML(errId, rowErr, ui.fixes?.[r.name], ui.copied)}</div>` +
+      `<div class="ask-opts"><button type="button" class="ask-opt rec" data-cand-save="${esc(r.name)}" aria-label="${esc(`Change ${r.label}`)}"${sending ? ' disabled' : ''}>${sending ? 'Asking…' : 'Change'}</button> <button type="button" class="ask-opt" data-cand-cancel="${esc(r.name)}"${sending ? ' disabled' : ''}>Cancel</button></div>${ui.pairRow === r.name ? pairBoxHTML(ui.pairState, 'pair-code-' + slug) : ''}</div>`;
   }
   const cands = parseModelCandidates(r.value), defTxt = parseModelCandidates(r.default).map((c) => `${c.cli}/${c.model}/${c.effort}`).join(' then ') || 'not set';
   const list = cands.length ? `<ol class="cand-list">${cands.map((c, i) => `<li><span class="muted">${i + 1}.</span> <span class="chip mono">${esc(`${c.cli} / ${c.model} / ${c.effort}`)}</span></li>`).join('')}</ol>` : '<span class="muted small">not set</span>';
   return `<div class="srow" data-row="${esc(r.name)}"><div class="srow-top"><div class="srow-models"><span class="sname">${esc(r.label)}</span>${list}</div>${!ask ? `<button type="button" class="ask-opt" data-edit="${esc(r.name)}" aria-label="${esc(`Edit ${r.label}`)}">Edit</button>` : ''}</div> <div class="srow-meta muted small"><span id="${metaId}">${esc(`default ${defTxt}`)}</span>${marks ? ' ' + marks : ''}</div>${r.note ? ` <p class="muted small">${esc(r.note)}</p>` : ''}${extra ? ' ' + extra : ''}</div>`;
 }
 
-function rowHTML(r, asks, ui) {
+function rowHTML(r, asks, ui, prior) {
   const slug = r.name.replace(/[^a-z0-9]+/gi, '-'), id = 'set-' + slug, metaId = 'set-meta-' + slug, errId = 'set-err-' + slug;
   const ask = (asks || []).find((a) => a.status === 'open' && a.set?.name === r.name && (!a.project || !ui.project || a.project === ui.project));
   const isModels = Array.isArray(r.clis) && r.clis.length > 0, isChoice = !isModels && Array.isArray(r.allowed) && r.allowed.length > 0;
@@ -56,7 +56,7 @@ function rowHTML(r, asks, ui) {
   } else if (alertTxt) extra = editorAlertHTML(errId, alertTxt, ui.fixes?.[r.name], ui.copied);
   else if (ui.notices?.[r.name]) extra = ui.notices[r.name].startsWith('Not saved:') ? `<p class="set-note" role="status">${esc(ui.notices[r.name])}</p>` : `<p class="set-ok" role="status">${OK_ICO}<span>${esc(ui.notices[r.name])}</span></p>`;
   if (ui.pairRow === r.name) extra += pairBoxHTML(ui.pairState, 'pair-code-' + slug);
-  if (isModels) return modelsRowHTML(r, ask, ui, { slug, metaId, errId, sending, rowErr, marks, extra });
+  if (isModels) return modelsRowHTML(r, ask, ui, { slug, metaId, errId, sending, rowErr, marks, extra, prior });
   const opts = isChoice ? (r.allowed.includes(curVal) ? r.allowed : [curVal, ...r.allowed]) : [];
   const ctrl = isChoice ? `<select id="${id}" class="set-in${bad ? ' bad' : ''}" data-setting="${esc(r.name)}" aria-describedby="${desc}">${opts.map((o) => `<option value="${esc(o)}"${o === curVal ? ' selected' : ''}>${esc(o || 'not set')}</option>`).join('')}</select>`
     : `<input id="${id}" class="set-in${isNum ? ' num' : ''}${bad ? ' bad' : ''}" data-setting="${esc(r.name)}" type="${isNum ? 'number' : 'text'}"${isNum ? ` min="${esc(r.min)}" max="${esc(r.max)}" required` : ' placeholder="not set"'} aria-describedby="${desc}" value="${esc(curVal)}">`;
@@ -68,6 +68,7 @@ function rowHTML(r, asks, ui) {
 export function renderSettingsHTML(rows, asks = [], ui = {}) {
   if (ui.error) return `<h2>settings</h2><p class="status" role="status"><span class="dot" aria-hidden="true"></span><span>Can&#39;t load the settings. Trying again.${typeof ui.error === 'string' && !/^(?:HTTP \d+|error)$/.test(ui.error) ? ' ' + esc(ui.error) : ''}</span></p><p class="muted small">The rest of the page still works.</p>`;
   if (!rows) return '<h2>settings</h2><p class="status" role="status"><span class="dot working" aria-hidden="true"></span><span>Loading the settings…</span></p><span class="set-sk" aria-hidden="true"></span><span class="set-sk" aria-hidden="true"></span><span class="set-sk" aria-hidden="true"></span>';
+  const prior = rows.filter((r) => r.clis?.length).flatMap((r) => [...parseModelCandidates(r.value), ...parseModelCandidates(r.default)]);
   const top = rows.filter((r) => r.top), rest = rows.filter((r) => !r.top);
-  return `<div class="set-head"><h2>settings</h2><p class="muted small">For this project only. A change is read back to you and saved when you confirm.</p></div>${top.map((r) => rowHTML(r, asks, ui)).join('')}${rest.length ? `<details class="all-settings"><summary>all settings (${rest.length})</summary>${rest.map((r) => rowHTML(r, asks, ui)).join('')}</details>` : ''}`;
+  return `<div class="set-head"><h2>settings</h2><p class="muted small">For this project only. A change is read back to you and saved when you confirm.</p></div>${top.map((r) => rowHTML(r, asks, ui, prior)).join('')}${rest.length ? `<details class="all-settings"><summary>all settings (${rest.length})</summary>${rest.map((r) => rowHTML(r, asks, ui, prior)).join('')}</details>` : ''}`;
 }

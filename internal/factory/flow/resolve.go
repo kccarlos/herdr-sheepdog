@@ -94,13 +94,15 @@ func DefaultModels(s Settings) map[string][]Candidate {
 	return m
 }
 
+func isEffort(e string) bool { return e == "low" || e == "medium" || e == "high" }
+
 func checkCandidate(c Candidate) error {
 	switch {
 	case !slices.Contains(knownCLIs, c.CLI):
 		return fmt.Errorf("unknown cli %q (allowed %s)", c.CLI, strings.Join(knownCLIs, ", "))
 	case c.Model == "" || strings.Contains(c.Model, ","):
 		return errors.New(map[bool]string{true: "a model name cannot hold a comma", false: "model is required"}[strings.Contains(c.Model, ",")])
-	case c.Effort != "low" && c.Effort != "medium" && c.Effort != "high":
+	case !isEffort(c.Effort):
 		return fmt.Errorf("unknown effort %q (allowed low, medium, high)", c.Effort)
 	}
 	return nil
@@ -120,16 +122,31 @@ func ParseCandidates(raw string) ([]Candidate, error) {
 	if strings.TrimSpace(raw) == "" {
 		return nil, errors.New("must list at least one candidate")
 	}
+	parts := strings.Split(raw, ",")
 	var out []Candidate
-	for _, p := range strings.Split(raw, ",") {
+	for k, p := range parts {
 		p = strings.TrimSpace(p)
-		if i, j := strings.IndexByte(p, '/'), strings.LastIndexByte(p, '/'); p == "" || i < 0 || i == j {
-			return nil, errors.New(map[bool]string{true: "a model name cannot hold a comma", false: "each entry must be cli/model/effort"}[strings.Contains(raw, ",")])
-		} else if c := (Candidate{CLI: strings.TrimSpace(p[:i]), Model: strings.TrimSpace(p[i+1 : j]), Effort: strings.TrimSpace(p[j+1:])}); checkCandidate(c) != nil {
-			return nil, checkCandidate(c)
-		} else {
-			out = append(out, c)
+		i, j := strings.IndexByte(p, '/'), strings.LastIndexByte(p, '/')
+		err := errors.New("each entry must be cli/model/effort")
+		var c Candidate
+		if p != "" && i >= 0 && i < j {
+			c = Candidate{CLI: strings.TrimSpace(p[:i]), Model: strings.TrimSpace(p[i+1 : j]), Effort: strings.TrimSpace(p[j+1:])}
+			err = checkCandidate(c)
 		}
+		if err != nil {
+			for _, t := range parts[k+1:] {
+				t = strings.TrimSpace(t)
+				ti, tj := strings.IndexByte(t, '/'), strings.LastIndexByte(t, '/')
+				if i <= 0 || !slices.Contains(knownCLIs, strings.TrimSpace(p[:i])) || (ti > 0 && slices.Contains(knownCLIs, strings.TrimSpace(t[:ti]))) {
+					break
+				}
+				if tj >= 0 && isEffort(strings.TrimSpace(t[tj+1:])) {
+					return nil, errors.New("a model name cannot hold a comma")
+				}
+			}
+			return nil, err
+		}
+		out = append(out, c)
 	}
 	return out, nil
 }

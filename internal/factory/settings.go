@@ -66,23 +66,27 @@ func (e *Engine) ProposeSetting(project, name, value, deviceID string) (flow.Ask
 	}
 	var probed flow.ResolveFacts
 	var probedCLIs []string
-	cands, cErr := flow.ParseCandidates(value)
 	role, isModels := strings.CutPrefix(name, "models.")
-	if isModels && value != "" && cErr == nil {
-		_, wErr := flow.DefaultSettings().With(name, value)
-		if _, sErr := e.loadProjectState(project); wErr == nil && sErr == nil {
-			for _, c := range cands {
-				if launchCapability(role)(c).Why == "" && !slices.Contains(probedCLIs, c.CLI) {
-					probedCLIs = append(probedCLIs, c.CLI)
+	if isModels {
+		if sPre, sErr := e.loadProjectState(project); sErr == nil {
+			if nextPre, wErr := sPre.Settings.With(name, value); wErr == nil {
+				bRows, aRows := sPre.Settings.Rows(), nextPre.Rows()
+				if idx := slices.IndexFunc(bRows, func(r flow.SettingRow) bool { return r.Name == name }); idx >= 0 && aRows[idx].Value != bRows[idx].Value {
+					cands, _ := flow.ParseCandidates(aRows[idx].Value)
+					for _, c := range cands {
+						if launchCapability(role)(c).Why == "" && !slices.Contains(probedCLIs, c.CLI) {
+							probedCLIs = append(probedCLIs, c.CLI)
+						}
+					}
 				}
 			}
-			if len(probedCLIs) > 0 && e.probeLaunch != nil {
-				probed = e.probeLaunch(context.Background(), probedCLIs)
-			} else if len(probedCLIs) > 0 && e.HC != nil && e.HC.Socket != "" {
-				probed = probeResolveFacts(context.Background(), probedCLIs, hcExecRunner(e.HC.Socket))
-			} else {
-				probedCLIs = nil
-			}
+		}
+		if len(probedCLIs) > 0 && e.probeLaunch != nil {
+			probed = e.probeLaunch(context.Background(), probedCLIs)
+		} else if len(probedCLIs) > 0 && e.HC != nil && e.HC.Socket != "" {
+			probed = probeResolveFacts(context.Background(), probedCLIs, hcExecRunner(e.HC.Socket))
+		} else {
+			probedCLIs = nil
 		}
 	}
 	e.mu.Lock()
@@ -116,21 +120,19 @@ func (e *Engine) ProposeSetting(project, name, value, deviceID string) (flow.Ask
 	if after.Value == before[idx].Value {
 		return flow.Ask{}, e.refuse(project, "unchanged", fmt.Sprintf("%s is already %s", after.Label, cmp.Or(after.Value, "empty")))
 	}
-	for _, c := range cands {
-		if !isModels {
-			break
-		}
-		if r := launchCapability(role)(c); r.Why != "" {
-			return flow.Ask{}, e.refuse(project, "not_launchable", r.Why)
-		} else if cf, ok := probed.CLIs[c.CLI]; ok && (!cf.Installed || !cf.SignedIn) {
-			p := map[string][2]string{"claude": {"Claude Code", "run: claude auth login"}, world.CodexCLI: {"Codex CLI", "run: codex login"}, world.AgyCLI: {"Antigravity CLI (agy)", "run agy without arguments and sign in"}}[c.CLI]
-			fix := map[bool]string{true: p[1], false: "install " + p[0] + ", then " + p[1]}[cf.Installed]
-			return flow.Ask{}, e.refuse(project, "not_launchable", c.CLI+map[bool]string{true: " is not signed in", false: " is not installed"}[cf.Installed], fix)
-		} else if ok && len(cf.Models) > 0 && !cf.Models[c.Model] {
-			return flow.Ask{}, e.refuse(project, "not_launchable", fmt.Sprintf("%s does not offer %s. It offers: %s.", c.CLI, c.Model, strings.Join(slices.Sorted(maps.Keys(cf.Models)), ", ")))
+	if isModels && after.Value != "" {
+		cands, _ := flow.ParseCandidates(after.Value)
+		for _, c := range cands {
+			if r := launchCapability(role)(c); r.Why != "" {
+				return flow.Ask{}, e.refuse(project, "not_launchable", r.Why)
+			} else if cf, ok := probed.CLIs[c.CLI]; ok && (!cf.Installed || !cf.SignedIn) {
+				return flow.Ask{}, e.refuse(project, "not_launchable", c.CLI+map[bool]string{true: " is not signed in", false: " is not installed"}[cf.Installed], cliAuthFix(c.CLI, cf.Installed))
+			} else if ok && len(cf.Models) > 0 && !cf.Models[c.Model] {
+				return flow.Ask{}, e.refuse(project, "not_launchable", fmt.Sprintf("%s does not offer %s. It offers: %s.", c.CLI, c.Model, strings.Join(slices.Sorted(maps.Keys(cf.Models)), ", ")))
+			}
 		}
 	}
-	now, cancelled := e.now(), []string{}
+	now, cancelled := e.now(), []string(nil)
 	for ai, a := range s.Asks {
 		if a.Status == flow.AskStatusOpen && a.Set != nil && a.Set.Name == name {
 			s.Asks[ai], _, _ = flow.StepAsk(a, flow.AskEvent{Kind: flow.EvAskCancel}, now)

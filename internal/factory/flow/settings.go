@@ -280,6 +280,9 @@ func (s Settings) With(name, value string) (Settings, error) {
 	if role, ok := strings.CutPrefix(name, "models."); ok {
 		delete(s.Models, role)
 		if cands, err := ParseCandidates(value); value != "" && err != nil {
+			if strings.Contains(err.Error(), "comma") {
+				err = fmt.Errorf("%s: %w", before[idx].Label, err)
+			}
 			return Settings{}, err
 		} else if value != "" && FormatCandidates(cands) != before[idx].Default {
 			if s.Models == nil {
