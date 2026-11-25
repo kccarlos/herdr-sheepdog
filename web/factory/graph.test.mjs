@@ -900,3 +900,19 @@ test('renderGraphSVG omits undefined from aria-label when a task has no title', 
   assert.ok(!label.includes('undefined'), `aria-label must not contain "undefined" when title is missing (got "${label}")`);
   assert.ok(label.startsWith('T1,') && label.includes('queued'), `aria-label must still name ref and stage (got "${label}")`);
 });
+
+test('a task that ended without merging (closed or dropped) shows its ending in the graph, not done', async () => {
+  const { renderGraphSVG } = await loadGraph();
+  const tasks = [
+    { ref: 'T1', title: 'merged task', stage: 'done', layer: 0, after: [], steps: [{ name: 'merged', state: 'done' }] },
+    { ref: 'T2', title: 'closed task', stage: 'done', layer: 0, after: [], steps: [{ name: 'implementing', state: 'done' }, { name: 'closed', state: 'ended' }] },
+    { ref: 'T3', title: 'dropped task', stage: 'done', layer: 0, after: [], steps: [{ name: 'dropped', state: 'ended' }] },
+  ];
+  const svg = renderGraphSVG(tasks, 'proj-demo');
+  const nodeText = (ref) => (svg.split(`data-ref="${ref}"`)[1] || '').split('</a>')[0];
+  assert.match(nodeText('T1'), />done</, 'a merged task still reads done');
+  assert.match(nodeText('T2'), />closed</, 'a closed task reads closed');
+  assert.doesNotMatch(nodeText('T2'), />done</, 'a closed task must not read done');
+  assert.match(nodeText('T3'), />dropped</, 'a dropped task reads dropped');
+  assert.doesNotMatch(nodeText('T3'), /class="gmark done"/, 'a dropped task must not carry the done check mark');
+});
