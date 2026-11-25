@@ -1367,8 +1367,8 @@ func TestTaskStepsPlanReview(t *testing.T) {
 		},
 	}, nil)
 	wantWait := []testStepView{
-		{Name: "planned", State: "done"},
 		{Name: "plan review", State: "now"},
+		{Name: "planned", State: "todo"},
 		{Name: "implementing", State: "todo"},
 		{Name: "review", State: "todo"},
 		{Name: "CI", State: "todo"},
@@ -1379,11 +1379,11 @@ func TestTaskStepsPlanReview(t *testing.T) {
 		assertStepOrderAndStates(t, gWait.Tasks[idx].Ref, steps, wantWait)
 		assertSingleNowStep(t, gWait.Tasks[idx].Ref, steps, "plan review")
 	}
-	// N9 precedes N10 (waiting on dep), so T3 is at planned (now) with plan review todo.
+	// Unreviewed task at N9 (waiting on dep) also shows plan review (now) before planned (todo).
 	t3Steps := taskStepsOf(t, gWait.Tasks[2])
 	assertStepOrderAndStates(t, "T3_dep_before_planrev", t3Steps, []testStepView{
-		{Name: "planned", State: "now"},
-		{Name: "plan review", State: "todo"},
+		{Name: "plan review", State: "now"},
+		{Name: "planned", State: "todo"},
 		{Name: "implementing", State: "todo"},
 		{Name: "review", State: "todo"},
 		{Name: "CI", State: "todo"},
@@ -1403,8 +1403,8 @@ func TestTaskStepsPlanReview(t *testing.T) {
 			}, nil)
 			steps := taskStepsOf(t, g.Tasks[0])
 			assertStepOrderAndStates(t, name, steps, []testStepView{
-				{Name: "planned", State: "done"},
 				{Name: "plan review", State: "done"},
+				{Name: "planned", State: "done"},
 				{Name: "implementing", State: "now"},
 				{Name: "review", State: "todo"},
 				{Name: "CI", State: "todo"},
@@ -1431,7 +1431,7 @@ func TestTaskStepsNowMatchesFlowHistoryRowStageAndWaitsOn(t *testing.T) {
 		case "ci":
 			return "CI", false, false
 		case "queued", "waiting_on_dep":
-			if r.ID == "N10" && task.Unreviewed && settings.PlanReviewRounds > 0 {
+			if task.Unreviewed && settings.PlanReviewRounds > 0 {
 				return "plan review", false, false
 			}
 			return "planned", false, false
@@ -1841,7 +1841,7 @@ func TestTaskStepsPlanReviewStaysDoneDuringSecondPlanReview(t *testing.T) {
 			{ID: "T3", Unreviewed: true, LastRow: "N10"},
 		},
 	}, nil)
-	prStep := taskStepsOf(t, g.Tasks[1])[1]
+	prStep := taskStepsOf(t, g.Tasks[1])[0]
 	if prStep.Name != "plan review" || prStep.State != "done" {
 		t.Errorf("T2 plan review step regressed during PR #2: got %+v, want {Name:plan review State:done}", prStep)
 	}
@@ -2052,7 +2052,7 @@ func TestTaskStepsHeldOrAskedKeepsLastRowStep(t *testing.T) {
 	}
 	assertSingleNowStep(t, "T-conflict-ask", taskStepsOf(t, g.Tasks[2]), "implementing")
 
-	// Dependency-blocked unreviewed task at N9 must stay at "planned" when parked (not jump to "plan review").
+	// Dependency-blocked unreviewed task at N9 shows "plan review" as now when parked (plan review precedes planned).
 	prSettings := flow.DefaultSettings()
 	prSettings.PlanReviewRounds = 1
 	gDep := GraphViewOf(flow.State{
@@ -2063,7 +2063,7 @@ func TestTaskStepsHeldOrAskedKeepsLastRowStep(t *testing.T) {
 			{ID: "T-dep-unrev-parked", After: []string{"T0"}, Unreviewed: true, Parked: true, LastRow: "N9"},
 		},
 	}, nil)
-	parkedDep := assertSingleNowStep(t, "T-dep-unrev-parked", taskStepsOf(t, gDep.Tasks[1]), "planned")
+	parkedDep := assertSingleNowStep(t, "T-dep-unrev-parked", taskStepsOf(t, gDep.Tasks[1]), "plan review")
 	if parkedDep.Text != "parked here, waiting on the coordinator" {
 		t.Errorf("T-dep-unrev-parked: text = %q, want %q", parkedDep.Text, "parked here, waiting on the coordinator")
 	}

@@ -131,8 +131,8 @@ const sampleTasks = () => [
     ref: 'T14', title: 'Waiting on plan review', stage: 'queued', why_waiting: 'Waiting on the plan review',
     layer: 0, after: [], dependents: [], rounds: 0,
     steps: [
-      { name: 'planned', state: 'done' },
       { name: 'plan review', state: 'now' },
+      { name: 'planned', state: 'todo' },
       { name: 'implementing', state: 'todo' },
       { name: 'review', state: 'todo' },
       { name: 'CI', state: 'todo' },
@@ -350,7 +350,7 @@ test('board rows render compact step bar with segments, current-step words, aria
     { ref: 'T2', segs: 5, stepOf: 'step 5 of 5', words: 'merged', states: ['done', 'done', 'done', 'done', 'done'] },
     { ref: 'T10', segs: 3, stepOf: 'step 3 of 3', words: W.barDropped, states: ['done', 'done', 'end'] },
     { ref: 'T11', segs: 6, stepOf: 'step 4 of 6', words: 'retro', states: ['done', 'done', 'done', 'now', 'todo', 'todo'] },
-    { ref: 'T14', segs: 6, stepOf: 'step 2 of 6', words: 'plan review', states: ['done', 'now', 'todo', 'todo', 'todo', 'todo'] },
+    { ref: 'T14', segs: 6, stepOf: 'step 1 of 6', words: 'plan review', states: ['now', 'todo', 'todo', 'todo', 'todo', 'todo'] },
   ];
 
   for (const c of checks) {
@@ -475,8 +475,8 @@ test('task view renders sent-back, retro, override-skipped, merged, dropped, clo
     ['merged', W.todo],
   ]);
   await expectView('T14', [
-    ['planned', W.done],
     ['plan review', W.now],
+    ['planned', W.todo],
     ['implementing', W.todo],
     ['review', W.todo],
     ['CI', W.todo],
