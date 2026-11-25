@@ -6,7 +6,7 @@ const ico14 = (d) => `<svg width="14" height="14" viewBox="0 0 24 24" fill="none
 export const PLUS_ICO = ico14('M12 5v14M5 12h14');
 const FAIL_ICO = ico14('M6 6l12 12M18 6L6 18'), SKIP_ICO = ico14('M5 12h14');
 const CK_ST = { ok: ['pass', 'ck-ok', OK_ICO], warn: ['warning', 'ck-warn', ERR_ICO], fail: ['fail', 'ck-fail', FAIL_ICO], skip: ['skipped', 'ck-skip', SKIP_ICO] };
-const ST_DOT = Object.assign(Object.create(null), { running: 'working', stopped: 'idle', finished: 'done' });
+export const ST_DOT = Object.assign(Object.create(null), { running: 'working', stopped: 'idle', finished: 'done' });
 const NG_GO = Object.assign(Object.create(null), { running: 'Give it this goal', stopped: 'Start with this goal', finished: 'Reopen with this goal' });
 export const projectState = (pr) => pr?.state || (pr?.running ? 'running' : 'stopped');
 export const CK_CANT = "Can't run the start checks: sheepdog did not answer in time. Check that sheepdog is running, then check again.";
@@ -108,7 +108,8 @@ export function renderNewProjectHTML(rows, ui = {}) {
     ? `<button type="button" class="ask-opt pri" data-np-start="1"${ui.starting ? ' aria-disabled="true"' : ''}>${ui.starting ? 'Starting…' : 'Start the project and its agents'}</button>`
     : '<button type="button" class="ask-opt off" data-np-start="1" aria-disabled="true" aria-describedby="np-start-off">Start the project and its agents</button><span id="np-start-off" class="small muted">Start turns on when no check fails.</span>';
   const pairHTML = ui.pairState?.pending?.kind === 'start' ? pairBoxHTML(ui.pairState, 'pair-code-np') : '';
-  return `<div class="np-wrap" data-np-form="1"><a class="back" href="#${esc(encodeURIComponent(ui.backProject || ''))}" data-np-back="1">‹ board</a><h1 class="np-h1">new project</h1>` +
+  const many = (ui.projects || []).length >= 2;
+  return `<div class="np-wrap" data-np-form="1"><a class="back" href="#${many ? '' : esc(encodeURIComponent(ui.backProject || ''))}" data-np-back="1">‹ ${many ? 'all projects' : 'board'}</a><h1 class="np-h1">new project</h1>` +
     `<section class="card" aria-label="new project"><div class="np-field"><label class="np-lbl" for="np-folder">folder</label><span id="np-folder-hint" class="small muted">A folder on this computer that is a git repository with a GitHub remote.</span>` +
     `<input id="np-folder" name="folder" class="set-in full mono${ui.notGit ? ' bad' : ''}" type="text" value="${esc(ui.folder || '')}" placeholder="/path/to/your/repo" aria-describedby="np-folder-hint${ui.notGit ? ' np-folder-err' : ''}">` +
     `${ui.notGit ? `<p id="np-folder-err" class="ask-err" role="alert">${ERR_ICO}<span>This folder is not a git repository. Pick another folder, or make it one.</span></p>` : ''}${suggHTML}</div>` +

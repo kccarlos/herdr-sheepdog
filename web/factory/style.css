@@ -204,3 +204,24 @@ fieldset.np-models > legend { padding: 0; margin-bottom: 4px; }
 .gedge.hot { stroke: var(--fg); stroke-width: 2.5; }
 .garrow.hot { fill: var(--fg); }
 @media (min-width: 761px) { #board.cols.graph-view { flex-direction: column; flex-wrap: nowrap; align-items: stretch; } #board.cols.graph-view > .col-main, #board.cols.graph-view > aside { flex: none; } }
+.ni-slot { display: contents; }
+.ni-btn { margin-left: auto; border: 1.5px solid var(--blocked); background: var(--primary-soft); font-weight: 600; }
+.ni-list { flex: 1 0 100%; margin-top: 10px; box-sizing: border-box; border-color: var(--blocked); }
+.ni-group { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.ni-group h3 { margin: 0; font-size: 15px; font-weight: 600; overflow-wrap: anywhere; }
+.ni-group h3 .mono { font-weight: 400; }
+.ni-group ul { list-style: none; margin: 0; padding: 0; }
+.ni-group li { padding: 2px 0; border-bottom: 1px solid var(--line); }
+.ni-group li:last-child { border-bottom: 0; }
+.ni-group a { display: flex; align-items: center; min-height: 44px; padding: 6px 0; box-sizing: border-box; overflow-wrap: anywhere; }
+.ov-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr)); gap: 14px; align-items: stretch; }
+.ov-card { color: var(--fg); text-decoration: none; }
+a.ov-card:hover { background: var(--code); color: var(--fg); }
+.ov-card.needs { border-color: var(--blocked); }
+.ov-card.err { border-color: var(--danger-line); }
+.ov-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px 10px; }
+.ov-needs { display: inline-flex; align-items: center; padding: 2px 10px; border: 1.5px solid var(--blocked); border-radius: 4px; background: var(--primary-soft); color: var(--fg); font-size: 13px; font-weight: 600; }
+.ov-goal { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.ov-foot { margin-top: auto; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.ov-err { display: inline-flex; align-items: center; gap: 6px; font-weight: 500; color: var(--danger); }
+.goal-head { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }

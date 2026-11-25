@@ -55,12 +55,12 @@ http://127.0.0.1:7777/factory
 
 Use your configured `web.port` if it is not `7777`. `/factory` answers only direct loopback requests on this computer (`403` from another device or through a reverse proxy; see [remote-access.md](remote-access.md#security)).
 
-The board refreshes every 3 seconds and shows:
+The board refreshes every 3 seconds. When two or more projects exist and none is chosen in the URL, `/factory` opens the **projects** overview (one card per project ordered by asks, `running`, `stopped`, `finished`, then unreadable projects, with an **all projects** back link inside each project). Whenever any project has an open ask for you, the header shows a **needs you** button listing every open ask across all projects and jumping straight to its card. Inside a project, the board shows:
 
 - **This project** bar under the goal, showing the project's state (`running`, `stopped`, or `finished`) and its actions (**Stop** with confirmation, **Resume**, **New goal**, or **Reopen with a new goal**).
 - **Tasks**, grouped in attention order: **needs your approval**, **waiting on you**, **blocked**, **waiting on CI**, **working**, **waiting on others**, **queued**, and a collapsed **done** list. Click any task row to open its detail view (latest verdict with the rule id under a **details** fold, review rounds, active model, dependencies, and recent log lines).
-- **Projects** in the sidebar, with `running`, `stopped`, or `finished` status, stage counts, and **New project**.
-- **Asks for you**, showing open gated asks and override cards.
+- **Projects** in the sidebar when there is none or one project, with status, stage counts, and **New project**.
+- **Asks for you**, showing open gated asks and override cards for the shown project.
 - **Agents**, listing up to one active run per task (the reviewer while reviewing, otherwise the worker; the coordinator is not listed here).
 
 ## Answer asks and overrides
