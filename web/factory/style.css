@@ -160,6 +160,25 @@ fieldset.np-models > legend { padding: 0; margin-bottom: 4px; }
 .pa-confirm { border-color: var(--danger); }
 .pa-confirm h3 { font-size: 15px; font-weight: 600; }
 .ask-opt.danger { border-color: var(--danger); color: var(--danger); }
+.sbar { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; margin-top: 2px; min-width: 0; }
+.bar { display: inline-flex; align-items: center; gap: 3px; flex: none; }
+.bar span { display: block; width: 18px; height: 6px; border-radius: 3px; background: var(--line); box-sizing: border-box; }
+.bar span.done { background: var(--done); }
+.bar span.now { background: var(--working); height: 10px; outline: 1.5px solid var(--fg); outline-offset: 1px; }
+.bar span.skip { background: none; border: 1px dashed var(--slate); }
+.bar span.end { background: var(--idle); }
+.steps { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; }
+.step { display: flex; gap: 12px; align-items: flex-start; padding: 8px 0; min-width: 0; }
+.step-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.step-top { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 8px; min-width: 0; }
+.step-name, .step-now { font-weight: 500; }
+.step-cur { font-size: 15px; font-weight: 600; }
+.sm-mark { flex: none; width: 22px; height: 22px; border-radius: var(--radius-pill); display: flex; align-items: center; justify-content: center; border: 1.5px solid var(--slate); color: var(--muted); background: var(--card); margin-top: 1px; box-sizing: border-box; }
+.sm-mark.done { background: color-mix(in srgb, var(--done) 14%, var(--card)); border-color: var(--done); color: var(--done); }
+.sm-mark.now { background: var(--working); border-color: var(--working); color: var(--card); }
+.sm-mark.skip { border-style: dashed; }
+.sm-mark.end { background: var(--code); border-color: var(--idle); color: var(--fg); }
+.sm-dot { width: 8px; height: 8px; border-radius: var(--radius-pill); background: currentColor; }
 .head-r { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
 .seg { display: inline-flex; padding: 3px; background: var(--code); border: 1px solid var(--line); border-radius: var(--radius-pill); }
 .seg button { min-height: 38px; min-width: 64px; padding: 0 14px; background: none; border: 0; border-radius: var(--radius-pill); color: var(--fg); font: inherit; font-size: 14px; cursor: pointer; }

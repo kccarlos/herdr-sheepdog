@@ -152,7 +152,7 @@ func coordSummary(s flow.State, bin string, heartbeat bool) string {
 			continue
 		}
 		if len(ls) < maxFactsWakes {
-			st, why := taskStageWhy(t, s.Tasks, s.Asks, s.Settings, s.Project.Started)
+			st, why, _ := taskStageWhy(t, s.Tasks, s.Asks, s.Settings, s.Project.Started)
 			ls = append(ls, fmt.Sprintf("- %s (%s): %s — %s\n", t.ID, st, cmp.Or(t.LastRow, "-"), cmp.Or(why, st)))
 		}
 	}
