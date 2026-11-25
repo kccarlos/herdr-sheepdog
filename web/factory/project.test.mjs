@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createAskFlow } from './asks.js';
+import { keyStore } from '../voice/pairing.js';
 
 const W = {
   emptyH: 'no project yet',
@@ -790,6 +791,8 @@ test('refused start shows daemon sentence, refused setting pair shows under its 
   assert.ok(maxRow?.querySelector('[role="alert"]')?.textContent.includes(maxMsg), 'refused {name, message} on start must show under max_running row');
 
   // 4. Start refused because a start check failed at start time updates results and turns Start off.
+  (btnByText(main, W.checkAgain) || btnByText(main, W.checkBtn)).click();
+  await page.flush();
   startReply = { status: 400, body: { error: 'not starting; fix these first', results: mixedFailChecks() } };
   btnByText(main, W.startBtn).click();
   await page.flush();
@@ -891,4 +894,352 @@ test('project.js exports renderNewProjectHTML, renderChecksHTML, checkProject an
   assert.doesNotMatch(projCode, /models\.(?:coordinator|worker|reviewer|retro|plan_reviewer)|\bmax_running\b/, 'project.js must hold no hard-coded setting names or defaults');
   const appSrc = readFileSync(new URL('./app.js', import.meta.url), 'utf8');
   assert.ok(!/\bPOST\b|method\s*:/.test(appSrc), 'app.js must hold no POST');
+});
+
+const wrapDaemon = (base, fetch) => Object.assign(Object.create(base), { fetch });
+async function seedEnrolledKey(daemonId = 'D1', deviceId = 'dev-1') {
+  const pair = await globalThis.crypto.subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, false, ['sign']);
+  await keyStore(globalThis.indexedDB).save(daemonId, { deviceId, key: pair.privateKey });
+}
+
+test('starting a path canonicalized by git switches to the new project and announces np.started', async (t) => {
+  const existing = { id: 'proj-old', folder: '/Users/dev/code/old', goal: 'Old project', state: 'running', live: true, running: true, counts: {} };
+  const daemon = fakeDaemon({
+    projects: [existing],
+    paired: true,
+    onStart: (body, projs) => {
+      projs.push({
+        id: 'proj-new',
+        folder: body.folder.replace(/\/+$/, '').replace(/^\/tmp\//, '/private/tmp/'),
+        goal: body.goal,
+        state: 'running',
+        live: true,
+        running: true,
+        counts: {},
+      });
+      return { status: 200, body: { ok: true, device_id: 'dev-1' } };
+    },
+  });
+  const page = await bootPage(t, daemon);
+  const main = await openNewProject(page, 'projects');
+  await setField(page, fieldByLabel(main, 'folder', page.doc).ctrl, '/tmp/new-repo/');
+  await setField(page, fieldByLabel(main, 'goal', page.doc).ctrl, 'Canonical repo goal');
+  btnByText(main, W.checkBtn).click();
+  await page.flush();
+  btnByText(main, W.startBtn).click();
+  await page.flush();
+
+  assert.ok(main.textContent.includes('Canonical repo goal'), 'page must switch to the newly started project even when git canonicalized the folder');
+  assert.ok(main.querySelectorAll('[role="status"]').some((s) => s.textContent.includes(W.started)), 'page must announce np.started with role="status"');
+});
+
+test('editing models and clicking Done after checks pass disables Start until re-checked', async (t) => {
+  const daemon = fakeDaemon({ projects: [], paired: true });
+  const page = await bootPage(t, daemon);
+  const main = await openNewProject(page, 'main');
+  await setField(page, fieldByLabel(main, 'folder', page.doc).ctrl, '/Users/dev/code/notes');
+  btnByText(main, W.checkBtn).click();
+  await page.flush();
+  assert.notEqual(btnByText(main, W.startBtn).getAttribute('aria-disabled'), 'true');
+
+  main.querySelector('button[aria-label="Edit worker models"]').click();
+  await page.flush();
+  const w = modelRow(main, 'models.worker', 'worker models');
+  await setField(page, w.querySelector('select[aria-label="CLI, first choice"]'), 'codex', 'change');
+  await setField(page, modelRow(main, 'models.worker', 'worker models').querySelector('input[aria-label="model, first choice"]'), 'gpt-5', 'input');
+  btnByText(modelRow(main, 'models.worker', 'worker models'), 'Done').click();
+  await page.flush();
+
+  assert.equal(btnByText(main, W.startBtn).getAttribute('aria-disabled'), 'true', 'changing models after checks pass must disable Start until re-checked');
+});
+
+test('opening the models editor after checks pass disables Start while the editor is open', async (t) => {
+  const daemon = fakeDaemon({ projects: [], paired: true });
+  const page = await bootPage(t, daemon);
+  const main = await openNewProject(page, 'main');
+  await setField(page, fieldByLabel(main, 'folder', page.doc).ctrl, '/Users/dev/code/notes');
+  btnByText(main, W.checkBtn).click();
+  await page.flush();
+  assert.notEqual(btnByText(main, W.startBtn).getAttribute('aria-disabled'), 'true');
+
+  main.querySelector('button[aria-label="Edit worker models"]').click();
+  await page.flush();
+  assert.equal(btnByText(main, W.startBtn).getAttribute('aria-disabled'), 'true', 'Start must be disabled while a models editor is open');
+});
+
+test('refused setting pair on Check again disables Start and clears passing summary', async (t) => {
+  let refuse = false;
+  const daemon = fakeDaemon({
+    projects: [],
+    onCheck: () => refuse
+      ? { status: 400, body: { name: 'max_running', message: 'max running 99: allowed 1–20', error: 'max running 99: allowed 1–20' } }
+      : { status: 200, body: { results: allPassChecks() } },
+  });
+  const page = await bootPage(t, daemon);
+  const main = await openNewProject(page, 'main');
+  await setField(page, fieldByLabel(main, 'folder', page.doc).ctrl, '/Users/dev/code/notes');
+  btnByText(main, W.checkBtn).click();
+  await page.flush();
+  assert.notEqual(btnByText(main, W.startBtn).getAttribute('aria-disabled'), 'true');
+
+  refuse = true;
+  await setField(page, fieldByLabel(main, 'max running', page.doc).ctrl, '99');
+  (btnByText(main, W.checkAgain) || btnByText(main, W.checkBtn)).click();
+  await page.flush();
+
+  assert.equal(btnByText(main, W.startBtn).getAttribute('aria-disabled'), 'true', 'refused {name, message} on check must disable Start');
+  assert.ok(!main.textContent.includes('All 3 checks pass.'), 'refused {name, message} on check must clear stale passing summary');
+});
+
+test('refused setting pair on Start disables Start until the setting is fixed', async (t) => {
+  const daemon = fakeDaemon({
+    projects: [],
+    paired: true,
+    onStart: () => ({ status: 400, body: { name: 'max_running', message: 'max running 99: allowed 1–20', error: 'max running 99: allowed 1–20' } }),
+  });
+  const page = await bootPage(t, daemon);
+  const main = await openNewProject(page, 'main');
+  await setField(page, fieldByLabel(main, 'folder', page.doc).ctrl, '/Users/dev/code/notes');
+  await setField(page, fieldByLabel(main, 'goal', page.doc).ctrl, 'Build search');
+  btnByText(main, W.checkBtn).click();
+  await page.flush();
+  btnByText(main, W.startBtn).click();
+  await page.flush();
+
+  assert.equal(btnByText(main, W.startBtn).getAttribute('aria-disabled'), 'true', 'refused {name, message} on start must disable Start');
+});
+
+test('passing Check this folder clears prior non-git suggestion refusal and enables Start', async (t) => {
+  const page = await bootPage(t, fakeDaemon({ projects: [] }));
+  const main = await openNewProject(page, 'main');
+  main.querySelector('button[data-sugg="/Users/dev/code/scratch"]').click();
+  await page.flush();
+  assert.ok(main.textContent.includes(W.notGit));
+
+  btnByText(main, W.checkBtn).click();
+  await page.flush();
+  assert.ok(!main.textContent.includes(W.notGit), 'passing start checks must clear prior np.notgit alert');
+  assert.notEqual(btnByText(main, W.startBtn).getAttribute('aria-disabled'), 'true', 'Start must enable once checks pass');
+});
+
+test('folder suggestion buttons expose comma-separated path and git status label', async (t) => {
+  const page = await bootPage(t, fakeDaemon({ projects: [] }));
+  const main = await openNewProject(page, 'main');
+  const notes = main.querySelector('button[data-sugg="/Users/dev/code/notes"]');
+  const scratch = main.querySelector('button[data-sugg="/Users/dev/code/scratch"]');
+  assert.equal(notes.getAttribute('aria-label') || notes.textContent.trim(), '/Users/dev/code/notes, git repository');
+  assert.equal(scratch.getAttribute('aria-label') || scratch.textContent.trim(), '/Users/dev/code/scratch, not a git repository');
+});
+
+test('activating a non-first folder suggestion keeps keyboard focus on that suggestion', async (t) => {
+  const page = await bootPage(t, fakeDaemon({ projects: [] }));
+  const main = await openNewProject(page, 'main');
+  const scratch = main.querySelector('button[data-sugg="/Users/dev/code/scratch"]');
+  scratch.focus();
+  scratch.click();
+  await page.flush();
+  assert.equal(page.doc.activeElement?.dataset?.sugg, '/Users/dev/code/scratch', 'clicking 3rd suggestion must not jump focus to 1st suggestion');
+});
+
+test('typing in goal after empty-goal refusal keeps focus on live #np-goal', async (t) => {
+  const page = await bootPage(t, fakeDaemon({ projects: [], paired: true }));
+  const main = await openNewProject(page, 'main');
+  await setField(page, fieldByLabel(main, 'folder', page.doc).ctrl, '/Users/dev/code/notes');
+  btnByText(main, W.checkBtn).click();
+  await page.flush();
+
+  btnByText(main, W.startBtn).click();
+  await page.flush();
+  const goalBefore = fieldByLabel(main, 'goal', page.doc).ctrl;
+  assert.strictEqual(page.doc.activeElement, goalBefore);
+
+  await setField(page, goalBefore, 'A');
+  const goalAfter = fieldByLabel(main, 'goal', page.doc).ctrl;
+  assert.strictEqual(page.doc.activeElement, goalAfter, 'first keystroke after goal refusal must keep focus on live #np-goal');
+});
+
+test('typing in max running inside the new-project form keeps the same input DOM node', async (t) => {
+  const page = await bootPage(t, fakeDaemon({ projects: [], paired: true }));
+  const main = await openNewProject(page, 'main');
+  const maxBefore = fieldByLabel(main, 'max running', page.doc).ctrl;
+  maxBefore.focus();
+  await setField(page, maxBefore, '1');
+  assert.strictEqual(fieldByLabel(main, 'max running', page.doc).ctrl, maxBefore, 'typing in max running must update row metadata in place without replacing the <input>');
+  await setField(page, maxBefore, '12');
+  assert.strictEqual(fieldByLabel(main, 'max running', page.doc).ctrl, maxBefore, 'typing a second digit must keep the same <input> node');
+});
+
+test('pressing Check this folder keeps keyboard focus inside the form after checks pass', async (t) => {
+  const page = await bootPage(t, fakeDaemon({ projects: [] }));
+  const main = await openNewProject(page, 'main');
+  const proto = main.constructor.prototype;
+  const origFocus = proto.focus, origInner = Object.getOwnPropertyDescriptor(proto, 'innerHTML');
+  t.after(() => { proto.focus = origFocus; Object.defineProperty(proto, 'innerHTML', origInner); });
+  proto.focus = function () { if (!this.disabled && this.ownerDocument) this.ownerDocument.activeElement = this; };
+  Object.defineProperty(proto, 'innerHTML', {
+    get: origInner.get,
+    configurable: true,
+    set(h) {
+      if (this.ownerDocument?.activeElement && this.contains(this.ownerDocument.activeElement)) this.ownerDocument.activeElement = null;
+      origInner.set.call(this, h);
+    },
+  });
+
+  await setField(page, fieldByLabel(main, 'folder', page.doc).ctrl, '/Users/dev/code/notes');
+  const checkBtn = btnByText(main, W.checkBtn);
+  checkBtn.focus();
+  checkBtn.click();
+  await page.flush();
+
+  assert.ok(main.contains(page.doc.activeElement), 'focus must stay inside the form after checks pass (not lost to disabled or class change)');
+});
+
+test('post-pairing refused Start returns keyboard focus to the Start button', async (t) => {
+  const daemon = fakeDaemon({
+    projects: [],
+    paired: false,
+    onStart: () => ({ status: 400, body: { error: 'Not started: a setting is not allowed. Change it in settings below.' } }),
+  });
+  const page = await bootPage(t, daemon);
+  const main = await openNewProject(page, 'main');
+  await setField(page, fieldByLabel(main, 'folder', page.doc).ctrl, '/Users/dev/code/notes');
+  await setField(page, fieldByLabel(main, 'goal', page.doc).ctrl, 'Ship');
+  btnByText(main, W.checkBtn).click();
+  await page.flush();
+  btnByText(main, W.startBtn).click();
+  await page.flush();
+
+  const codeIn = main.querySelector('input[name="code"]');
+  codeIn.value = 'ABCD-EFGH';
+  codeIn.focus();
+  main.querySelector('form[data-pair-form]').dispatchEvent({ type: 'submit', bubbles: true });
+  await page.flush();
+
+  assert.strictEqual(page.doc.activeElement, btnByText(main, W.startBtn), 'after Pair succeeds and Start is refused, focus must return to Start');
+});
+
+test('401 session_expired on GET /api/spaces re-auths silently instead of showing herdr unreachable', async (t) => {
+  let spacesExpired = true;
+  const base = fakeDaemon({ projects: [], paired: true });
+  const daemon = wrapDaemon(base, async (path, init = {}) => {
+    const [u] = String(path).split('?');
+    if (spacesExpired && u === '/api/spaces') {
+      return { ok: false, status: 401, json: async () => ({ error: 'unauthorized', reason: 'session_expired' }) };
+    }
+    if (u === '/api/auth/session') spacesExpired = false;
+    return base.fetch(path, init);
+  });
+  const page = await bootPage(t, daemon);
+  await seedEnrolledKey();
+  const main = await openNewProject(page, 'main');
+
+  assert.ok(!main.textContent.includes(W.suggNone), '401 session_expired on /api/spaces must re-auth instead of showing herdr unreachable');
+  assert.ok(main.querySelector('button[data-sugg="/Users/dev/code/notes"]'), 'suggestions must load after silent re-auth');
+});
+
+test('401 session_expired on POST /api/factory/projects/check re-auths silently instead of showing unauthorized', async (t) => {
+  let checkExpired = true;
+  const base = fakeDaemon({ projects: [], paired: true });
+  const daemon = wrapDaemon(base, async (path, init = {}) => {
+    const [u] = String(path).split('?');
+    if (checkExpired && u === '/api/factory/projects/check') {
+      return { ok: false, status: 401, json: async () => ({ error: 'unauthorized', reason: 'session_expired' }) };
+    }
+    if (u === '/api/auth/session') checkExpired = false;
+    return base.fetch(path, init);
+  });
+  const page = await bootPage(t, daemon);
+  await seedEnrolledKey();
+  const main = await openNewProject(page, 'main');
+  await setField(page, fieldByLabel(main, 'folder', page.doc).ctrl, '/Users/dev/code/notes');
+  btnByText(main, W.checkBtn).click();
+  await page.flush();
+
+  assert.ok(!main.textContent.includes('unauthorized'), '401 session_expired on /projects/check must re-auth instead of showing raw unauthorized');
+  assert.ok(main.textContent.includes('All 3 checks pass.'), 'check results must render after silent re-auth');
+});
+
+test('changing folder to non-git while pairing box is open closes pairing box and drops stale start', async (t) => {
+  const daemon = fakeDaemon({ projects: [], paired: false });
+  const page = await bootPage(t, daemon);
+  const main = await openNewProject(page, 'main');
+  await setField(page, fieldByLabel(main, 'folder', page.doc).ctrl, '/Users/dev/code/notes');
+  await setField(page, fieldByLabel(main, 'goal', page.doc).ctrl, 'First goal');
+  btnByText(main, W.checkBtn).click();
+  await page.flush();
+  btnByText(main, W.startBtn).click();
+  await page.flush();
+  assert.ok(main.querySelector('form[data-pair-form]'));
+
+  main.querySelector('button[data-sugg="/Users/dev/code/scratch"]').click();
+  await page.flush();
+  assert.equal(main.querySelector('form[data-pair-form]'), null, 'picking a non-git folder while pairing box is open must close the stale pairing box');
+});
+
+test('editing goal while pairing box is open does not start with the stale goal on Pair', async (t) => {
+  const daemon = fakeDaemon({ projects: [], paired: false });
+  const page = await bootPage(t, daemon);
+  const main = await openNewProject(page, 'main');
+  await setField(page, fieldByLabel(main, 'folder', page.doc).ctrl, '/Users/dev/code/notes');
+  await setField(page, fieldByLabel(main, 'goal', page.doc).ctrl, 'Typo goal');
+  btnByText(main, W.checkBtn).click();
+  await page.flush();
+  btnByText(main, W.startBtn).click();
+  await page.flush();
+
+  await setField(page, fieldByLabel(main, 'goal', page.doc).ctrl, 'Corrected goal');
+  const pairForm = main.querySelector('form[data-pair-form]');
+  if (pairForm) {
+    main.querySelector('input[name="code"]').value = 'ABCD-EFGH';
+    pairForm.dispatchEvent({ type: 'submit', bubbles: true });
+    await page.flush();
+    assert.equal(daemon.starts[0]?.goal, 'Corrected goal', 'resumed start after Pair must use the edited goal, not the stale snapshot');
+  }
+});
+
+test('renderChecksHTML with an empty results array does not claim All 0 checks pass', async () => {
+  const { renderChecksHTML } = await import('./project.js');
+  const html = renderChecksHTML([]);
+  assert.ok(!html.includes('All 0 checks pass.'), 'empty results array must not claim All 0 checks pass.');
+});
+
+test('fixHTML does not mark an empty run: command as Copied before Copy is clicked', async () => {
+  const { fixHTML } = await import('./settings.js');
+  const html = fixHTML('run: ');
+  assert.ok(!html.includes('Copied'), 'empty run: command must not match default copied="" and render Copied before click');
+});
+
+test('folder suggestions cap initial visible rows when many folders exist and still let the owner reach the rest', async (t) => {
+  const manySpaces = {
+    spaces: [],
+    folders: Array.from({ length: 40 }, (_, i) => ({
+      name: `repo-${String(i + 1).padStart(2, '0')}`,
+      path: `/Users/dev/code/repo-${String(i + 1).padStart(2, '0')}`,
+      git: true,
+    })),
+    kinds: [],
+    worktrees: true,
+    needs_access: [],
+  };
+  const page = await bootPage(t, fakeDaemon({ projects: [], spaces: manySpaces }));
+  const main = await openNewProject(page, 'main');
+  const inClosedDetails = (el) => {
+    for (let c = el.parentElement; c; c = c.parentElement) if (c.tagName === 'DETAILS' && !c.open) return true;
+    return false;
+  };
+  const visibleSuggs = () => main.querySelectorAll('button[data-sugg]').filter((b) => !b.hidden && !inClosedDetails(b));
+
+  const initial = visibleSuggs();
+  assert.ok(initial.length > 0 && initial.length <= 10, `expected at most 10 visible suggestions initially for 40 folders, got ${initial.length}`);
+
+  const target = '/Users/dev/code/repo-35';
+  if (!initial.some((b) => b.dataset.sugg === target)) {
+    const suggWrap = main.querySelector('.np-sugg') || main;
+    const moreDetails = suggWrap.querySelector('details');
+    const moreBtn = suggWrap.querySelectorAll('button').find((b) => !b.hasAttribute('data-sugg'));
+    if (moreDetails) moreDetails.open = true;
+    else if (moreBtn) { moreBtn.click(); await page.flush(); }
+    else await setField(page, fieldByLabel(main, 'folder', page.doc).ctrl, 'repo-35');
+    assert.ok(visibleSuggs().some((b) => b.dataset.sugg === target), 'owner must be able to reach suggestions beyond the initial cap');
+  }
 });
