@@ -7,8 +7,10 @@ export const isOwnerAsk = (a) => Boolean(a && a.gated !== false && a.kind !== 'd
 export const PAIR_HINT = 'Changes from this page need a paired browser, once. On this Mac, open the Sheepdog menu-bar app (its icon is in the menu bar), choose Pair browser…, and type the code it shows.';
 const PAIR_WRONG = 'That code did not work. It was mistyped, already used, or older than 5 minutes. Choose Pair browser… again for a new code.';
 export const ERR_ICO = '<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4l9 16H3z"></path><path d="M12 10v4"></path><path d="M12 17v.5"></path></svg>';
+export const OK_ICO = '<svg class="ico" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12l5 5 9-10"></path></svg>';
 
 export function pairBoxHTML(state = {}, id = 'pair-code') {
+  if (state.pairDone) return `<section class="pair-box" role="region" aria-label="pair this browser"><h3>pair this browser</h3><p class="set-ok" role="status">${OK_ICO}<span>Paired. Sending what you asked for…</span></p></section>`;
   const cid = esc(id), err = state.pairError ? `<p class="ask-err" role="alert">${ERR_ICO}<span>${esc(state.pairError)}</span></p>` : '';
   return `<section class="pair-box" role="region" aria-label="pair this browser"><h3>pair this browser</h3><p>${esc(state.pairMessage || PAIR_HINT)}</p>` +
     `<p class="muted">What you just asked for is kept. It is sent as soon as this browser is paired.</p>` +
