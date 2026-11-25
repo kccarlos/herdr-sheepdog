@@ -191,7 +191,7 @@ class El {
   remove() { this._det(this); }
   focus() { if (this.ownerDocument) this.ownerDocument.activeElement = this; }
   contains(o) { for (let c = o; c; c = c.parentElement) if (c === this) return true; return false; }
-  matches(s) { return String(s).split(',').some((p) => matchOne(this, p)); }
+  matches(s) { return String(s).split(/,(?=(?:[^"]*"[^"]*")*[^"]*$)(?![^\[]*\])/).some((p) => matchOne(this, p)); }
   closest(s) { for (let c = this; c; c = c.parentElement) if (c.nodeType === 1 && c.matches(s)) return c; return null; }
   querySelectorAll(s) { const out = [], w = (n) => { for (const c of n.children) { if (c.matches(s)) out.push(c); w(c); } }; w(this); return out; }
   querySelector(s) { return this.querySelectorAll(s)[0] || null; }

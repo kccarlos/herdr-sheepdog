@@ -17,7 +17,7 @@ const STAGE = { owner_gate: ['needs your approval', 'blocked', true], owner_answ
 const ORDER = ['owner_gate', 'owner_answer', 'blocked_or_failed', 'ci', 'working', 'waiting_on_dep', 'queued'];
 // A stage this page does not know yet shows under its raw name rather than vanishing.
 const stage = (t) => STAGE[t.stage] || [t.stage || 'unknown', 'idle'];
-let data = null, down = false, lastOK = 0, timer = 0, busy = false, again = false, curNarrow = true, npSeq = 0, startedFolder = '', boardNotice = null, boardNoticeTimer = 0;
+let data = null, down = false, lastOK = 0, timer = 0, busy = false, again = false, curNarrow = true, npSeq = 0, justStarted = null, boardNotice = null, boardNoticeTimer = 0;
 const started = Date.now(), noticeTimers = new Map();
 const mq = globalThis.matchMedia?.('(max-width: 760px)') || null;
 const askFlow = createAskFlow(browserAskDeps());
@@ -28,11 +28,11 @@ const npUI = emptyNP();
 const pairRow = () => askUI.pending?.kind === 'setting' ? askUI.pending.name : (askUI.pending?.row || '');
 const setState = () => ({ ...setUI, pairRow: pairRow(), askBusyId: askUI.busyId, pairState: askUI });
 const npState = () => ({ ...npUI, projects: data?.projects || [], backProject: data?.p || '', copied: setUI.copied, pairState: askUI });
-const npSet = () => Object.fromEntries(Object.entries(npUI.edits).filter(([, v]) => v !== undefined));
+const npSet = () => ({ ...npUI.edits });
 const clearPair = () => Object.assign(askUI, { needsPairing: false, pairDone: false, pending: null, pairError: '', pairCode: '' });
 const findRow = (n, root = $('settings')) => n && [...root.querySelectorAll('[data-row]')].find((x) => x.dataset.row === n);
 const findCtrl = (n) => n && [...$('settings').querySelectorAll('[data-setting]')].find((x) => x.dataset.setting === n);
-const focusRow = (n, r = findRow(n)) => (r?.querySelector('button[data-cand-save], button[data-propose], button[data-default], button[data-ask-id], button[data-edit]') || r?.querySelector('[data-setting]'))?.focus({ preventScroll: true });
+const focusRow = (n, root = $('settings'), r = findRow(n, root)) => (r?.querySelector('button[data-cand-save], button[data-propose], button[data-default], button[data-ask-id], button[data-edit]') || r?.querySelector('[data-setting]'))?.focus({ preventScroll: true });
 const setNotice = (n, txt) => {
   clearTimeout(noticeTimers.get(n)); setUI.notices[n] = txt;
   noticeTimers.set(n, setTimeout(() => { delete setUI.notices[n]; noticeTimers.delete(n); if (data) render(); }, NOTICE_MS));
@@ -66,10 +66,11 @@ async function poll() {
   let next = data, off = false, setP = null;
   try {
     const [{ projects = [] }, { asks = [] }] = await Promise.all([get('/api/factory/projects'), get('/api/factory/asks')]);
-    const sp = startedFolder && projects.find((x) => x.folder === startedFolder);
+    const sp = justStarted && (projects.find((x) => !justStarted.ids.has(x.id)) || projects.find((x) => x.folder === justStarted.folder));
     const p = sp ? sp.id : (projects.some((x) => x.id === want) ? want : (projects[0]?.id || ''));
+    if (sp || !again) justStarted = null;
     if (sp) {
-      startedFolder = ''; clearTimeout(boardNoticeTimer);
+      clearTimeout(boardNoticeTimer);
       boardNotice = { project: sp.id, text: 'Started. The coordinator is planning the tasks.' };
       boardNoticeTimer = setTimeout(() => { boardNotice = null; if (data) render(); }, NOTICE_MS);
       if (location.hash !== '#' + enc(sp.id)) location.hash = '#' + enc(sp.id);
@@ -117,7 +118,7 @@ async function poll() {
 
 // set replaces an element's HTML only when it changed, then reopens the <details>
 // that were open and puts keyboard focus back on the same control.
-const key = (e) => [e.tagName, e.dataset?.setting || e.id || e.getAttribute('href') || e.dataset?.askId || e.closest?.('[data-row]')?.dataset.row || e.closest?.('[data-ask-id]')?.dataset.askId || '', e.dataset?.option || e.dataset?.copy || e.getAttribute('aria-label') || e.className || e.parentElement?.className || e.textContent?.slice(0, 24) || ''].join(':');
+const key = (e) => e.id ? `${e.tagName}#${e.id}` : [e.tagName, e.dataset?.setting || e.dataset?.sugg || e.getAttribute('href') || e.dataset?.askId || e.closest?.('[data-row]')?.dataset.row || e.closest?.('[data-ask-id]')?.dataset.askId || '', e.dataset?.option || e.dataset?.copy || e.getAttribute('aria-label') || (e.dataset?.npCheck && 'np-check') || (e.dataset?.npStart && 'np-start') || e.className || e.parentElement?.className || e.textContent?.slice(0, 24) || ''].join(':');
 function set(el, html) {
   if (el._html === html) return;
   const open = [...el.querySelectorAll('details[open]')].map(key);
@@ -265,47 +266,51 @@ async function submitAnswer(askId, option, inRow = '') {
 }
 
 async function openNewProject() {
-  const seq = ++npSeq; Object.assign(npUI, emptyNP(), { open: true }); if (askUI.pending?.kind === 'start') clearPair(); render();
+  const seq = ++npSeq; justStarted = null; Object.assign(npUI, emptyNP(), { open: true }); if (askUI.pending?.kind === 'start') clearPair(); render();
   const loaded = await loadNewProject(get); if (seq === npSeq && npUI.open) { Object.assign(npUI, loaded); render(); }
 }
 async function runCheck() {
-  const seq = npSeq; Object.assign(npUI, { checking: true, checkError: '', startError: '', errors: {}, fixes: {} }); render();
-  const res = await checkProject(npUI.folder.trim(), npSet()); if (seq !== npSeq || !npUI.open) return;
+  const seq = npSeq; Object.assign(npUI, { checking: true, checkError: '', startError: '', errors: {}, fixes: {} }); if (askUI.pending?.kind === 'start') clearPair(); render();
+  const res = await checkProject(npUI.folder.trim(), npSet(), undefined, askFlow.reauth); if (seq !== npSeq || !npUI.open) return;
   npUI.checking = false;
-  if (res.ok) Object.assign(npUI, { checks: res.results, hasChecked: true });
-  else if (res.name) { npUI.errors[res.name] = res.message; if (res.fix) npUI.fixes[res.name] = res.fix; }
+  if (res.ok) Object.assign(npUI, { checks: res.results, hasChecked: true, notGit: false });
+  else if (res.name) { npUI.checks = null; npUI.errors[res.name] = res.message; if (res.fix) npUI.fixes[res.name] = res.fix; }
   else Object.assign(npUI, { checks: null, hasChecked: true, checkError: res.message });
   render();
+  if (res.name) focusRow(res.name, $('main'));
+  else if (!$('main').contains(document.activeElement)) $('main').querySelector('button[data-np-check]')?.focus({ preventScroll: true });
 }
-async function runStart(folder = npUI.folder.trim(), goal = npUI.goal.trim(), set = npSet()) {
-  if (!goal) { npUI.goalErr = true; render(); return $('np-goal')?.focus({ preventScroll: true }); }
-  const seq = npSeq; Object.assign(npUI, { starting: true, goalErr: false, startError: '', errors: {}, fixes: {} }); if (!askUI.pairDone) clearPair(); render();
+async function runStart() {
+  const folder = npUI.folder.trim(), goal = npUI.goal.trim(), set = npSet();
+  if (!goal) { if (askUI.pending?.kind === 'start') clearPair(); npUI.goalErr = true; render(); return $('np-goal')?.focus({ preventScroll: true }); }
+  const seq = npSeq, ids = new Set((data?.projects || []).map((x) => x.id)); Object.assign(npUI, { starting: true, goalErr: false, startError: '', errors: {}, fixes: {} }); if (!askUI.pairDone) clearPair(); render();
   const res = await startProject(askFlow, folder, goal, set).catch((e) => ({ ok: false, message: e.message || 'Network error.' }));
   if (seq !== npSeq) return;
   npUI.starting = false;
-  if (res.ok) { clearPair(); npUI.open = false; startedFolder = folder; return poll(); }
-  if (res.needsPairing) { Object.assign(askUI, { needsPairing: false, pairDone: false, pairMessage: res.message, pending: { kind: 'start', folder, goal, set } }); render(); return $('main').querySelector('input[name="code"]')?.focus({ preventScroll: true }); }
+  if (res.ok) { clearPair(); npUI.open = false; justStarted = { folder, ids }; return poll(); }
+  if (res.needsPairing) { Object.assign(askUI, { needsPairing: false, pairDone: false, pairMessage: res.message, pending: { kind: 'start' } }); render(); return $('main').querySelector('input[name="code"]')?.focus({ preventScroll: true }); }
   clearPair();
   if (res.name) { npUI.errors[res.name] = res.message; if (res.fix) npUI.fixes[res.name] = res.fix; }
   else if (Array.isArray(res.results)) Object.assign(npUI, { checks: res.results, hasChecked: true });
   else npUI.startError = res.message || 'Could not start project.';
   render();
+  if (res.name) focusRow(res.name, $('main'));
+  else $('main').querySelector('button[data-np-start]')?.focus({ preventScroll: true });
 }
 
 const syncEdit = (e) => {
   const inForm = Boolean(e.target.closest?.('[data-np-form]')), ctrl = e.target.closest?.('[data-setting]');
   if (inForm && (e.target.id === 'np-folder' || e.target.id === 'np-goal')) {
-    const isF = e.target.id === 'np-folder', dirtyErr = isF ? (npUI.notGit || npUI.checks || npUI.checkError || npUI.startError) : (npUI.goalErr || npUI.startError);
-    if (isF) Object.assign(npUI, { folder: e.target.value, notGit: false, checks: null, checkError: '', startError: '' });
+    const isF = e.target.id === 'np-folder', dirtyErr = isF ? (npUI.notGit || npUI.checks || npUI.checkError || npUI.startError || askUI.pending?.kind === 'start') : (npUI.goalErr || npUI.startError);
+    if (isF) { Object.assign(npUI, { folder: e.target.value, notGit: false, checks: null, checkError: '', startError: '' }); if (askUI.pending?.kind === 'start') clearPair(); }
     else Object.assign(npUI, { goal: e.target.value, goalErr: false, startError: '' });
     if (dirtyErr) render(); else $('main')._html = renderNewProjectHTML(npUI.rows, npState());
   } else if (ctrl && data) {
     const ui = inForm ? npUI : setUI, n = ctrl.dataset.setting, row = (ui.rows || []).find((r) => r.name === n);
     if (row && ctrl.value === row.value) delete ui.edits[n]; else ui.edits[n] = ctrl.value;
     delete ui.errors[n]; delete ui.fixes[n];
-    if (inForm) return render();
-    clearTimeout(noticeTimers.get(n)); noticeTimers.delete(n); delete setUI.notices[n];
-    const html = renderSettingsHTML(setUI.rows, data.asks, setState()), tmp = document.createElement('div');
+    if (!inForm) { clearTimeout(noticeTimers.get(n)); noticeTimers.delete(n); delete setUI.notices[n]; }
+    const root = inForm ? $('main') : $('settings'), html = inForm ? renderNewProjectHTML(npUI.rows, npState()) : renderSettingsHTML(setUI.rows, data.asks, setState()), tmp = document.createElement('div');
     tmp.innerHTML = html;
     const srow = ctrl.closest('[data-row]'), nextRow = [...tmp.querySelectorAll('[data-row]')].find((x) => x.dataset.row === n);
     const top = srow?.querySelector('.srow-top'), nextTop = nextRow?.querySelector('.srow-top'), nextCtrl = nextTop?.querySelector('[data-setting]');
@@ -316,7 +321,9 @@ const syncEdit = (e) => {
       const btn = nextTop.querySelector('button'); if (btn) top.appendChild(btn);
       while (top.nextElementSibling) top.nextElementSibling.remove();
       while (nextTop.nextElementSibling) srow.appendChild(nextTop.nextElementSibling);
-      $('settings')._html = html;
+      const act = inForm && root.querySelector('.np-actions'), nextAct = act && tmp.querySelector('.np-actions');
+      if (act && nextAct && act.innerHTML !== nextAct.innerHTML) act.innerHTML = nextAct.innerHTML;
+      root._html = html;
     } else render();
   } else if (e.target.dataset?.candField && (inForm ? npUI.editor : setUI.editor) && data) {
     const ui = inForm ? npUI : setUI, c = ui.editor.cands[+e.target.dataset.candIdx], f = e.target.dataset.candField, n = ui.editor.row;
@@ -345,7 +352,7 @@ $('board').addEventListener('click', (e) => {
   if (e.target.closest('a[data-np-back]')) { e.preventDefault(); closeNewProject(); return render(); }
   if (npUI.open && e.target.closest('a.proj')) { closeNewProject(); return render(); }
   const sugg = e.target.closest('button[data-sugg]');
-  if (sugg) { Object.assign(npUI, { folder: sugg.dataset.sugg, notGit: sugg.dataset.suggGit !== '1', checks: null, checkError: '', startError: '' }); return render(); }
+  if (sugg) { Object.assign(npUI, { folder: sugg.dataset.sugg, notGit: sugg.dataset.suggGit !== '1', checks: null, checkError: '', startError: '' }); if (askUI.pending?.kind === 'start') clearPair(); return render(); }
   if (e.target.closest('button[data-np-check]') && !npUI.checking && !npUI.starting) return runCheck();
   const stBtn = e.target.closest('button[data-np-start]');
   if (stBtn && stBtn.getAttribute('aria-disabled') !== 'true' && !npUI.starting && !npUI.checking) return runStart();
@@ -353,7 +360,7 @@ $('board').addEventListener('click', (e) => {
   if (opt && !askUI.busyId) return submitAnswer(opt.dataset.askId, opt.dataset.option, opt.closest('[data-row]')?.dataset.row || '');
   const inForm = Boolean(e.target.closest?.('[data-np-form]')), ui = inForm ? npUI : setUI, root = inForm ? $('main') : $('settings'), locked = inForm ? (npUI.checking || npUI.starting) : Boolean(setUI.busy);
   const ed = e.target.closest('button[data-edit]');
-  if (ed && !locked) { const n = ed.dataset.edit, r = (ui.rows || []).find((x) => x.name === n); if (r) { if (!inForm && pairRow() === ui.editor?.row) clearPair(); delete ui.errors[n]; delete ui.fixes[n]; ui.editor = { row: n, cands: openModelCands(r, inForm && ui.edits[n] !== undefined ? ui.edits[n] : (r.value || r.default)) }; render(); findRow(n, root)?.querySelector('select, input')?.focus({ preventScroll: true }); } return; }
+  if (ed && !locked) { const n = ed.dataset.edit, r = (ui.rows || []).find((x) => x.name === n); if (r) { if (inForm ? askUI.pending?.kind === 'start' : pairRow() === ui.editor?.row) clearPair(); delete ui.errors[n]; delete ui.fixes[n]; ui.editor = { row: n, cands: openModelCands(r, inForm && ui.edits[n] !== undefined ? ui.edits[n] : (r.value || r.default)) }; render(); findRow(n, root)?.querySelector('select, input')?.focus({ preventScroll: true }); } return; }
   if (ui.editor && !locked) {
     const n = ui.editor.row, r = (ui.rows || []).find((x) => x.name === n), cs = ui.editor.cands, clr = () => { delete ui.errors[n]; delete ui.fixes[n]; };
     if (e.target.closest('button[data-cand-add]') && r) { cs.push({ cli: r.clis[0], model: '', effort: 'medium' }); clr(); render(); return findRow(n, root)?.querySelectorAll('input[data-cand-field="model"]')[cs.length - 1]?.focus({ preventScroll: true }); }
@@ -366,7 +373,9 @@ $('board').addEventListener('click', (e) => {
       if (badIdx < 0) {
         const val = cs.map((c) => `${c.cli}/${c.model.trim()}/${c.effort}`).join(', ');
         if (!inForm) return submitSetting(data.p, n, val);
+        const prev = npUI.edits[n] !== undefined ? npUI.edits[n] : (r?.value ?? '');
         if (r && val === r.value) delete npUI.edits[n]; else npUI.edits[n] = val;
+        if (val !== prev) { npUI.checks = null; npUI.checkError = ''; if (askUI.pending?.kind === 'start') clearPair(); }
         npUI.editor = null; clr(); render(); return findRow(n, root)?.querySelector('button[data-edit]')?.focus({ preventScroll: true });
       }
       ui.errors[n] = emptyIdx >= 0 ? 'Type a model name.' : `${r?.label || n}: a model name cannot hold a comma`;
@@ -391,7 +400,7 @@ $('board').addEventListener('submit', async (e) => {
   if (!res.ok) { askUI.pairError = res.message || 'Pairing failed.'; render(); return (askUI.pending?.kind === 'start' ? $('main') : pairRow() ? $('settings') : $('asks')).querySelector('input[name="code"]')?.focus({ preventScroll: true }); }
   const pending = askUI.pending;
   Object.assign(askUI, { pairDone: Boolean(pending), pairError: '', pairCode: '' });
-  if (pending?.kind === 'start') await runStart(pending.folder, pending.goal, pending.set);
+  if (pending?.kind === 'start') await runStart();
   else if (pending?.kind === 'setting') await submitSetting(pending.project, pending.name, pending.value);
   else if (pending?.askId) await submitAnswer(pending.askId, pending.option, pending.row || '');
   else { clearPair(); render(); await poll(); }

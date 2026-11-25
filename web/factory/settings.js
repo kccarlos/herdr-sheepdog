@@ -10,7 +10,7 @@ export function parseModelCandidates(raw, fallbackCLI = '') {
 }
 export function fixHTML(fix, copied = '') {
   if (!fix || !fix.startsWith('run:')) return fix ? `<p class="small"><b>Fix:</b> ${esc(fix)}</p>` : '';
-  const body = fix.slice(4).trim(), cuts = [body.indexOf(' ('), body.indexOf(', then ')].filter((i) => i >= 0), cut = cuts.length ? Math.min(...cuts) : body.length, cmd = body.slice(0, cut).trim(), rest = body.slice(cut).replace(/^,\s*/, '').trim(), cp = copied === cmd;
+  const body = fix.slice(4).trim(), cuts = [body.indexOf(' ('), body.indexOf(', then ')].filter((i) => i >= 0), cut = cuts.length ? Math.min(...cuts) : body.length, cmd = body.slice(0, cut).trim(), rest = body.slice(cut).replace(/^,\s*/, '').trim(), cp = Boolean(copied) && copied === cmd;
   return `<div class="fix-blk"><span class="small"><b>Fix, in a terminal:</b></span><div class="cmd"><code>${esc(cmd)}</code><button type="button" class="ask-opt sm" data-copy="${esc(cmd)}" aria-label="${esc(cp ? `Copied ${cmd}` : `Copy the command ${cmd}`)}">${cp ? 'Copied' : 'Copy'}</button>${cp ? '<span class="sr" role="status">Copied</span>' : ''}</div>${rest ? `<p class="small">${esc(rest)}</p>` : ''}</div>`;
 }
 export const editorAlertHTML = (errId, err, fix, copied = '') => err ? `<p id="${errId}" class="ask-err" role="alert">${ERR_ICO}<span>${esc(err)}</span></p>${fixHTML(fix, copied)}` : '';
