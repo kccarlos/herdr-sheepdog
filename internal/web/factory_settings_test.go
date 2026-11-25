@@ -76,3 +76,21 @@ func TestFactorySettingsBlankProjectIDReturns404(t *testing.T) {
 		t.Fatalf("GET /api/factory/projects/%%20/settings = %d %s, want 404", w.Code, w.Body.String())
 	}
 }
+
+func TestFactorySettingsModelsRouteRefusesUnlaunchable(t *testing.T) {
+	f := newBrowserEnrolFixture(t, nil)
+	if err := factory.SaveState(f.paths.State("proj-demo"), flow.State{
+		Seq: 1, Settings: flow.DefaultSettings(), Project: flow.Project{ID: "proj-demo", Folder: filepath.Join(f.dir, "repo"), Goal: "demo", Started: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	wDef := f.doLoopback(http.MethodGet, "/api/factory/settings", nil, "")
+	if wDef.Code != http.StatusOK || !strings.Contains(wDef.Body.String(), `"models.worker"`) || !strings.Contains(wDef.Body.String(), `"clis"`) {
+		t.Fatalf("GET /api/factory/settings = %d %s, want models.worker with clis", wDef.Code, wDef.Body.String())
+	}
+	_, ticket := f.enrollAndSignInApp("Test Browser", DeviceBrowser)
+	wBad := f.doLoopback(http.MethodPost, "/api/factory/projects/proj-demo/settings", map[string]string{"name": "models.retro", "value": "codex/gpt-6.2-sol/medium"}, ticket)
+	if wBad.Code != http.StatusBadRequest || !strings.Contains(wBad.Body.String(), `"not_launchable"`) || !strings.Contains(wBad.Body.String(), "the engine cannot launch codex as retro yet") {
+		t.Fatalf("POST models.retro=codex = %d %s, want 400 not_launchable", wBad.Code, wBad.Body.String())
+	}
+}

@@ -1,7 +1,7 @@
 // The factory page (design.md 12.1, the FactoryWeb* boards): polls the factory
 // views and delegates ask answers, setting proposals and browser pairing to asks.js & settings.js.
 import { esc, isOwnerAsk, renderAskCardsHTML, createAskFlow, browserAskDeps } from './asks.js';
-import { renderSettingsHTML, proposeSetting } from './settings.js';
+import { renderSettingsHTML, proposeSetting, parseModelCandidates } from './settings.js';
 import { renderMarkdown } from '../static/markdown.js';
 import { goalTitle } from './goal.js';
 
@@ -21,13 +21,13 @@ const started = Date.now(), noticeTimers = new Map();
 const mq = globalThis.matchMedia?.('(max-width: 760px)') || null;
 const askFlow = createAskFlow(browserAskDeps());
 const askUI = { busyId: '', error: '', errorAskId: '', needsPairing: false, pairDone: false, pairMessage: '', pairError: '', pairCode: '', pairingBusy: false, pending: null };
-const setUI = { project: '', rows: null, error: '', busy: '', edits: {}, errors: {}, notices: {} };
+const setUI = { project: '', rows: null, error: '', busy: '', edits: {}, errors: {}, fixes: {}, notices: {}, editor: null, copied: '' };
 const pairRow = () => askUI.pending?.kind === 'setting' ? askUI.pending.name : (askUI.pending?.row || '');
 const setState = () => ({ ...setUI, pairRow: pairRow(), askBusyId: askUI.busyId, pairState: askUI });
 const clearPair = () => Object.assign(askUI, { needsPairing: false, pairDone: false, pending: null, pairError: '', pairCode: '' });
 const findRow = (n) => n && [...$('settings').querySelectorAll('[data-row]')].find((x) => x.dataset.row === n);
 const findCtrl = (n) => n && [...$('settings').querySelectorAll('[data-setting]')].find((x) => x.dataset.setting === n);
-const focusRow = (n, r = findRow(n)) => (r?.querySelector('button[data-propose], button[data-default], button[data-ask-id]') || r?.querySelector('[data-setting]'))?.focus({ preventScroll: true });
+const focusRow = (n, r = findRow(n)) => (r?.querySelector('button[data-cand-save], button[data-propose], button[data-default], button[data-ask-id], button[data-edit]') || r?.querySelector('[data-setting]'))?.focus({ preventScroll: true });
 const setNotice = (n, txt) => {
   clearTimeout(noticeTimers.get(n)); setUI.notices[n] = txt;
   noticeTimers.set(n, setTimeout(() => { delete setUI.notices[n]; noticeTimers.delete(n); if (data) render(); }, NOTICE_MS));
@@ -63,7 +63,7 @@ async function poll() {
     const p = projects.some((x) => x.id === want) ? want : (projects[0]?.id || '');
     if (setUI.project !== p) {
       noticeTimers.forEach(clearTimeout); noticeTimers.clear();
-      Object.assign(setUI, { project: p, rows: null, error: '', busy: '', edits: {}, errors: {}, notices: {} });
+      Object.assign(setUI, { project: p, rows: null, error: '', busy: '', edits: {}, errors: {}, fixes: {}, notices: {}, editor: null, copied: '' });
     }
     let graph = null, log = [], problem = '';
     if (p) {
@@ -79,6 +79,7 @@ async function poll() {
   }
   const prev = data;
   data = next; down = off;
+  if (setUI.editor && (next?.asks || []).some((a) => a.status === 'open' && a.set?.name === setUI.editor.row && (!a.project || a.project === next.p))) setUI.editor = null;
   if (!off) lastOK = Date.now();
   render();
   if (setP && !off) {
@@ -103,7 +104,7 @@ async function poll() {
 
 // set replaces an element's HTML only when it changed, then reopens the <details>
 // that were open and puts keyboard focus back on the same control.
-const key = (e) => [e.tagName, e.dataset?.setting || e.id || e.getAttribute('href') || e.dataset?.askId || e.closest?.('[data-row]')?.dataset.row || e.closest?.('[data-ask-id]')?.dataset.askId || '', e.dataset?.option || e.getAttribute('aria-label') || e.className || e.parentElement?.className || e.textContent?.slice(0, 24) || ''].join(':');
+const key = (e) => [e.tagName, e.dataset?.setting || e.id || e.getAttribute('href') || e.dataset?.askId || e.closest?.('[data-row]')?.dataset.row || e.closest?.('[data-ask-id]')?.dataset.askId || '', e.dataset?.option || e.dataset?.copy || e.getAttribute('aria-label') || e.className || e.parentElement?.className || e.textContent?.slice(0, 24) || ''].join(':');
 function set(el, html) {
   if (el._html === html) return;
   const open = [...el.querySelectorAll('details[open]')].map(key);
@@ -205,17 +206,17 @@ function taskHTML(t) {
 }
 
 async function submitSetting(project, name, value) {
-  setUI.busy = name; delete setUI.errors[name]; delete setUI.notices[name];
+  setUI.busy = name; delete setUI.errors[name]; delete setUI.fixes[name]; delete setUI.notices[name];
   if (!askUI.pairDone) clearPair();
   render();
   const res = await proposeSetting(askFlow, project, name, value).catch((e) => ({ ok: false, message: e.message || 'Network error.' }));
   setUI.busy = '';
-  if (res.ok) { delete setUI.edits[name]; clearPair(); await poll(); return focusRow(name); }
+  if (res.ok) { delete setUI.edits[name]; if (setUI.editor?.row === name) setUI.editor = null; clearPair(); await poll(); return focusRow(name); }
   if (res.needsPairing) {
     Object.assign(askUI, { needsPairing: false, pairDone: false, pairMessage: res.message, pending: { kind: 'setting', project, name, value } });
     render(); return $('settings').querySelector('input[name="code"]')?.focus({ preventScroll: true });
   }
-  clearPair(); setUI.errors[name] = res.message || 'Could not change setting.'; render(); focusRow(name);
+  clearPair(); setUI.errors[name] = res.message || 'Could not change setting.'; if (res.fix) setUI.fixes[name] = res.fix; render(); focusRow(name);
 }
 
 async function submitAnswer(askId, option, inRow = '') {
@@ -228,11 +229,14 @@ async function submitAnswer(askId, option, inRow = '') {
   if (res.ok) {
     clearPair();
     if (ask?.set) {
-      const n = ask.set.name; delete setUI.edits[n]; delete setUI.errors[n];
-      setNotice(n, option === 'Save' ? (n.startsWith('models.') ? 'Saved. The next agent started for this role uses it. Running agents keep their model.' : 'Saved. The engine uses it from now on.') : `Kept at ${ask.set.was || 'not set'}. Nothing changed.`);
+      const n = ask.set.name, isMod = (setUI.rows || []).find((r) => r.name === n)?.clis?.length > 0;
+      const was = isMod && ask.set.was ? parseModelCandidates(ask.set.was).map((c) => `${c.cli}/${c.model}/${c.effort}`).join(' then ') : (ask.set.was || 'not set');
+      if (setUI.editor?.row === n) setUI.editor = null;
+      delete setUI.edits[n]; delete setUI.errors[n]; delete setUI.fixes[n];
+      setNotice(n, option === 'Save' ? (isMod ? 'Saved. The next agent started for this role uses it. Running agents keep their model.' : 'Saved. The engine uses it from now on.') : `Kept at ${was}. Nothing changed.`);
     }
     await poll();
-    return (inRow ? findCtrl(inRow) : $('asks').querySelector('button[data-ask-id], a, summary'))?.focus({ preventScroll: true });
+    return (inRow ? (findCtrl(inRow) || findRow(inRow)?.querySelector('button[data-edit]')) : $('asks').querySelector('button[data-ask-id], a, summary'))?.focus({ preventScroll: true });
   }
   if (res.needsPairing) {
     Object.assign(askUI, { needsPairing: !inRow, pairDone: false, pairMessage: res.message, pending: { kind: 'ask', askId, option, row: inRow } });
@@ -266,6 +270,14 @@ const syncEdit = (e) => {
       while (nextTop.nextElementSibling) srow.appendChild(nextTop.nextElementSibling);
       $('settings')._html = html;
     } else render();
+  } else if (e.target.dataset?.candField && setUI.editor && data) {
+    const c = setUI.editor.cands[+e.target.dataset.candIdx], f = e.target.dataset.candField, n = setUI.editor.row;
+    if (!c) return;
+    c[f] = e.target.value; delete setUI.errors[n]; delete setUI.fixes[n];
+    if (f !== 'model') return render();
+    const srow = e.target.closest('[data-row]'), li = e.target.closest('li.cand'), al = srow?.querySelector('.cand-alert'), tag = `${c.cli} ${c.model.trim() || 'model'}`;
+    srow?.querySelectorAll('.set-in.bad').forEach((x) => x.classList.remove('bad')); li?.querySelector('[data-cand-up]')?.setAttribute('aria-label', `Move ${tag} up`); li?.querySelector('[data-cand-rm]')?.setAttribute('aria-label', `Remove ${tag}`);
+    if (al) al.innerHTML = ''; $('settings')._html = renderSettingsHTML(setUI.rows, data.asks, setState());
   } else if (e.target.name === 'code') askUI.pairCode = e.target.value;
 };
 $('board').addEventListener('input', syncEdit);
@@ -277,17 +289,32 @@ $('board').addEventListener('keydown', (e) => {
     if (!setUI.busy && !(data?.asks || []).some((a) => a.status === 'open' && a.set?.name === n && (!a.project || a.project === data.p)) && (!ctrl.reportValidity || ctrl.reportValidity())) submitSetting(data.p, n, ctrl.value);
   }
 });
+const openModelCands = (r, raw) => parseModelCandidates(raw, r.clis[0]).map((c) => ({ ...c, cli: r.clis.includes(c.cli) ? c.cli : r.clis[0] }));
 $('board').addEventListener('click', (e) => {
   const opt = e.target.closest('button[data-ask-id][data-option]');
   if (opt && !askUI.busyId) return submitAnswer(opt.dataset.askId, opt.dataset.option, opt.closest('[data-row]')?.dataset.row || '');
-  const prop = e.target.closest('button[data-propose]');
-  if (prop && !setUI.busy) {
-    const n = prop.dataset.propose, ctrl = findCtrl(n);
-    if (!ctrl?.reportValidity || ctrl.reportValidity()) submitSetting(data.p, n, setUI.edits[n] ?? ctrl?.value ?? '');
-    return;
+  const ed = e.target.closest('button[data-edit]');
+  if (ed && !setUI.busy) { const n = ed.dataset.edit, r = (setUI.rows || []).find((x) => x.name === n); if (r) { if (pairRow() === setUI.editor?.row) clearPair(); delete setUI.errors[n]; delete setUI.fixes[n]; setUI.editor = { row: n, cands: openModelCands(r, r.value || r.default) }; render(); findRow(n)?.querySelector('select, input')?.focus({ preventScroll: true }); } return; }
+  if (setUI.editor && !setUI.busy) {
+    const n = setUI.editor.row, r = (setUI.rows || []).find((x) => x.name === n), cs = setUI.editor.cands, clr = () => { delete setUI.errors[n]; delete setUI.fixes[n]; };
+    if (e.target.closest('button[data-cand-add]') && r) { cs.push({ cli: r.clis[0], model: '', effort: 'medium' }); clr(); render(); return findRow(n)?.querySelectorAll('input[data-cand-field="model"]')[cs.length - 1]?.focus({ preventScroll: true }); }
+    if (e.target.closest('button[data-cand-default]') && r) { setUI.editor.cands = r.default ? openModelCands(r, r.default) : []; clr(); render(); return findRow(n)?.querySelector('select, input, button[data-cand-save]')?.focus({ preventScroll: true }); }
+    const up = e.target.closest('button[data-cand-up]'), rm = e.target.closest('button[data-cand-rm]');
+    if (up || (rm && cs.length > 1)) { if (up) { const i = +up.dataset.candUp; if (i > 0) [cs[i - 1], cs[i]] = [cs[i], cs[i - 1]]; } else cs.splice(+rm.dataset.candRm, 1); clr(); render(); if (!$('settings').contains(document.activeElement)) findRow(n)?.querySelector('select, input')?.focus({ preventScroll: true }); return; }
+    if (e.target.closest('button[data-cand-cancel]')) { if (pairRow() === n) clearPair(); setUI.editor = null; clr(); render(); return findRow(n)?.querySelector('button[data-edit]')?.focus({ preventScroll: true }); }
+    if (e.target.closest('button[data-cand-save]')) {
+      const emptyIdx = cs.findIndex((c) => !c.model.trim()), commaIdx = cs.findIndex((c) => c.model.includes(',')), badIdx = emptyIdx >= 0 ? emptyIdx : commaIdx;
+      if (badIdx < 0) return submitSetting(data.p, n, cs.map((c) => `${c.cli}/${c.model.trim()}/${c.effort}`).join(', '));
+      setUI.errors[n] = emptyIdx >= 0 ? 'Type a model name.' : `${r?.label || n}: a model name cannot hold a comma`;
+      delete setUI.fixes[n]; render();
+      return findRow(n)?.querySelectorAll('input[data-cand-field="model"]')[badIdx]?.focus({ preventScroll: true });
+    }
   }
-  const def = e.target.closest('button[data-default]');
-  if (def && !setUI.busy) submitSetting(data.p, def.dataset.default, (setUI.rows || []).find((r) => r.name === def.dataset.default)?.default ?? '');
+  const cp = e.target.closest('button[data-copy]');
+  if (cp) return navigator.clipboard?.writeText?.(cp.dataset.copy)?.then(() => { setUI.copied = cp.dataset.copy; render(); setTimeout(() => { if (setUI.copied === cp.dataset.copy) { setUI.copied = ''; if (data) render(); } }, 2000); }, () => {});
+  const prop = e.target.closest('button[data-propose]'), def = e.target.closest('button[data-default]');
+  if (prop && !setUI.busy) { const n = prop.dataset.propose, ctrl = findCtrl(n); if (!ctrl?.reportValidity || ctrl.reportValidity()) submitSetting(data.p, n, setUI.edits[n] ?? ctrl?.value ?? ''); }
+  else if (def && !setUI.busy) submitSetting(data.p, def.dataset.default, (setUI.rows || []).find((r) => r.name === def.dataset.default)?.default ?? '');
 });
 $('board').addEventListener('submit', async (e) => {
   const form = e.target.closest('form[data-pair-form]');

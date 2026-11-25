@@ -32,7 +32,13 @@ type SettingChange struct {
 
 // RuleQuestion formats the read-back question for an engine-opened setting proposal (SE1, SE3).
 func RuleQuestion(c SettingChange) string {
-	return fmt.Sprintf("This project: %s %s (now %s). Save?", settingLabel(c.Name), cmp.Or(c.Value, "empty"), cmp.Or(c.Was, "empty"))
+	fmtVal := func(v string) string {
+		if cands, err := ParseCandidates(v); err == nil && strings.HasPrefix(c.Name, "models.") {
+			return strings.ReplaceAll(FormatCandidates(cands), ", ", " then ")
+		}
+		return cmp.Or(v, "empty")
+	}
+	return fmt.Sprintf("This project: %s %s (now %s). Save?", settingLabel(c.Name), fmtVal(c.Value), fmtVal(c.Was))
 }
 
 // OverrideTarget is one task bound into an engine-filled override card (design.md 4.3b, plan.md 7.1).
