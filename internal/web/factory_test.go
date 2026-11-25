@@ -38,7 +38,7 @@ func (f *stubFactory) Projects() []factory.ProjectView { return nil }
 func (f *stubFactory) Graph(string) (factory.GraphView, error) {
 	return factory.GraphView{}, factory.ErrProjectNotFound
 }
-func (f *stubFactory) LogLines(string, int) ([]factory.LogEntry, error) {
+func (f *stubFactory) LogLines(string, int, string, bool) ([]factory.LogEntry, error) {
 	return nil, factory.ErrProjectNotFound
 }
 

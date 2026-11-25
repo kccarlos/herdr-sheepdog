@@ -444,7 +444,7 @@ func TestEngineViewsLockFreeCorruptStateAndBadLogLine(t *testing.T) {
 		if err != nil || len(g.Tasks) != 5 {
 			t.Errorf("eng.Graph = %+v, err=%v", g, err)
 		}
-		entries, err := eng.LogLines("proj-demo", 2)
+		entries, err := eng.LogLines("proj-demo", 2, "", false)
 		if err != nil || len(entries) != 2 || entries[1].Decision != "queued wake" {
 			t.Errorf("eng.LogLines = %+v, err=%v", entries, err)
 		}
@@ -452,7 +452,7 @@ func TestEngineViewsLockFreeCorruptStateAndBadLogLine(t *testing.T) {
 			if _, err := eng.Graph(bad); !errors.Is(err, ErrProjectNotFound) {
 				t.Errorf("Graph(%q) err = %v, want ErrProjectNotFound", bad, err)
 			}
-			if _, err := eng.LogLines(bad, 10); !errors.Is(err, ErrProjectNotFound) {
+			if _, err := eng.LogLines(bad, 10, "", false); !errors.Is(err, ErrProjectNotFound) {
 				t.Errorf("LogLines(%q) err = %v, want ErrProjectNotFound", bad, err)
 			}
 		}

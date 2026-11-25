@@ -183,7 +183,7 @@ func TestProjectRepoURLStoredAndViewsNeverCallGit(t *testing.T) {
 			ve := New(paths, nil)
 			ve.git = world.NewGit(hc.NewClient(noGit.Path), nil, nil)
 			_, gErr := ve.Graph(id)
-			_, lErr := ve.LogLines(id, 10)
+			_, lErr := ve.LogLines(id, 10, "", false)
 			lcExpect(t, viewWire(t, ve.Projects()[0]).RepoURL == tc.want && gErr == nil && lErr == nil, "view RepoURL=%q want=%q errs=%v/%v", viewWire(t, ve.Projects()[0]).RepoURL, tc.want, gErr, lErr)
 		})
 	}

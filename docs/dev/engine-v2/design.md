@@ -1074,7 +1074,7 @@ Every surface reads a **view**: a pure function of the stored state. The JSON sh
 | Ask cards (FactoryAsk, FactoryAskCard), on Conversation and on Agents with a badge | open owner asks | ask table |
 | Start row and shell start (FactoryStartEntry, FactoryStartShell) | doctor lines, then five questions | `doctor.go`; J1 |
 | Agents block, worker window (FactoryAgents, FactoryWorker) | coordinator state and age; each run's terminal, model and effort | run table; labels `sheepdog.project/role/task/model` set at launch |
-| Log (FactoryTerminal) | `at, by, wake, task, decision, why, model` | `log.jsonl` (section 14) |
+| Log (FactoryTerminal, FactoryWebLog) | `at, by, wake, task, decision, why, kind, model` | `log.jsonl` (section 14) |
 | Debug | for a task: the rule that matched, and for each earlier rule the part of its condition that was false; refusals with their codes | `log.jsonl`; refusals from the daemon's event log (section 14) |
 | Voice digest | merged, waiting, pools, alerts; any PR merged outside the accept bar; any task that has waited on the coordinator for hours | a pure function over state and log; no model |
 | Override result | one short line per answered-Yes override card (voice, APNs, log; no card) | `flow.OverrideResult` over state (section 4.3b) |
@@ -1127,7 +1127,7 @@ type Change struct {
 type Engine interface {
     // reads (views)
     Projects() []ProjectView;  Graph(project string) (GraphView, error);  Asks(open bool) []flow.Ask
-    Digest(since) Digest;  Rules(project) []Rule;  Alerts(since) []Alert;  LogLines(project string, n int) ([]LogEntry, error)
+    Digest(since) Digest;  Rules(project) []Rule;  Alerts(since) []Alert;  LogLines(project string, n int, task string, observations bool) ([]LogEntry, error)
     // owner actions (each becomes an event)
     Start(folder, goal string, maxRunning int) error;  Stop(project string) error;  Say(project, text string) error
     MintProof(askID, option, inputKind, deviceID string) (AnswerProof, error)

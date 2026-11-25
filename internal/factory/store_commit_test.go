@@ -525,7 +525,7 @@ func TestStore_ReadersHideLinesPastStateSeq(t *testing.T) {
 
 	// Web log view and offline status read through the same loadProjectCopy seam.
 	eng := New(paths, nil)
-	entries, err := eng.LogLines(id, 0)
+	entries, err := eng.LogLines(id, 0, "", false)
 	if err != nil {
 		t.Fatalf("LogLines: %v", err)
 	}
