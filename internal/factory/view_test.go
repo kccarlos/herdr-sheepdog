@@ -2195,3 +2195,37 @@ func TestTaskStepsImplementingNotSentBackAfterRetroShipOrCoordinatorSendBack(t *
 		t.Errorf("N22 coordinator send-back after passing round 1 falsely blames review round 1: %q", n22.Text)
 	}
 }
+
+// Plan review comes before planned (orchestrator decision 2026-11-25, plan 14.8): after the
+// project's plan review is accepted, a task still waiting for a slot (N10) or on a dependency
+// (N9) shows plan review done and planned now — never implementing — and an unreviewed task
+// waiting on a dependency shows plan review now.
+func TestTaskStepsPlanReviewBeforePlannedOrder(t *testing.T) {
+	t0 := time.Date(2026, 11, 25, 6, 0, 0, 0, time.UTC)
+	s := flow.DefaultSettings()
+	s.PlanReviewRounds = 1
+	accepted := flow.PlanReview{N: 1, Tasks: []string{"T1", "T2"}, Verdict: flow.VerdictPass, Started: t0, At: t0.Add(time.Minute), Accepted: t0.Add(time.Minute)}
+	st := flow.State{
+		Settings: s,
+		Project:  flow.Project{ID: "p-pr-order", Started: true, PlanReviews: []flow.PlanReview{accepted}},
+		Tasks: []flow.Task{
+			{ID: "T1", Title: "queued for a slot after plan review", LastRow: "N10"},
+			{ID: "T2", Title: "waiting on T1 after plan review", After: []string{"T1"}, LastRow: "N9"},
+			{ID: "T3", Title: "unreviewed, waiting on T1", After: []string{"T1"}, LastRow: "N9", Unreviewed: true},
+		},
+	}
+	want := map[string][2]string{"T1": {"plan review:done", "planned:now"}, "T2": {"plan review:done", "planned:now"}, "T3": {"plan review:now", "planned:todo"}}
+	for _, tv := range GraphViewOf(st, nil).Tasks {
+		steps := taskStepsOf(t, tv)
+		if len(steps) < 3 {
+			t.Fatalf("%s: steps=%+v", tv.Ref, steps)
+		}
+		got := [2]string{steps[0].Name + ":" + steps[0].State, steps[1].Name + ":" + steps[1].State}
+		if w, ok := want[tv.Ref]; ok && got != w {
+			t.Errorf("%s: first steps = %v, want %v (implementing must not be now: %+v)", tv.Ref, got, w, steps)
+		}
+		if steps[2].Name != "implementing" || steps[2].State != "todo" {
+			t.Errorf("%s: third step = %+v, want implementing todo", tv.Ref, steps[2])
+		}
+	}
+}
