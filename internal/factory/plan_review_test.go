@@ -160,6 +160,7 @@ func TestStore_AcceptPlanLockedFailedWriteKeepsMarks(t *testing.T) {
 	w.seedIdleCoordAndWarmUp()
 	w.edit(func(s *flow.State) {
 		s.Settings.PlanReviewRounds = 1
+		s.Settings.Models = map[string][]flow.Candidate{flow.RolePlanReviewer: {{CLI: world.CodexCLI, Model: "gpt-6.2-sol", Effort: "medium"}}}
 		s.Tasks = append(s.Tasks, flow.Task{ID: "T2", Title: "feat: held", EstimateLines: 30, Unreviewed: true})
 	})
 

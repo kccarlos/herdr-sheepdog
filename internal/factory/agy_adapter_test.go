@@ -131,6 +131,7 @@ func newAgyRig(t *testing.T, models map[string][]flow.Candidate) *agyRig {
 		t.Fatal(err)
 	}
 	r.id = r.eng.projectDirs()[0].Name()
+	r.edit(func(s *flow.State) { s.Settings.PlanReviewRounds = 0 })
 	if models != nil {
 		r.edit(func(s *flow.State) { s.Settings.Models = models })
 	}

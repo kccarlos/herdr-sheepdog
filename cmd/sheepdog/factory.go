@@ -40,6 +40,7 @@ func printFactoryUsage(w io.Writer) {
 	fprintln(w, "  log [<folder>] [-n N]                each engine step: time, task, rule, asked, decision, why")
 	fprintln(w, "  plan apply <file>                    (coordinator only) apply a JSON plan")
 	fprintln(w, "  plan amend <file>                    (coordinator only) change tasks' title, brief, outcomes, estimate_lines or add tasks, with a why")
+	fprintln(w, "  plan reject <task> --why \"<why>\"     (coordinator only) reject open plan review findings on a task")
 	fprintln(w, "  task <park|unpark|drop|close|send-back|retry|say> <task> --why \"<why>\"  (coordinator only)")
 	fprintln(w, "  recap decide <task> <choice> --why \"<why>\" [--child '<json>' ...]  (coordinator only) decide an open recap")
 	fprintln(w, "  report ready [--proof \"<outcome>=<cmd>\" ...] [--artifact \"<outcome>=<path>\" ...] [--touched \"<places>\"] [--skipped \"<what was left out>\"] [--reject \"<why>\"]  (worker only) run proofs and report HEAD ready, or reject findings")
@@ -233,8 +234,20 @@ func runFactoryLog(ctx context.Context, args []string, stdout, stderr io.Writer)
 // runTokenEnv names the run's token the engine puts in each run's environment.
 const runTokenEnv = "SHEEPDOG_RUN_TOKEN"
 
-// runFactoryPlan sends `plan apply|amend <file>` with the run's token; the engine checks it.
+// runFactoryPlan sends `plan apply|amend <file>` or `plan reject <task> --why` with the run's token.
 func runFactoryPlan(ctx context.Context, args []string, stdout, stderr io.Writer) int {
+	if len(args) >= 1 && args[0] == "reject" {
+		fs := factoryFlags("factory plan reject", stderr)
+		why := fs.String("why", "", "reason")
+		if err := fs.Parse(reorderFactoryArgs(fs, args[1:])); err != nil {
+			return flagExit(err)
+		}
+		if fs.NArg() != 1 {
+			printFactoryUsage(stderr)
+			return 2
+		}
+		return sendFactoryReport(ctx, "factory plan reject", "plan reject", map[string]string{"task": fs.Arg(0), "why": *why}, "plan reject "+fs.Arg(0), stdout, stderr)
+	}
 	if len(args) != 2 || (args[0] != "apply" && args[0] != "amend") {
 		printFactoryUsage(stderr)
 		return 2

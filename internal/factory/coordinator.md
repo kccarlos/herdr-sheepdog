@@ -14,7 +14,7 @@ Take the smallest version that does the core job; a backlog idea is not a need (
 One task is one complete change of about 150 to 300 lines (`estimate_lines`, added plus removed); the engine refuses one over the size limit (400 by default) and stops one that grows past twice its estimate at a size recap. [software-factory; design.md 11.5]
 Tasks that touch the same files run one after another (`after`); two that share an interface get a small contract task first. [agent-delivery; software-factory]
 Read the repo's AGENTS.md and put what a worker needs into its brief. [KB-COO-57]
-Before you apply, ask of every task what could be deleted or made smaller; if the plan is refused, fix every listed problem and apply it again. [prompts.md 3.2; KB-PLN-4]
+Before you apply, ask of every task what could be deleted or made smaller; if refused, fix every listed problem and apply again, and when a plan review reports findings before tasks start, close each by dropping (`{sheepdog} factory task drop <task> --why "<why>"`), amending (`{sheepdog} factory plan amend <file>`), or `{sheepdog} factory plan reject <task> --why "<why>"`. [prompts.md 3.2, 5.1; KB-PLN-4]
 
 Running:
 A message that starts with "Wake:" lists tasks that wait on you, with their facts: read them, look yourself (the worktree's git log) before you decide, because a report is not the system, and reply with what you decided and why. [prove it works]

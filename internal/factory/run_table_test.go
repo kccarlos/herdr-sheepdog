@@ -37,6 +37,7 @@ func TestWorkerDiedMidTurnSeenAsGone(t *testing.T) {
 			id := eng.projectDirs()[0].Name()
 			eng.passProject(ctx, id, false) // J7 coordinator
 			st, _ := LoadState(paths.State(id))
+			st.Settings.PlanReviewRounds = 0
 			st.Project.RunTokenHash = tokenHash("tok-coord")
 			if err := SaveState(paths.State(id), st); err != nil {
 				t.Fatal(err)
@@ -114,6 +115,7 @@ func TestStartTrustScreenToldApartFromBlank(t *testing.T) {
 	eng.passProject(ctx, id, false) // coordinator
 	st, _ := LoadState(paths.State(id))
 	srv.SetStatus(st.Project.RunID, &hc.Status{App: "claude-code", State: "working"})
+	st.Settings.PlanReviewRounds = 0
 	st.Project.RunTokenHash = tokenHash("tok-coord")
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
@@ -216,6 +218,7 @@ func TestRunStateSurvivesRestart(t *testing.T) {
 	eng1.passProject(ctx, id, false)
 	st, _ := LoadState(paths.State(id))
 	srv.SetStatus(st.Project.RunID, &hc.Status{App: "claude-code", State: "working"})
+	st.Settings.PlanReviewRounds = 0
 	st.Project.RunTokenHash = tokenHash("tok-coord")
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
@@ -279,6 +282,7 @@ func TestIdleRunWithLimitProseStaysIdle(t *testing.T) {
 	eng.passProject(ctx, id, false)
 	st, _ := LoadState(paths.State(id))
 	srv.SetStatus(st.Project.RunID, &hc.Status{App: "claude-code", State: "working"})
+	st.Settings.PlanReviewRounds = 0
 	st.Project.RunTokenHash = tokenHash("tok-coord")
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)
@@ -332,6 +336,7 @@ func TestQuietRunInterruptedOnceThenEndedStuck(t *testing.T) {
 	eng.passProject(ctx, id, false)
 	st, _ := LoadState(paths.State(id))
 	srv.SetStatus(st.Project.RunID, &hc.Status{App: "claude-code", State: "idle"})
+	st.Settings.PlanReviewRounds = 0
 	st.Project.RunTokenHash = tokenHash("tok-coord")
 	if err := SaveState(paths.State(id), st); err != nil {
 		t.Fatal(err)

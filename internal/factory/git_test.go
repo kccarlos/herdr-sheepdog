@@ -40,6 +40,14 @@ func newGitTestEngine(t *testing.T, paths Paths, client *hc.Client) *Engine {
 	return e
 }
 
+func noPlanReview(t *testing.T, p Paths, id string) {
+	st, _ := LoadState(p.State(id))
+	st.Settings.PlanReviewRounds = 0
+	if err := SaveState(p.State(id), st); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDaemonProjectPathsUseMachineExec(t *testing.T) {
 	ctx := context.Background()
 	parent := t.TempDir()

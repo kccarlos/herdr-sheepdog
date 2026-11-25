@@ -12,7 +12,7 @@ const (
 	AskStartCoordinator, AskStopCoordinator, AskFinalJournal         = "coordinator", "stop_coordinator", "final_journal"
 	AskCoordGoOn, AskCoordDialogStuck, AskDeliverWakes, AskHeartbeat = "coord_go_on", "coord_dialog_stuck", "deliver_wakes", "heartbeat"
 	AskStartPlanReviewer, AskStopPlanReviewer, AskAcceptPlan         = "start_plan_reviewer", "stop_plan_reviewer", "accept_plan"
-	coordStartWindow, firstDialogStuck                               = time.Hour, 1
+	coordStartWindow, firstDialogStuck, planFindingsHoldBeats        = time.Hour, 1, 2
 )
 
 // ProjectIn is what a project rule sees (design.md section 6).
@@ -63,7 +63,7 @@ func (in ProjectIn) heartbeatDue() bool {
 
 func (in ProjectIn) planReviewStep() (start, accept bool) {
 	if pr := in.lastPlanReview(); pr != nil && pr.Accepted.IsZero() {
-		return false, pr.Verdict != "" && len(OpenPlanFindings(in.Project)) == 0
+		return false, pr.Verdict != "" && (len(OpenPlanFindings(in.Project)) == 0 || in.past(pr.At, planFindingsHoldBeats*in.HeartbeatMinutes))
 	}
 	if !slices.ContainsFunc(in.Tasks, func(t Task) bool { return !Ended(t) && t.Unreviewed }) {
 		return false, false
@@ -75,7 +75,11 @@ func (in ProjectIn) planReviewStep() (start, accept bool) {
 }
 
 func (in ProjectIn) planReviewStopWhy() string {
-	if pr := in.lastPlanReview(); pr != nil && pr.Accepted.IsZero() && pr.Verdict == "" && pr.Run != nil && in.PlanRun.State != RunNone {
+	pr := in.lastPlanReview()
+	if pr != nil && pr.Verdict != "" && pr.Run != nil && pr.Run.RunID != "" {
+		return "plan reviewer report was accepted"
+	}
+	if pr != nil && pr.Accepted.IsZero() && pr.Verdict == "" && pr.Run != nil && in.PlanRun.State != RunNone {
 		switch {
 		case in.PlanRun.State == RunGone, in.PlanRun.State == RunIdle:
 			return "plan reviewer " + map[RunState]string{RunGone: "terminal is gone", RunIdle: "went idle without a report"}[in.PlanRun.State]
@@ -138,14 +142,11 @@ func pcond(id, waits, stage string, when, sel func(ProjectIn) bool, yes, no Deci
 	return prow(id, waits, stage, when, func(in ProjectIn) Decision { return map[bool]Decision{true: yes, false: no}[sel(in)] })
 }
 
-// ProjectRows is the ordered project rule table for the coordinator (design.md section 6).
+// CoordRows is the ordered rule table for the coordinator (design.md section 6).
 // J1 (doctor) is slice 8; J3/J5 (alerts/sign-in) are slice 5b; J11 (rotation) is slice 13.
 // J2 lives in passProject's early return and Engine.Stop.
 // J10 sits before J6/J7 so an R29 dialog-stuck end is noted before J6 waits or J7 restarts it.
-var ProjectRows = []Row[ProjectIn]{
-	prow("J15", "engine", "running", func(in ProjectIn) bool { return in.planReviewStopWhy() != "" }, func(in ProjectIn) Decision {
-		return pdec(in.planReviewStopWhy(), AskStopPlanReviewer)
-	}),
+var CoordRows = []Row[ProjectIn]{
 	prow("J3", "owner", "stopped", func(in ProjectIn) bool { return StoppingAlert(in.Alerts) != nil && !in.alive() }, func(in ProjectIn) Decision {
 		a := StoppingAlert(in.Alerts)
 		return pdec("Stopped: " + cmp.Or(a.Fix, a.Cause))
@@ -180,3 +181,11 @@ var ProjectRows = []Row[ProjectIn]{
 	pcond("J16", "engine", "running", func(in ProjectIn) bool { s, a := in.planReviewStep(); return s || a }, func(in ProjectIn) bool { s, _ := in.planReviewStep(); return s }, pdec("unreviewed tasks waiting and coordinator is idle: start plan reviewer", AskStartPlanReviewer), pdec("accept held plan", AskAcceptPlan)),
 	pfix("J14", "none", nil, "running"),
 }
+
+// ProjectRows prepends J15 (plan-reviewer terminal cleanup) ahead of CoordRows
+// so a plan reviewer never outlives a stopped, alerted, or finished project.
+var ProjectRows = append([]Row[ProjectIn]{
+	prow("J15", "engine", "running", func(in ProjectIn) bool { return in.planReviewStopWhy() != "" }, func(in ProjectIn) Decision {
+		return pdec(in.planReviewStopWhy(), AskStopPlanReviewer)
+	}),
+}, CoordRows...)

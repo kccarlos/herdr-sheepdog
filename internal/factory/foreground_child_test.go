@@ -72,6 +72,7 @@ func newQuietWorkerFixture(t *testing.T, start time.Time) *quietWorkerFixture {
 	f.eng.passProject(ctx, f.id, false) // J7 coordinator
 	st, _ := LoadState(paths.State(f.id))
 	srv.SetStatus(st.Project.RunID, &hc.Status{App: "claude-code", State: "idle"})
+	st.Settings.PlanReviewRounds = 0
 	st.Project.RunTokenHash = tokenHash("tok-coord")
 	if err := SaveState(paths.State(f.id), st); err != nil {
 		t.Fatal(err)

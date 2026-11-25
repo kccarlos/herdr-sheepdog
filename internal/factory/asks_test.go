@@ -923,6 +923,7 @@ func TestWorkerAnswerHeldWhenWorkerDiedOrHCDownBetweenPasses(t *testing.T) {
 			t.Fatal(err)
 		}
 		id := eng.projectDirs()[0].Name()
+		noPlanReview(t, paths, id)
 		pass := func(d time.Duration) {
 			now = now.Add(d)
 			eng.passProject(context.Background(), id, false)
