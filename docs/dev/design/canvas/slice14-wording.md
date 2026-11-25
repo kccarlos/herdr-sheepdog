@@ -2,7 +2,7 @@
 
 Every label, read-back question, option, refusal and empty-state sentence
 that slice 14 writes on `/factory`, with the tab order and the
-screen-reader label of each new control. The code PRs 14.1–14.9 copy these
+screen-reader label of each new control. The code PRs 14.1–14.10 copy these
 strings; a test's expected string is the **Text** column
 ([plan.md](../../engine-v2/plan.md), slice 14, UX line 7).
 
@@ -282,7 +282,7 @@ strings; a test's expected string is the **Text** column
 | `ov.needs` | mark | needs you: 2 | on a project card, only when the project has open asks for you; amber outline, the number is the count |
 | `ov.progress` | card text | 3 of 6 done | done tasks of all tasks |
 | `ov.notasks` | card text | no tasks yet | a project the coordinator has not planned yet |
-| `ov.name` | card text | notes | the project's name: the last part of its folder's path (the project's id when it has no folder); in mono above the goal, and before the goal in the needs-you list |
+| `ov.name` | card text | notes | the project's name: the last part of its folder's path (the project's id when it has no folder); in mono above the goal on overview cards, beside the goal on the project board, and before the goal in the needs-you list |
 | `ov.card` | screen-reader text | notes, A notes page with search, running, needs you: 2, 2 of 8 done | a card's label; the whole card is one link into the project |
 | `ov.err` | mark | can't read project | a project whose stored state the daemon cannot read; icon: triangle; danger colour. The card shows the project id, this mark, the hint and the daemon's error; no state word and no progress; it is not a link; it sorts last |
 | `ov.err.hint` | sentence | Its state file could not be read. | under the mark; the daemon's error sentence follows as secondary text |
@@ -290,7 +290,7 @@ strings; a test's expected string is the **Text** column
 | `ov.all` | link | all projects | only when there are two or more projects. On a project's board: the back link, in place of the aside's projects card. On the new-project form: in place of 'board' (never two back links). The task view keeps 'board', which returns to its project |
 | `ni.btn` | button | needs you: 3 | in the header on every page, counting every project; not shown when the count is 0, nor before the first load. Lowercase on purpose (it sits beside "sheepdog factory · live" and matches the card mark): the one exception to buttons starting with a capital. Screen-reader labels "needs you: 3 asks in 2 projects", "needs you: 2 asks in 1 project", "needs you: 1 ask in 1 project"; aria-expanded. While the link is lost it stays, with the last known asks |
 | `ni.h` | heading | needs you | heading of the list the button opens. The list is part of the page, directly under the header: it pushes the page down and covers nothing |
-| `ni.item` | link | Delete the old notes table in the migration? | one link per open ask, under its project's heading (name · goal). Activating it closes the list and opens that project with the ask's card scrolled into view and focused; when that project is already shown, the page does not reload: the list closes and the card is scrolled to and focused |
+| `ni.item` | link | Delete the old notes table in the migration? | one link per open ask, under its project's heading (name · goal). Activating it closes the list and opens that project with the ask's card scrolled into view and focused; when that project's board is already shown (not its task view or the new-project form), the page does not reload: the list closes and the card is scrolled to and focused |
 | `ni.inproj` | card text | 2 open | inside a project the asks-for-you card counts and lists only that project (exists; now per project) |
 | `ni.none` | empty state | No open asks right now. | the asks card of a project with none (exists), even while the header's count shows another project's |
 
@@ -441,9 +441,9 @@ is `role="status"`. Focus survives the 3 s poll.
 
 | # | Control | Screen-reader label and notes |
 |---|---|---|
-| 1 | needs you: 3 | button in the header, first control of every page; "needs you: 3 asks in 2 projects" (singular forms "1 ask", "1 project"), expanded or collapsed. Escape closes the list and focus returns to the button |
+| 1 | needs you: 3 | button in the header, first control of every page; "needs you: 3 asks in 2 projects" (singular forms "1 ask", "1 project"), expanded or collapsed. Escape closes the list and focus returns to the button. If a poll resolves the last open ask while the list is open, the open state resets to closed and focus moves out cleanly (to the main column's first control) so it is not stranded and the list does not reopen on a later ask |
 | 2 | the open list | directly after the button, in the page under the header: per project a heading "notes · A notes page with search", then a link per ask reading the question |
-| 3 | an ask link, activated | the list closes; the ask's project opens and focus lands on that ask's card under asks for you. If that project is already shown nothing reloads: the list closes, the card is scrolled into view and focused |
+| 3 | an ask link, activated | the list closes; the ask's project opens and focus lands on that ask's card under asks for you. If that project's board is already shown (not its task view or the new-project form) nothing reloads: the list closes, the card is scrolled into view and focused |
 | 4 | focus across the 3 s poll | each ask link carries its ask's id, so focus stays on the same ask when the list is redrawn, also when two asks lead to the same project |
 | 5 | all projects | link "all projects", first control of the main column on a project's board and on the new-project form, with two or more projects |
 | 6 | board | link "board" on the task view, unchanged; on the new-project form only with no project or one |
