@@ -18,7 +18,11 @@ const STAGE = {
   queued: ['queued', 'idle'],
   done: ['done', 'done'],
 };
-const stageInfo = (s) => (Object.hasOwn(STAGE, s) ? STAGE[s] : [s || 'unknown', 'idle']);
+const stageInfo = (t) => {
+  const ended = Array.isArray(t?.steps) && t.steps.find((s) => s.state === 'ended');
+  if (ended) return [ended.name || 'ended', 'idle'];
+  return Object.hasOwn(STAGE, t?.stage) ? STAGE[t.stage] : [t?.stage || 'unknown', 'idle'];
+};
 
 export function layout(tasks = []) {
   if (!tasks.length) return { nodes: [], edges: [], width: 0, height: 0, layers: 0 };
@@ -73,7 +77,7 @@ export function renderGraphSVG(tasks = [], project = '') {
       `<path class="garrow" ${attrs} d="M${e.x2 - 4} ${e.y2 - 7} L${e.x2 + 4} ${e.y2 - 7} L${e.x2} ${e.y2} Z"></path>`;
   }).join('');
   const nodeHTML = g.nodes.map(({ task: t, x, y, w, h }) => {
-    const [label, dot] = stageInfo(t.stage), title = t.title || '';
+    const [label, dot] = stageInfo(t), title = t.title || '';
     const after = (t.after || []).length ? `, after ${t.after.join(' and ')}` : '';
     const aria = `${[t.ref, title, label].filter(Boolean).join(', ')}${after}`;
     return `<a class="gnode" data-ref="${esc(t.ref)}" href="#${enc(project)}/${enc(t.ref)}" aria-label="${esc(aria)}">` +
