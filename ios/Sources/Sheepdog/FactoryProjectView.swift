@@ -9,11 +9,27 @@ struct FactoryProjectView: View {
     @State private var loaded: Result<([FactoryTask], Bool), Error>?
     @State private var text = ""
     @State private var feedback: (message: String, color: Color)?
+    @State private var showsCoordinator = false
+    @State private var showAsks = false
 
     private var computer: ComputerModel? { model.fleet.model(computerID) }
     private var head: FactoryProjectHead { computer?.factoryHeads.first { $0.id == initialHead.id } ?? initialHead }
 
     var body: some View {
+        ScrollViewReader { proxy in
+            boardScroll
+                .onChange(of: showAsks) {
+                    guard showAsks else { return }
+                    proxy.scrollTo("factoryProject.asks", anchor: .top)
+                    showAsks = false
+                }
+        }
+        .navigationDestination(isPresented: $showsCoordinator) {
+            FactoryCoordinatorView(initialHead: head, computerID: computerID) { showAsks = true }
+        }
+    }
+
+    private var boardScroll: some View {
         ScrollView {
             let name = computer?.name ?? "your computer"
             if case let .failure(error) = loaded {
@@ -28,8 +44,17 @@ struct FactoryProjectView: View {
                 let board = FactoryProjectBoard(head: head, tasks: tasks, asks: computer.questions, computerName: name, live: live)
                 VStack(alignment: .leading, spacing: 12) {
                     FactoryHeadCard(item: board.summary, computer: computer.snapshot, dialog: nil, answer: { _, _ in }, project: board, onGone: projectGone)
+                    if board.showsCoordinatorButton {
+                        Button("Coordinator") { showsCoordinator = true }
+                            .buttonStyle(.bordered).controlSize(.large)
+                            .accessibilityLabel(board.coordinatorAccessibilityLabel)
+                            .accessibilityIdentifier("factoryProject.coordinator")
+                    }
                     composer(board, on: computer)
-                    if !board.openAsks.isEmpty { Text(board.asksHeading).font(.headline).foregroundStyle(Theme.blockedText).accessibilityAddTraits(.isHeader) }
+                    if !board.openAsks.isEmpty {
+                        Text(board.asksHeading).font(.headline).foregroundStyle(Theme.blockedText)
+                            .accessibilityAddTraits(.isHeader).id("factoryProject.asks")
+                    }
                     ForEach(board.openAsks, id: \.id) { ask in
                         ApprovalCardView(card: .init(pending: ask, phase: computer.phase(ask.id)), idPrefix: "question.\(ask.id)") { computer.answer(question: ask.id, option: $0) }
                     }

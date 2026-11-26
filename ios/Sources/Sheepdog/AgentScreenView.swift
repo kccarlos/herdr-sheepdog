@@ -22,13 +22,15 @@ struct AgentScreenView: View {
     var computer: String? = nil
     /// On iPad: the window is a pane in the detail, with its own header.
     var pane: PaneChrome?
+    var coordinator: FactoryCoordinatorWindow?
+    var onCoordinatorAsks: (() -> Void)?
     @EnvironmentObject private var model: SessionViewModel
     @State private var paneID: String?
 
     var body: some View {
         let remote = computer == model.currentComputerID ? nil : computer
         let current = paneID.flatMap { id in model.flock.all.first { $0.paneID == id } } ?? agent
-        AgentWindowView(agent: current, computer: remote, pane: pane) { id in
+        AgentWindowView(agent: current, computer: remote, pane: pane, coordinator: coordinator, onCoordinatorAsks: onCoordinatorAsks) { id in
             if let switchTo = pane?.onSwitch { switchTo(id) } else { paneID = id }
         }
         .id("\(remote ?? "")|\(current.paneID)")
@@ -102,6 +104,7 @@ struct AgentWindowInputs: Equatable {
     var others: [AgentWindowMenu.Other]
     var handshake: ProtocolHandshake.State
     var pane: PaneChrome.Key?
+    var coordinator: FactoryCoordinatorWindow?
 }
 
 /// The session's side of an agent window: it observes the session and
@@ -112,17 +115,20 @@ private struct AgentWindowView: View {
     let agent: Agent
     let computer: String?
     let pane: PaneChrome?
+    let coordinator: FactoryCoordinatorWindow?
+    let onCoordinatorAsks: (() -> Void)?
     let onSwitch: (String) -> Void
 
     @EnvironmentObject private var model: SessionViewModel
 
     var body: some View {
         let inputs = inputs
-        AgentWindowContent(agent: agent, computer: computer, pane: pane, onSwitch: onSwitch, model: model, inputs: inputs)
+        AgentWindowContent(agent: agent, computer: computer, pane: pane, onSwitch: onSwitch, model: model,
+                           inputs: inputs, onCoordinatorAsks: onCoordinatorAsks)
             .equatable()
             // Opening the window is looking at the agent: what it finished
             // is seen, and so is each turn that ends while it stays open.
-            .modifier(SeenWhileVisible(paneID: agent.paneID, visible: computer == nil && inputs.live.hasAttention, attention: inputs.live.attention))
+            .modifier(SeenWhileVisible(paneID: agent.paneID, visible: coordinator == nil && computer == nil && inputs.live.hasAttention, attention: inputs.live.attention))
     }
 
     private var inputs: AgentWindowInputs {
@@ -134,7 +140,9 @@ private struct AgentWindowView: View {
         return AgentWindowInputs(
             live: live,
             // Any open question of this agent, not only the one the voice is on.
-            approval: computer.map { model.remoteCard(computer: $0, paneID: agent.paneID) } ?? model.questionCard(for: agent.paneID),
+            approval: coordinator == nil
+                ? (computer.map { model.remoteCard(computer: $0, paneID: agent.paneID) } ?? model.questionCard(for: agent.paneID))
+                : nil,
             voiceQuestionID: computer == nil ? model.approval?.pending.id : nil,
             computerLine: computerLine,
             shellShown: computer == nil && model.shellEntryShown,
@@ -145,7 +153,8 @@ private struct AgentWindowView: View {
                     .map { .init(paneID: $0.paneID, name: $0.displayName, blocked: $0.state == .blocked) }
                 : [],
             handshake: computer == nil ? model.linkModel.handshake : .idle,
-            pane: pane?.key
+            pane: pane?.key,
+            coordinator: coordinator
         )
     }
 }
@@ -162,6 +171,7 @@ private struct AgentWindowContent: View, Equatable {
     /// For actions only; what the window shows comes from `inputs`.
     let model: SessionViewModel
     let inputs: AgentWindowInputs
+    let onCoordinatorAsks: (() -> Void)?
 
     static func == (a: Self, b: Self) -> Bool {
         a.agent.paneID == b.agent.paneID && a.computer == b.computer && a.model === b.model && a.inputs == b.inputs
@@ -183,20 +193,23 @@ private struct AgentWindowContent: View, Equatable {
     @State private var questionArea: CGFloat = 0
     @FocusState private var promptFocused: Bool
 
-    init(agent: Agent, computer: String? = nil, pane: PaneChrome?, onSwitch: @escaping (String) -> Void, model: SessionViewModel, inputs: AgentWindowInputs) {
+    init(agent: Agent, computer: String? = nil, pane: PaneChrome?, onSwitch: @escaping (String) -> Void, model: SessionViewModel,
+         inputs: AgentWindowInputs, onCoordinatorAsks: (() -> Void)?) {
         self.agent = agent
         self.computer = computer
         self.pane = pane
         self.onSwitch = onSwitch
         self.model = model
         self.inputs = inputs
+        self.onCoordinatorAsks = onCoordinatorAsks
         let paneID = agent.paneID
         _box = State(initialValue: LazyWindow { AgentWindowController(paneID: paneID, computer: computer) })
     }
 
     /// The agent as the app lists it now.
     private var live: Agent { inputs.live }
-    private var name: String { live.displayName }
+    private var coordinator: FactoryCoordinatorWindow? { inputs.coordinator }
+    private var name: String { coordinator.map { "the \($0.projectName) coordinator" } ?? live.displayName }
     private var theme: TerminalTheme { colorScheme == .dark ? .dark : .light }
     private var background: Color { Color(theme.background) }
     /// The brand's code surface, a step off the background.
@@ -206,7 +219,9 @@ private struct AgentWindowContent: View, Equatable {
     private var approval: ApprovalFlow.Card? { inputs.approval }
 
     var body: some View {
-        if let pane {
+        if coordinator != nil {
+            content
+        } else if let pane {
             VStack(spacing: 0) {
                 paneHeader(pane)
                 content
@@ -240,7 +255,13 @@ private struct AgentWindowContent: View, Equatable {
     private var content: some View {
         VStack(spacing: 0) {
             if let notice = state.notice, !(state.phase == .ended && !window.hasScreen) {
-                NoticeBar(notice: notice, text: state.noticeText ?? notice.text, fill: noticeFill) { act(on: notice) }
+                let endedCoordinator = state.phase == .ended ? coordinator : nil
+                NoticeBar(
+                    notice: notice,
+                    text: endedCoordinator?.notRunningState.heading ?? state.noticeText ?? notice.text,
+                    actionTitle: endedCoordinator?.backButtonLabel,
+                    fill: noticeFill
+                ) { act(on: notice) }
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
             terminal
@@ -251,6 +272,25 @@ private struct AgentWindowContent: View, Equatable {
                     .padding(.top, 8)
                     .id(approval.pending.id)
             }
+            if let text = coordinator?.askStrip, let onCoordinatorAsks {
+                Button(action: onCoordinatorAsks) {
+                    HStack(spacing: 8) {
+                        Text(text).multilineTextAlignment(.leading).frame(maxWidth: .infinity, alignment: .leading)
+                        Image(systemName: "chevron.right")
+                            .font(.system(size: 14, weight: .semibold)).accessibilityHidden(true)
+                    }
+                    .font(.subheadline)
+                    .foregroundStyle(Theme.ink)
+                    .padding(10).frame(minHeight: 44)
+                    .background(Theme.blocked.opacity(0.12), in: .rect(cornerRadius: 12))
+                    .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(Theme.blocked) }
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(text)
+                .accessibilityIdentifier("coordinatorWindow.askStrip")
+                .padding(.horizontal, 12)
+                .layoutPriority(1)
+            }
             controls
         }
         // The whole window, which the card's own size cannot change.
@@ -259,6 +299,12 @@ private struct AgentWindowContent: View, Equatable {
         .animation(Theme.ease, value: state.notice)
         .onAppear {
             window.surface.apply(theme: theme)
+            if coordinator != nil {
+                let ownerID = computer ?? model.currentComputerID
+                window.onEnded = { [weak model] in
+                    Task { await model?.fleet.model(ownerID)?.refresh() }
+                }
+            }
             window.attach(model: model)
             window.onActivity = pane?.onInteract
         }
@@ -286,7 +332,7 @@ private struct AgentWindowContent: View, Equatable {
         .onChange(of: inputs.handshake) { _, _ in window.availabilityChanged() }
         .modifier(AgentActionDialogs(pending: $action, name: name, paneID: agent.paneID, window: window) { leave() })
         .sheet(isPresented: $showsMoreKeys) {
-            MoreKeysSheet(window: window, interrupt: true) { snippet in
+            MoreKeysSheet(window: window, interrupt: coordinator == nil) { snippet in
                 if window.typing {
                     window.sendText(snippet)
                 } else {
@@ -451,12 +497,13 @@ private struct AgentWindowContent: View, Equatable {
             } else if state.phase == .ended, !window.hasScreen {
                 // Closed before anything was drawn: say so in the middle,
                 // not over an empty terminal.
+                let off = coordinator?.notRunningState
                 ContentUnavailableView {
-                    Label(state.noticeText ?? "This agent closed.", systemImage: "terminal")
+                    Label(off?.heading ?? state.noticeText ?? "This agent closed.", systemImage: "terminal")
                 } description: {
-                    Text("Its pane closed, or sheepdog no longer tracks it.")
+                    Text(off?.body ?? "Its pane closed, or sheepdog no longer tracks it.")
                 } actions: {
-                    Button(pane == nil ? "Back to agents" : "Close") { leave() }
+                    Button(coordinator?.backButtonLabel ?? (pane == nil ? "Back to agents" : "Close")) { leave() }
                         .accessibilityIdentifier("agentScreen.ended.back")
                 }
                 .background(background)
@@ -487,6 +534,7 @@ private struct AgentWindowContent: View, Equatable {
     private var controls: some View {
         VStack(alignment: .leading, spacing: 8) {
             KeyBar(window: window, onMore: { showsMoreKeys = true })
+                .dynamicTypeSize(...(coordinator == nil ? DynamicTypeSize.accessibility5 : .xxxLarge))
             if window.typing {
                 Label("Typing goes straight to \(name).", systemImage: "keyboard")
                     .font(.caption)
@@ -495,15 +543,16 @@ private struct AgentWindowContent: View, Equatable {
             } else {
                 TerminalComposer(
                     text: $prompt,
-                    placeholder: state.phase == .observing ? "Take over to type" : "Ask \(name)…",
+                    placeholder: state.phase == .observing ? "Take over to type" : (coordinator?.promptPlaceholder ?? "Ask \(name)…"),
                     enabled: window.canOperate,
                     sending: window.sending,
-                    canStop: live.state == .working,
+                    canStop: coordinator == nil && live.state == .working,
                     focused: $promptFocused,
                     onSend: sendPrompt,
                     onStop: { window.stop(actions: inputs.actionsAvailable) },
+                    fieldAccessibilityLabel: coordinator?.promptAccessibilityLabel,
                     leading: {
-                        if computer == nil {
+                        if coordinator == nil && computer == nil {
                             AttachButton(upload: { data, fileName, type in
                                 try await model.uploadAttachment(paneID: agent.paneID, data: data, fileName: fileName, mimeType: type)
                             }, onAttached: { reply in
@@ -529,12 +578,13 @@ private struct AgentWindowContent: View, Equatable {
                     .accessibilityIdentifier("agentScreen.reply")
             }
         }
-        .dynamicTypeSize(...DynamicTypeSize.accessibility2)
+        .dynamicTypeSize(...(coordinator == nil ? DynamicTypeSize.accessibility2 : .accessibility5))
         .padding(.horizontal, 12)
         .padding(.top, 8)
         .padding(.bottom, 6)
         .background(Color(.systemBackground).opacity(0.001))
         .overlay(alignment: .top) { Divider() }
+        .onChange(of: window.inputError) { if let error = window.inputError { AccessibilityNotification.Announcement(error).post() } }
     }
 
     private var canSendPrompt: Bool { window.canOperate && AgentScreenModel.canSend(prompt) }
@@ -542,8 +592,13 @@ private struct AgentWindowContent: View, Equatable {
     private func sendPrompt() {
         guard canSendPrompt else { return }
         let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        let coordinator = coordinator
+        let computerName = computer.flatMap { model.session($0)?.name } ?? model.currentComputerName
         Task {
-            if await window.sendPrompt(text) { prompt = "" }
+            let sent = await window.sendPrompt(text, formatError: coordinator.map { coordinator in
+                { FactoryCoordinatorWindow.inputErrorMessage($0, projectName: coordinator.projectName, computerName: computerName) }
+            })
+            if sent, coordinator == nil || prompt.trimmedOrNil == text { prompt = "" }
         }
     }
 
@@ -622,6 +677,7 @@ private struct StateChip: View {
 struct NoticeBar: View {
     let notice: AgentWindowState.Notice
     let text: String
+    var actionTitle: String? = nil
     let fill: Color
     let action: () -> Void
 
@@ -664,7 +720,7 @@ struct NoticeBar: View {
     }
 
     @ViewBuilder private var button: some View {
-        if let title = notice.action {
+        if let title = actionTitle ?? notice.action {
             Button(title, action: action)
                 .font(.footnote.weight(.semibold))
                 .fixedSize()
@@ -721,6 +777,10 @@ struct TerminalHost: UIViewRepresentable {
     }
 
     func updateUIView(_ view: UIView, context: Context) {}
+
+    static func dismantleUIView(_ view: UIView, coordinator: ()) {
+        view.removeFromSuperview()
+    }
 }
 
 extension Color {
@@ -800,6 +860,7 @@ final class AgentWindowController {
     @ObservationIgnored private(set) var hub: TermHub?
     /// A tap, a key or a prompt in this window (iPad: focuses its pane).
     @ObservationIgnored var onActivity: (() -> Void)?
+    @ObservationIgnored var onEnded: (() -> Void)?
     @ObservationIgnored private var channel: Int?
     @ObservationIgnored private var snapshotTask: Task<Void, Never>?
     @ObservationIgnored private var pushes: ScreenStreamRouter.Subscription?
@@ -867,6 +928,7 @@ final class AgentWindowController {
     }
 
     func detach() {
+        onEnded = nil
         run(mutate { $0.disappeared() })
         pushes?.end()
         pushes = nil
@@ -920,7 +982,7 @@ final class AgentWindowController {
 
     /// The composer: always `POST /input` (it guarantees submission and
     /// tells the orchestrator). True when sent.
-    func sendPrompt(_ text: String) async -> Bool {
+    func sendPrompt(_ text: String, formatError: ((Error) -> String)? = nil) async -> Bool {
         onActivity?()
         guard canOperate, let model else { return false }
         run(mutate { $0.willSendInput() })
@@ -931,7 +993,7 @@ final class AgentWindowController {
             Haptics.answered()
             return true
         } catch {
-            finishSend(error)
+            finishSend(error, formatted: formatError?(error))
             return false
         }
     }
@@ -954,9 +1016,9 @@ final class AgentWindowController {
         snapshot.finishSend(reply: reply)
     }
 
-    private func finishSend(_ error: Error) {
+    private func finishSend(_ error: Error, formatted: String? = nil) {
         sending = false
-        inputError = (error as? DaemonError)?.message ?? error.localizedDescription
+        inputError = formatted ?? (error as? DaemonError)?.message ?? error.localizedDescription
         Haptics.answerFailed()
     }
 
@@ -1019,9 +1081,11 @@ final class AgentWindowController {
     // MARK: Commands
 
     private func mutate(_ change: (inout AgentWindowState) -> [AgentWindowState.Command]) -> [AgentWindowState.Command] {
+        let wasEnded = state.phase == .ended
         var next = state
         let commands = change(&next)
         if next != state { state = next }
+        if !wasEnded, state.phase == .ended { onEnded?() }
         return commands
     }
 

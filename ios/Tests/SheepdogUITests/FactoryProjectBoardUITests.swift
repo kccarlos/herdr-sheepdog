@@ -15,6 +15,7 @@ final class FactoryProjectBoardUITests: XCTestCase {
 
     private static let runningNotes = #"[{"id":"proj-1","name":"notes","goal":"A notes page with search","state":"running","counts":{"working":2,"owner_answer":1,"done":1},"folder":"~/code/notes","coordinator_pane":"coord-notes-1"}]"#
     private static let stoppedNotes = #"[{"id":"proj-1","name":"notes","goal":"A notes page with search","state":"stopped","counts":{"owner_answer":1,"done":1},"folder":"~/code/notes"}]"#
+    private static let finishedNotes = #"[{"id":"proj-1","name":"notes","goal":"A notes page with search","state":"finished","counts":{"done":2},"folder":"~/code/notes"}]"#
     private static let sampleGraph = #"{"protocol":1,"project":"proj-1","folder":"~/code/notes","tasks":[{"ref":"T10","title":"feat: import","stage":"owner_answer","why_waiting":"Delete the old notes table?","after":[],"dependents":[],"layer":0,"rounds":0,"steps":[{"name":"planned","state":"done"},{"name":"implementing","state":"now"}]},{"ref":"T8","title":"feat: tags","stage":"working","why_waiting":"Worker is working","after":[],"dependents":[],"layer":0,"rounds":1,"run_role":"worker","run_cli":"codex","run_started_at":"2026-11-25T11:01:00Z","last_actor_decision":{"at":"2026-11-25T11:03:00Z","by":"coordinator","decision":"sent back","why":"the tag index must be case-insensitive"},"steps":[{"name":"planned","state":"done"},{"name":"implementing","state":"now","text":"sent back from review round 1; 1 round done"},{"name":"review","state":"todo"}]},{"ref":"T14","title":"feat: search filters","stage":"done","after":[],"dependents":[],"layer":0,"rounds":0,"steps":[{"name":"planned","state":"done"},{"name":"merged","state":"done"}]}]}"#
     private static let sampleAsk = #"{"id":"fask-del-1","pane_id":"factory:proj-1","kind":"answer_prompt","agent":"notes","question":"Delete the old notes table?","summary":"Delete the old notes table?","factory":{"project":"proj-1","task":"T10","kind":"delete"},"options":[{"index":1,"label":"Keep it","default":true,"recommended":true},{"index":2,"label":"Delete it"}]}"#
 
@@ -64,9 +65,206 @@ final class FactoryProjectBoardUITests: XCTestCase {
         XCTAssertTrue(stub.stopBodies().contains { $0.contains("proj-1") })
 
         tapWhenTappable(resumeBtn, "Resume")
-        // The coordinator button returning after Resume is pinned in PR 9b (coordinator window).
-        XCTAssertTrue(stopBtn.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["factoryProject.coordinator"].waitForExistence(timeout: 10))
         XCTAssertTrue(stub.startBodies().contains { $0.contains("~/code/notes") && $0.contains("A notes page with search") })
+    }
+
+    func testCoordinatorWindowLiveControlsRestrictionsAndOffStates() throws {
+        let stub = try StubDaemon(.computer(name: "Work Mac", agents: "[]", questions: "[\(Self.sampleAsk)]", factory: Self.runningNotes, pendingAction: Self.sampleAsk))
+        stub.enableEvents = true
+        stub.factoryGraphs["proj-1"] = Self.sampleGraph
+        stub.screens["coord-notes-1"] = "● factory ask T10 \"Delete the old notes table?\"\n> Ready\n"
+        stub.screens["coord-notes-2"] = "● fresh coordinator session\n> Ready\n"
+        let host = try stub.start(); defer { stub.stop() }
+
+        let app = launch(host: host)
+        showAgentsPane(app)
+        tapWhenTappable(scrollToVisible(app, app.descendants(matching: .any)["flock.factory.proj-1"].firstMatch), "notes head")
+        let coordBtn = app.buttons["factoryProject.coordinator"].firstMatch
+        XCTAssertTrue(coordBtn.waitForExistence(timeout: 15))
+        XCTAssertEqual(coordBtn.label, "Open the notes coordinator's window")
+        tapWhenTappable(coordBtn, "Coordinator")
+
+        let header = app.descendants(matching: .any)["agentScreen.header"].firstMatch
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        XCTAssertTrue(header.label.contains("notes") && header.label.lowercased().contains("coordinator"), header.label)
+        let terminal = app.descendants(matching: .any)["agentScreen.terminal"].firstMatch
+        XCTAssertTrue(terminal.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value CONTAINS 'factory ask T10'"), evaluatedWith: terminal)
+        waitForExpectations(timeout: 15)
+
+        XCTAssertTrue(app.descendants(matching: .any)["coordinatorWindow.askStrip"].exists)
+        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.keyBar"].exists)
+        let field = app.textFields["agentScreen.field"].firstMatch
+        XCTAssertTrue(field.exists && field.label == "Message to the notes coordinator")
+        for id in ["agentScreen.stop", "agentScreen.attach", "agentScreen.menu", "agentScreen.menu.rename", "agentScreen.menu.stop", "agentScreen.menu.close", "agentScreen.menu.files"] {
+            XCTAssertFalse(app.descendants(matching: .any)[id].exists, "\(id) must be absent in coordinator window")
+        }
+        tapWhenTappable(app.buttons["agentScreen.key.more"].firstMatch, "More keys")
+        XCTAssertTrue(app.buttons["moreKeys.done"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["moreKeys.ctrlC"].exists, "no Interrupt row in coordinator More keys")
+        tapWhenTappable(app.buttons["moreKeys.done"].firstMatch, "Done")
+
+        stub.factoryState = #"[{"id":"proj-1","name":"notes","goal":"A notes page with search","state":"running","counts":{"working":1},"folder":"~/code/notes","alert":{"kind":"agents_down","cause":"claude coordinator is signed out","fix":"sign in to claude at this Mac"}}]"#
+        stub.emitFactoryChanged(project: "proj-1")
+        XCTAssertTrue(app.staticTexts["The notes coordinator is not running"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["claude coordinator is signed out"].exists)
+        XCTAssertTrue(app.staticTexts["Fix: sign in to claude at this Mac"].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["agentScreen.keyBar"].exists)
+        XCTAssertFalse(app.textFields["agentScreen.field"].exists)
+
+        stub.factoryState = Self.stoppedNotes
+        stub.emitFactoryChanged(project: "proj-1")
+        XCTAssertTrue(app.staticTexts["notes is stopped"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Resume notes on its page; it goes on with the same goal."].exists)
+        XCTAssertTrue(app.buttons["Back to notes"].exists)
+
+        stub.factoryState = Self.finishedNotes
+        stub.emitFactoryChanged(project: "proj-1")
+        XCTAssertTrue(app.staticTexts["notes is finished"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["To go on, reopen notes with a new goal on its page."].exists)
+        XCTAssertFalse(app.descendants(matching: .any)["agentScreen.keyBar"].exists)
+        XCTAssertFalse(app.textFields["agentScreen.field"].exists)
+        XCTAssertTrue(app.buttons["Back to notes"].exists)
+
+        // When a coordinator runs again (even on a rotated pane), the live window comes back.
+        stub.factoryState = #"[{"id":"proj-1","name":"notes","goal":"A notes page with search","state":"running","counts":{"working":1},"folder":"~/code/notes","coordinator_pane":"coord-notes-2"}]"#
+        stub.emitFactoryChanged(project: "proj-1")
+        let recovered = app.descendants(matching: .any)["agentScreen.terminal"].firstMatch
+        XCTAssertTrue(recovered.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value CONTAINS 'fresh coordinator session'"), evaluatedWith: recovered)
+        waitForExpectations(timeout: 15)
+        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.keyBar"].exists)
+        XCTAssertTrue(app.textFields["agentScreen.field"].exists)
+
+        stub.factoryState = Self.stoppedNotes
+        stub.emitFactoryChanged(project: "proj-1")
+        let backBtn = app.buttons["Back to notes"].firstMatch
+        XCTAssertTrue(backBtn.waitForExistence(timeout: 10))
+        tapWhenTappable(backBtn, "Back to notes")
+        XCTAssertTrue(app.descendants(matching: .any)["factoryProject.board"].waitForExistence(timeout: 10))
+    }
+
+    /// D10 interactive gaps: typing a clarifying prompt (without answering any ask or calling /say),
+    /// Esc and Ctrl-C via keyboard/More keys allowed, 409 blocked refusal keeping draft while keys
+    /// still reach the dialog, and tapping the ask reminder strip returning to the project board.
+    func testCoordinatorWindowInputKeysBlockedRefusalAndAskStripNavigation() throws {
+        let stub = try StubDaemon(.computer(name: "Work Mac", agents: "[]", questions: "[\(Self.sampleAsk)]", factory: Self.runningNotes, pendingAction: Self.sampleAsk))
+        stub.enableEvents = true
+        stub.factoryGraphs["proj-1"] = Self.sampleGraph
+        stub.screens["coord-notes-1"] = "● factory ask T10 \"Delete the old notes table?\"\n> Ready\n"
+        let host = try stub.start(); defer { stub.stop() }
+
+        let app = launch(host: host)
+        showAgentsPane(app)
+        tapWhenTappable(scrollToVisible(app, app.descendants(matching: .any)["flock.factory.proj-1"].firstMatch), "notes head")
+        tapWhenTappable(app.buttons["factoryProject.coordinator"].firstMatch, "Coordinator", timeout: 15)
+
+        let terminal = app.descendants(matching: .any)["agentScreen.terminal"].firstMatch
+        XCTAssertTrue(terminal.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value CONTAINS 'factory ask T10'"), evaluatedWith: terminal)
+        waitForExpectations(timeout: 15)
+
+        // 1. Esc on the key bar and ⌃C in More keys (Keys grid) work; keyboard toggle stays present.
+        XCTAssertTrue(app.buttons["agentScreen.key.typing"].exists)
+        let esc = app.buttons["agentScreen.key.esc"].firstMatch
+        XCTAssertTrue(esc.waitForExistence(timeout: 5) && esc.isEnabled)
+        tapWhenTappable(esc, "Esc")
+        XCTAssertTrue(waitUntil(5) { stub.agentInputBodies().contains { $0.pane == "coord-notes-1" && $0.body.contains("\"esc\"") } })
+
+        tapWhenTappable(app.buttons["agentScreen.key.more"].firstMatch, "More keys")
+        XCTAssertTrue(app.buttons["moreKeys.done"].waitForExistence(timeout: 10))
+        XCTAssertFalse(app.buttons["moreKeys.ctrlC"].exists, "no Interrupt row in coordinator More keys")
+        let gridCtrlC = app.buttons["moreKeys.⌃C"].firstMatch
+        XCTAssertTrue(gridCtrlC.waitForExistence(timeout: 5) && gridCtrlC.isEnabled)
+        tapWhenTappable(gridCtrlC, "Keys grid Ctrl-C")
+        XCTAssertTrue(waitUntil(5) { stub.agentInputBodies().contains { $0.pane == "coord-notes-1" && $0.body.contains("ctrl+c") } })
+        tapWhenTappable(app.buttons["moreKeys.done"].firstMatch, "Done")
+
+        // 2. Typing a clarifying question posts to /api/agents/<pane>/input, clears the field, and never answers an ask or calls /say.
+        let field = app.textFields["agentScreen.field"].firstMatch
+        let send = app.buttons["agentScreen.send"].firstMatch
+        typeWhenFocused(field, "Why drop the old table?")
+        tapWhenTappable(send, "Send clarifying question")
+        XCTAssertTrue(waitUntil(5) { stub.agentInputBodies().contains { $0.pane == "coord-notes-1" && $0.body.contains("Why drop the old table?") } })
+        XCTAssertTrue(waitUntil(5) {
+            let v = field.value as? String
+            return v == nil || v == "" || v == "Ask the notes coordinator…"
+        }, "prompt field clears after sending")
+        XCTAssertTrue(stub.answerBodies().isEmpty, "typing in the coordinator window never answers an ask")
+        XCTAssertTrue(stub.sayBodies().isEmpty, "typing in the coordinator window is not an owner wake (/say)")
+
+        // 3. Blocked coordinator 409 shows app.win.blocked, preserves unsent text, and keys still reach the dialog.
+        stub.agentInputHandler = { _, body in
+            if body.contains("\"text\"") {
+                return (409, #"{"error":"notes is waiting at a prompt; answer it first"}"#)
+            }
+            return (200, #"{"kind":"keys","spoken":"Sent."}"#)
+        }
+        typeWhenFocused(field, "Hold on a second")
+        tapWhenTappable(send, "Send while blocked")
+        let blocked = app.descendants(matching: .any).matching(
+            NSPredicate(format: "label == %@", "Not sent: the notes coordinator is waiting at its own prompt. Answer it with the keys, or on its card in Agents.")
+        ).firstMatch
+        XCTAssertTrue(blocked.waitForExistence(timeout: 10))
+        XCTAssertEqual(field.value as? String, "Hold on a second", "blocked refusal must keep unsent draft in the box")
+        let inputsBeforeKey = stub.agentInputBodies().count
+        tapWhenTappable(app.buttons["agentScreen.key.enter"].firstMatch, "Enter while blocked")
+        XCTAssertTrue(waitUntil(5) {
+            stub.agentInputBodies().count > inputsBeforeKey && stub.agentInputBodies().last?.body.contains("\"enter\"") == true
+        }, "keys still reach the coordinator's dialog while blocked")
+
+        // 4. Ask reminder strip carries exact app.win.ask copy and tapping it returns to the project board at its asks.
+        let strip = app.descendants(matching: .any)["coordinatorWindow.askStrip"].firstMatch
+        XCTAssertTrue(strip.exists)
+        XCTAssertEqual(strip.label, "T10 is waiting on your answer. Answer it on its card; typing here is not an answer.")
+        tapWhenTappable(strip, "Ask reminder strip")
+        XCTAssertTrue(app.descendants(matching: .any)["factoryProject.board"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.buttons["question.fask-del-1.option.1"].firstMatch.waitForExistence(timeout: 5))
+    }
+
+    /// D12: Opening another computer's project coordinator window talks to that computer
+    /// directly without moving the voice off the current computer.
+    func testRemoteComputerCoordinatorWindowUsesOriginatingComputer() throws {
+        let workStub = try StubDaemon(.computer(name: "Work Mac", agents: "[]", questions: "[]", factory: "[]"))
+        workStub.screens["coord-home-1"] = "WRONG_WORK_MAC_SCREEN\n"
+        let homeHead = #"[{"id":"proj-home","name":"photos","goal":"Organise albums","state":"running","counts":{"working":1},"folder":"~/code/photos","coordinator_pane":"coord-home-1"}]"#
+        let homeStub = try StubDaemon(.computer(name: "Home Mac", agents: "[]", questions: "[]", factory: homeHead))
+        homeStub.factoryGraphs["proj-home"] = #"{"protocol":1,"project":"proj-home","folder":"~/code/photos","tasks":[]}"#
+        homeStub.screens["coord-home-1"] = "HOME_COORDINATOR_LIVE_42\n> Ready\n"
+
+        let workHost = try workStub.start(); defer { workStub.stop() }
+        let homeHost = try homeStub.start(); defer { homeStub.stop() }
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogComputers", "Work Mac=\(workHost);Home Mac=\(homeHost)"]
+        app.launch()
+
+        showAgentsPane(app)
+        let workMarker = app.descendants(matching: .any).matching(identifier: "computer.voiceMarker.fixture-1").firstMatch
+        XCTAssertTrue(workMarker.waitForExistence(timeout: 10))
+        XCTAssertTrue(workMarker.isSelected)
+
+        tapWhenTappable(scrollToVisible(app, app.descendants(matching: .any)["flock.factory.proj-home"].firstMatch), "Home Mac photos head")
+        tapWhenTappable(app.buttons["factoryProject.coordinator"].firstMatch, "Home Mac Coordinator", timeout: 15)
+
+        let terminal = app.descendants(matching: .any)["agentScreen.terminal"].firstMatch
+        XCTAssertTrue(terminal.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value CONTAINS 'HOME_COORDINATOR_LIVE_42'"), evaluatedWith: terminal)
+        waitForExpectations(timeout: 15)
+        XCTAssertFalse((terminal.value as? String ?? "").contains("WRONG_WORK_MAC_SCREEN"))
+
+        typeWhenFocused(app.textFields["agentScreen.field"].firstMatch, "Check album index")
+        tapWhenTappable(app.buttons["agentScreen.send"].firstMatch, "Send to Home Mac coordinator")
+        XCTAssertTrue(waitUntil(5) { homeStub.agentInputBodies().contains { $0.pane == "coord-home-1" && $0.body.contains("Check album index") } })
+        XCTAssertTrue(workStub.agentInputBodies().isEmpty)
+
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.descendants(matching: .any)["factoryProject.board"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(workMarker.waitForExistence(timeout: 10))
+        XCTAssertTrue(workMarker.isSelected)
+        XCTAssertEqual(workMarker.label, "Voice is on Work Mac")
     }
 
     func testBoardEmptyTasksAndLoadErrorStates() throws {
