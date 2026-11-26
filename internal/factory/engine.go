@@ -483,12 +483,34 @@ func (e *Engine) Run(ctx context.Context) {
 }
 
 func (e *Engine) projectDirs() []os.DirEntry {
-	dir := filepath.Join(e.Paths.DataDir, "factory", "projects")
-	if guardTestPath(dir) != nil {
-		return nil
+	e.projectHeadsMu.Lock()
+	entries, err := e.readProjectDirs()
+	var removed []string
+	if err == nil || errors.Is(err, os.ErrNotExist) {
+		dirs := make(map[string]bool, len(entries))
+		for _, ent := range entries {
+			dirs[ent.Name()] = ent.IsDir()
+		}
+		for id := range e.projectHeads {
+			if !dirs[id] {
+				delete(e.projectHeads, id)
+				removed = append(removed, id)
+			}
+		}
 	}
-	entries, _ := os.ReadDir(dir)
+	e.projectHeadsMu.Unlock()
+	for _, id := range removed {
+		e.logEvent("factory.changed", map[string]string{"project": id})
+	}
 	return entries
+}
+
+func (e *Engine) readProjectDirs() ([]os.DirEntry, error) {
+	dir := filepath.Join(e.Paths.DataDir, "factory", "projects")
+	if err := guardTestPath(dir); err != nil {
+		return nil, err
+	}
+	return os.ReadDir(dir)
 }
 
 func (e *Engine) eachStateLocked(fn func(id string, s flow.State) bool) {
@@ -506,6 +528,15 @@ func (e *Engine) passProject(ctx context.Context, id string, _ ...bool) {
 	defer e.mu.Unlock()
 	s, err := LoadState(e.Paths.State(id))
 	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			e.projectHeadsMu.Lock()
+			_, hadHead := e.projectHeads[id]
+			delete(e.projectHeads, id)
+			e.projectHeadsMu.Unlock()
+			if hadHead {
+				e.logEvent("factory.changed", map[string]string{"project": id})
+			}
+		}
 		return
 	}
 	if err := e.freshLocked(id, s); err != nil {

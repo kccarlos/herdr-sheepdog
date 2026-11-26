@@ -214,9 +214,6 @@ func (s *Supervisor) rename(ctx context.Context, paneID, name string) (string, e
 // alias stays for tool plumbing, tags and logs (aliasOf).
 func (s *Supervisor) sayOf(paneID string) string {
 	if a, ok := s.store.Get(paneID); ok {
-		if name := s.coordinatorName(a); name != "" {
-			return "the " + name + " factory"
-		}
 		if n := state.Say(a); n != "" {
 			return n
 		}

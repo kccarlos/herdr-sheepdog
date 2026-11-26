@@ -46,8 +46,8 @@ func (s *Supervisor) factoryProjectName(id string) string {
 	return id
 }
 
-func (s *Supervisor) coordinatorName(row state.Agent) string {
-	if id := row.Labels["sheepdog.project"]; s.cfg.Factory != nil && id != "" && row.Labels["sheepdog.role"] == flow.RoleCoordinator {
+func (s *Supervisor) coordinatorName(labels map[string]string) string {
+	if id := labels["sheepdog.project"]; s.cfg.Factory != nil && id != "" && labels["sheepdog.role"] == flow.RoleCoordinator {
 		return s.factoryProjectName(id)
 	}
 	return ""

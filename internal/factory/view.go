@@ -146,10 +146,11 @@ func projectLive(s flow.State) bool {
 }
 
 func ProjectName(id, folder string) string {
-	if folder == "" {
+	base := strings.TrimSpace(filepath.Base(strings.TrimSpace(folder)))
+	if base == "" || base == "." || base == "/" || base == string(filepath.Separator) {
 		return id
 	}
-	return filepath.Base(folder)
+	return base
 }
 
 func projectAlert(alerts map[string]flow.Alert) *ProjectAlert {
@@ -321,8 +322,11 @@ func (e *Engine) Projects() []ProjectView {
 
 func (e *Engine) initProjectHeads() {
 	e.projectHeadsOnce.Do(func() {
+		e.projectHeadsMu.Lock()
+		defer e.projectHeadsMu.Unlock()
 		e.projectHeads = map[string]ProjectHead{}
-		for _, ent := range e.projectDirs() {
+		entries, _ := e.readProjectDirs()
+		for _, ent := range entries {
 			if ent.IsDir() {
 				if s, err := LoadState(e.Paths.State(ent.Name())); err == nil {
 					e.projectHeads[ent.Name()] = projectHeadOf(s)

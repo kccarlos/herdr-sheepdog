@@ -198,6 +198,10 @@ func SpokenNames(agents []Agent) map[string]string {
 	byKind := map[string][]Agent{}
 	var kinds []string
 	for _, a := range run {
+		if a.ProjectName != "" {
+			out[a.PaneID] = "the " + a.ProjectName + " factory"
+			continue
+		}
 		if n := CEOName(a); n != "" {
 			out[a.PaneID] = n
 			continue
@@ -283,6 +287,9 @@ func SpokenNames(agents []Agent) map[string]string {
 	}
 	seen := map[string]bool{}
 	for _, a := range order {
+		if a.ProjectName != "" {
+			continue
+		}
 		name := out[a.PaneID]
 		key := strings.ToLower(name)
 		if !seen[key] {

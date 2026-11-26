@@ -21,10 +21,10 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 )
 
-func getRawJSONMap(t *testing.T, h *harness, path string) (m map[string]any) {
+func getState(t *testing.T, h *harness) (m map[string]any) {
 	t.Helper()
-	if code := h.getJSON(path, &m); code != http.StatusOK {
-		t.Fatalf("GET %s = %d, want 200", path, code)
+	if code := h.getJSON("/api/state", &m); code != http.StatusOK {
+		t.Fatalf("GET %s = %d, want 200", "/api/state", code)
 	}
 	return m
 }
@@ -41,7 +41,7 @@ func TestStateFactoryListPinnedKeysAlertPrecedenceAndOmittedWhenEmpty(t *testing
 	eEmpty := factory.New(factory.Paths{DataDir: t.TempDir()}, nil)
 	h0 := newHarness(t, harnessOpts{factory: eEmpty})
 	h0.srv.deps.Factory = eEmpty
-	if got := getRawJSONMap(t, h0, "/api/state"); got["factory"] != nil {
+	if got := getState(t, h0); got["factory"] != nil {
 		t.Fatalf("0 projects carried factory = %v, want omitted", got["factory"])
 	}
 	t0, paths := time.Date(2026, 11, 25, 11, 0, 0, 0, time.UTC), factory.Paths{DataDir: t.TempDir()}
@@ -63,7 +63,7 @@ func TestStateFactoryListPinnedKeysAlertPrecedenceAndOmittedWhenEmpty(t *testing
 	eng := factory.New(paths, nil)
 	h := newHarness(t, harnessOpts{factory: eng})
 	h.srv.deps.Factory = eng
-	list, ok := getRawJSONMap(t, h, "/api/state")["factory"].([]any)
+	list, ok := getState(t, h)["factory"].([]any)
 	if !ok || len(list) != 2 {
 		t.Fatalf("GET /api/state factory = %#v, want 2 entries", list)
 	}
@@ -105,7 +105,7 @@ func TestStateFactoryAskCardMetaProjectNameAndEventsKind(t *testing.T) {
 	var byID map[string]map[string]any
 	waitFor(t, time.Second, func() bool {
 		byID = map[string]map[string]any{}
-		for _, q := range getRawJSONMap(t, h, "/api/state")["questions"].([]any) {
+		for _, q := range getState(t, h)["questions"].([]any) {
 			m := q.(map[string]any)
 			byID[m["id"].(string)] = m
 		}
@@ -168,7 +168,7 @@ func TestStateBlockedCoordinatorPendingAgentAndPushTag(t *testing.T) {
 		Agent: "claude", Name: coordName, WorkspaceID: "ws-notes", Cwd: notesDir, Labels: labels,
 	})
 
-	st := getRawJSONMap(t, h, "/api/state")
+	st := getState(t, h)
 	checkAgent := func(where string, raw any) {
 		t.Helper()
 		ag, _ := raw.(string)

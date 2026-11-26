@@ -16,6 +16,8 @@ type Agent struct {
 	// AliasAuto marks a derived alias; it is re-derived when the workspace
 	// label, name or kind change, while config/SetAlias aliases are pinned.
 	AliasAuto bool `json:"alias_auto,omitempty"`
+	// ProjectName gives a factory coordinator its project's display name.
+	ProjectName string `json:"project_name,omitempty"`
 	// Kind is the agent kind label (codex, claude, …).
 	Kind           string `json:"kind"`
 	Workspace      string `json:"workspace"`
