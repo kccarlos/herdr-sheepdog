@@ -940,9 +940,10 @@ func TestInvariantCleanupRetryWithStaleReviewerNotI1(t *testing.T) {
 	}
 }
 
-// withoutFactoryChanged drops factory.changed lines: a restart pass that
-// changes a project's head entry announces it (app-factory.md §4); these
-// tests pin that violations are not re-logged.
+// withoutFactoryChanged drops factory.changed lines: a restart pass commits
+// a pr_snapshot observation log line (empty in-memory PR cache), which
+// legitimately emits factory.changed (app-factory.md §4); these tests pin
+// that violations are not re-logged.
 func withoutFactoryChanged(log string) string {
 	var keep []string
 	for _, l := range strings.SplitAfter(log, "\n") {

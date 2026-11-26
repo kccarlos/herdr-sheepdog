@@ -87,3 +87,87 @@ func TestProjectNameInSupervisorNamesAsksVoiceControlAndBlockedCoordinator(t *te
 		t.Errorf("blocked coordinator push Agent = %+v, want notes", ns)
 	}
 }
+
+// Pins PR 1 fix round (§3.2 D2): a blocked coordinator never leaks its raw
+// coord-<hex> terminal name in voice.push agent tags, SpokenNames,
+// revivePrompt summaries, or checkQuestion summaries.
+func TestBlockedCoordinatorNameInPushTagReviveReconcileAndSpokenNames(t *testing.T) {
+	const projID, coordPane, coordName = "proj-1a2b3c4d", "hc:coord-1", "coord-1a2b3c4d"
+	paths, hcSrv := factory.Paths{DataDir: t.TempDir()}, hctest.New(t)
+	hcSrv.OnExec = hctest.GitExec
+	notesDir := filepath.Join(t.TempDir(), "notes")
+	for _, args := range [][]string{{"init", "-b", "main", notesDir}, {"-C", notesDir, "config", "--local", "sheepdog.projectId", projID}} {
+		if b, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, b)
+		}
+	}
+	if err := factory.SaveState(paths.State(projID), flow.State{
+		Seq: 1, Settings: flow.DefaultSettings(),
+		Project: flow.Project{ID: projID, Folder: notesDir, Goal: "Notes", Started: true, RunID: coordPane, Run: &flow.RunRecord{Role: flow.RoleCoordinator, State: flow.PhaseWorking}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	eng := factory.New(paths, hc.NewClient(hcSrv.Path))
+	eng.StartCheck = func(context.Context, factory.DoctorOptions) []onboard.Result { return nil }
+	h := newHarness(t, func(c *Config) { c.Factory = eng; c.Chattiness = string(Chatty) })
+
+	labels := map[string]string{"sheepdog.project": projID, "sheepdog.role": flow.RoleCoordinator}
+	h.srv.SetWorkspace(herdr.WorkspaceInfo{WorkspaceID: "ws-notes", Label: "notes"})
+	h.srv.SetAgent(herdr.AgentInfo{PaneID: coordPane, WorkspaceID: "ws-notes", Agent: "claude", Name: coordName, Status: herdr.StateWorking, Cwd: notesDir, Labels: labels})
+	h.srv.SetScreen(coordPane, fixture(t, "codex-approval-prompt.screen.txt"))
+	sendPaneLabeledTransition(h, coordPane, coordName, herdr.StateWorking, herdr.StateBlocked, labels)
+
+	h.pusher.mu.Lock()
+	var pushAgents []string
+	for _, tags := range h.pusher.tags {
+		if ag, _ := tags["agent"].(string); ag != "" {
+			pushAgents = append(pushAgents, ag)
+		}
+	}
+	h.pusher.mu.Unlock()
+	if len(pushAgents) == 0 || !strings.Contains(strings.ToLower(pushAgents[0]), "notes") || strings.Contains(strings.ToLower(pushAgents[0]), "coord") || strings.Contains(pushAgents[0], "1a2b3c4d") {
+		t.Errorf("voice.push agent tags = %q, want project name (never %q)", pushAgents, coordName)
+	}
+
+	spoken := h.sup.SpokenNames()
+	hasNotes := false
+	for _, n := range spoken {
+		if strings.Contains(strings.ToLower(n), "notes") {
+			hasNotes = true
+		}
+		if strings.Contains(strings.ToLower(n), "coord") || strings.Contains(n, "1a2b3c4d") {
+			t.Errorf("SpokenNames() leaked raw coordinator name: %q", spoken)
+		}
+	}
+	if !hasNotes {
+		t.Errorf("SpokenNames() = %q, want entry naming notes", spoken)
+	}
+
+	h.sup.mu.Lock()
+	_ = h.sup.store.ClearPending()
+	_ = h.sup.store.DropQuestion(coordPane)
+	p, revived, ok, why := h.sup.revivePrompt(coordPane, "test", &paneScreen{text: fixture(t, "codex-approval-prompt.screen.txt")})
+	h.sup.mu.Unlock()
+	if !revived || !ok {
+		t.Fatalf("revivePrompt = (revived=%v ok=%v why=%q), want revived", revived, ok, why)
+	}
+	if !strings.Contains(strings.ToLower(p.SpokenSummary), "the notes factory") || strings.Contains(strings.ToLower(p.SpokenSummary), "coord") || strings.Contains(p.SpokenSummary, "1a2b3c4d") {
+		t.Errorf("revivePrompt SpokenSummary = %q, want %q (never coord-<hex>)", p.SpokenSummary, "the notes factory")
+	}
+
+	h.sup.mu.Lock()
+	_ = h.sup.store.SetQuestion(p)
+	h.sup.mu.Unlock()
+	h.srv.SetScreen(coordPane, fixture(t, "claude-permission-prompt.screen.txt"))
+	row, _ := h.sup.store.Get(coordPane)
+	h.sup.checkQuestion(context.Background(), row, p)
+	var gotSummary string
+	for _, q := range h.sup.store.Questions() {
+		if q.PaneID == coordPane {
+			gotSummary = q.SpokenSummary
+		}
+	}
+	if !strings.Contains(strings.ToLower(gotSummary), "the notes factory") || strings.Contains(strings.ToLower(gotSummary), "coord") || strings.Contains(gotSummary, "1a2b3c4d") {
+		t.Errorf("checkQuestion SpokenSummary = %q, want %q (never coord-<hex>)", gotSummary, "the notes factory")
+	}
+}

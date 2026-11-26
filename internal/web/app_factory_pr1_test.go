@@ -1,10 +1,12 @@
 package web
 
 import (
+	"context"
 	"encoding/json"
 	"maps"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -13,6 +15,10 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc"
+	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
+	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/onboard"
 )
 
 func getRawJSONMap(t *testing.T, h *harness, path string) (m map[string]any) {
@@ -127,5 +133,78 @@ func TestStateFactoryAskCardMetaProjectNameAndEventsKind(t *testing.T) {
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("GET /events?kinds=factory status = %d, want 200", resp.StatusCode)
 		}
+	}
+}
+
+// Pins PR 1 fix round (§3.2 D2): a blocked coordinator's question card in
+// GET /api/state (questions[].agent and pending_action.agent) and its
+// voice.push event agent tag use the project name, never coord-<hex>.
+func TestStateBlockedCoordinatorPendingAgentAndPushTag(t *testing.T) {
+	const projID, coordPane, coordName = "proj-1a2b3c4d", "hc:coord-1", "coord-1a2b3c4d"
+	paths, hcSrv := factory.Paths{DataDir: t.TempDir()}, hctest.New(t)
+	hcSrv.OnExec = hctest.GitExec
+	notesDir := filepath.Join(t.TempDir(), "notes")
+	for _, args := range [][]string{{"init", "-b", "main", notesDir}, {"-C", notesDir, "config", "--local", "sheepdog.projectId", projID}} {
+		if b, err := exec.Command("git", args...).CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, b)
+		}
+	}
+	if err := factory.SaveState(paths.State(projID), flow.State{
+		Seq: 1, Settings: flow.DefaultSettings(),
+		Project: flow.Project{ID: projID, Folder: notesDir, Goal: "Notes", Started: true, RunID: coordPane, Run: &flow.RunRecord{Role: flow.RoleCoordinator, State: flow.PhaseWorking}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	eng := factory.New(paths, hc.NewClient(hcSrv.Path))
+	eng.StartCheck = func(context.Context, factory.DoctorOptions) []onboard.Result { return nil }
+	h := newHarness(t, harnessOpts{factory: eng})
+	h.srv.deps.Factory = eng
+	startSupervisorRun(t, h)
+
+	labels := map[string]string{"sheepdog.project": projID, "sheepdog.role": flow.RoleCoordinator}
+	h.herdr.SetScreen(coordPane, "claude", codexScreen(t), herdr.StateBlocked)
+	h.sup.HandleTransition(context.Background(), herdr.Transition{
+		PaneID: coordPane, From: herdr.StateWorking, To: herdr.StateBlocked, At: time.Now(),
+		Agent: "claude", Name: coordName, WorkspaceID: "ws-notes", Cwd: notesDir, Labels: labels,
+	})
+
+	st := getRawJSONMap(t, h, "/api/state")
+	checkAgent := func(where string, raw any) {
+		t.Helper()
+		ag, _ := raw.(string)
+		if !strings.Contains(strings.ToLower(ag), "notes") || strings.Contains(strings.ToLower(ag), "coord") || strings.Contains(ag, "1a2b3c4d") {
+			t.Errorf("%s = %q, want project name notes (never %q)", where, ag, coordName)
+		}
+	}
+	foundQ := false
+	for _, raw := range st["questions"].([]any) {
+		q := raw.(map[string]any)
+		if q["pane_id"] == coordPane {
+			foundQ = true
+			checkAgent("GET /api/state questions[].agent", q["agent"])
+		}
+	}
+	if !foundQ {
+		t.Fatalf("blocked coordinator question missing from /api/state questions: %#v", st["questions"])
+	}
+	pa, _ := st["pending_action"].(map[string]any)
+	if pa == nil || pa["pane_id"] != coordPane {
+		t.Fatalf("pending_action = %#v, want pane %s", st["pending_action"], coordPane)
+	}
+	checkAgent("GET /api/state pending_action.agent", pa["agent"])
+
+	foundPush := false
+	for _, ev := range h.log.Tail(100) {
+		if ev.Type != "voice.push" {
+			continue
+		}
+		var pl map[string]any
+		if json.Unmarshal(ev.Payload, &pl) == nil && pl["pending_id"] == pa["id"] {
+			foundPush = true
+			checkAgent("voice.push payload.agent", pl["agent"])
+		}
+	}
+	if !foundPush {
+		t.Fatalf("missing voice.push event for pending_id=%v", pa["id"])
 	}
 }

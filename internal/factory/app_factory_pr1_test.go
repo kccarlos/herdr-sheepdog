@@ -1,7 +1,9 @@
 package factory
 
 import (
+	"context"
 	"encoding/json"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -179,5 +181,49 @@ func TestFactoryChangedEventOnLogOrHeadChangeAndQuietSave(t *testing.T) {
 	case c := <-ch:
 		t.Errorf("factory.changed sent on Engine.Changes(): %+v", c)
 	default:
+	}
+}
+
+// Pins PR 1 fix round: after a project's directory is removed on disk, the
+// next pass (or Projects()) drops the deleted project from ProjectHeads.
+func TestProjectHeadsDropsDeletedProject(t *testing.T) {
+	paths, srv := testPaths(t), hctest.New(t)
+	srv.OnExec = hctest.GitExec
+	eng := newTestEngine(t, paths, hc.NewClient(srv.Path))
+	repo := filepath.Join(t.TempDir(), "notes")
+	if b, err := exec.Command("git", "init", "-b", "main", repo).CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, b)
+	}
+	if err := eng.Start(repo, "goal 1", 1); err != nil {
+		t.Fatal(err)
+	}
+	heads := eng.ProjectHeads()
+	if len(heads) != 1 {
+		t.Fatalf("ProjectHeads() before delete = %+v, want 1", heads)
+	}
+	id := heads[0].ID
+	if err := os.RemoveAll(paths.project(id)); err != nil {
+		t.Fatal(err)
+	}
+	eng.passProject(context.Background(), id)
+	_ = eng.Projects()
+	if got := eng.ProjectHeads(); len(got) != 0 {
+		t.Fatalf("ProjectHeads() after deleting %s = %+v, want empty", id, got)
+	}
+}
+
+// Pins PR 1 fix round: degenerate folder paths ("/", ".", whitespace) fall
+// back to the project id in ProjectName.
+func TestProjectNameEdgeCases(t *testing.T) {
+	for _, tc := range []struct{ folder, want string }{
+		{"/", "proj-1"},
+		{".", "proj-1"},
+		{"   ", "proj-1"},
+		{"\t\n", "proj-1"},
+		{"/work/notes/", "notes"},
+	} {
+		if got := ProjectName("proj-1", tc.folder); got != tc.want {
+			t.Errorf("ProjectName(proj-1, %q) = %q, want %q", tc.folder, got, tc.want)
+		}
 	}
 }
