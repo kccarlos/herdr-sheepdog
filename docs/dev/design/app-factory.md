@@ -232,10 +232,10 @@ rows were gone.
 
 | What is shown | From | New in the daemon |
 |---|---|---|
-| The heads on Agents, kept fresh: id, name, state, counts, folder, the coordinator's pane or none, the open alert | **a small `factory` list in `GET /api/state`** (below) | the list |
+| The heads on Agents, kept fresh | **a small `factory` list in `GET /api/state`**, keys pinned below | the list |
 | A project's page: goal and the rest of the project view | `GET /api/factory/projects` | `name`; the coordinator's pane; the open alert's cause and fix |
-| A project's tasks, each with stage, waiting reason, steps, model and its live run | `GET /api/factory/projects/{id}/graph` (`TaskView`, `terminal`) | on the task's run: its **role** as a word and its **start time**; on the task: the **last decision and its why** (the selection of 5.3) |
-| Open asks | the question cards, as today (`/api/state` `questions`, pane `factory:<id>`) | nothing |
+| A project's tasks, each with stage, waiting reason, steps, model and its live run | `GET /api/factory/projects/{id}/graph` (`TaskView`, `terminal`) | the run's role, CLI and start time and the last decision (the new `TaskView` keys below; the selection of 5.3) |
+| Open asks | the question cards, as today (`/api/state` `questions`, pane `factory:<id>`) | the `factory` object on a `fask-` card (below) |
 | A stuck coordinator's dialog | its real row in `agents` while blocked, as today; the new app draws that card on its project, matched by the coordinator's pane | nothing |
 | The coordinator's screen | the screen reads, with the second lookup below | the lookup |
 
@@ -246,8 +246,9 @@ running, stopped or finished), `counts` (the project view's map),
 `folder`, `coordinator_pane` (left out when no coordinator runs) and
 `alert` (`{kind, cause, fix}`, left out when none is open). A project can
 hold several alerts (`flow.Project.Alerts` is a map); the entry shows one:
-the stopping alert (`flow.StoppingAlert`), else `agents_down`, else the
-first by key. The same `alert` goes on the project view. The keys are
+the stopping alert (`flow.StoppingAlert`), else one of kind
+`agents_down` (its keys vary: `agents_down`, `agents_down@j6`, …), else
+the first by key. The same `alert` goes on the project view. The keys are
 written into [ws-contract.md](../ws-contract.md) with the code.
 
 - It is built from the same in-memory read the screen lookup below needs,
@@ -301,14 +302,17 @@ written into [ws-contract.md](../ws-contract.md) with the code.
   run record, left out when no run is live) and `last_actor_decision`
   `{by, decision, why, at}`, where `at` is the log line's time, which the
   task view shows ("Today, 11:05"). The existing `last_rule` and
-  `last_decision` stay for `/factory`.
+  `last_decision` stay for `/factory`. Role, CLI and start time are on
+  the run record (`flow.RunRecord`, `internal/factory/flow/runs.go`).
 - **The kind and task on a factory ask card.** A `fask-` question card
   carries only the question, the options and the command today. Its
   `PendingView` gains an optional `factory` object, `{project, task,
   kind}`, filled from the `flow.Ask` the bridge already reads, and left
-  out for every other card. That is smaller than having the app join
+  out for every other card. `kind` is the ask's own word (`delete`,
+  `release`, `rule` for the read-back, `override`, and the others of
+  `flow.Ask`); the app draws its four card kinds from it. That is smaller than having the app join
   `GET /api/factory/asks`. The read-back's new and current values are in
-  the question text already.
+  the question text already (`flow.RuleQuestion`).
 - **The blocked coordinator is shown once.** Its real row stays in
   `agents` for older app builds. The new app leaves out of the ordinary
   agents any row whose pane is a `factory` entry's `coordinator_pane`,
