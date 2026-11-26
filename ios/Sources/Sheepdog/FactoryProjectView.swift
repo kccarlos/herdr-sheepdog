@@ -11,6 +11,9 @@ struct FactoryProjectView: View {
     @State private var feedback: (message: String, color: Color)?
     @State private var showsCoordinator = false
     @State private var showAsks = false
+    @State private var selectedTask: FactoryTask?
+    @State private var showsGoalSheet = false
+    @State private var showDone = false
 
     private var computer: ComputerModel? { model.fleet.model(computerID) }
     private var head: FactoryProjectHead { computer?.factoryHeads.first { $0.id == initialHead.id } ?? initialHead }
@@ -26,6 +29,17 @@ struct FactoryProjectView: View {
         }
         .navigationDestination(isPresented: $showsCoordinator) {
             FactoryCoordinatorView(initialHead: head, computerID: computerID) { showAsks = true }
+        }
+        .navigationDestination(isPresented: Binding(get: { selectedTask != nil }, set: { if !$0 { selectedTask = nil } })) {
+            if let task = selectedTask {
+                let current = (try? loaded?.get())?.0.first { $0.ref == task.ref } ?? task
+                FactoryTaskView(task: current, projectName: head.name, projectState: head.state)
+            }
+        }
+        .sheet(isPresented: $showsGoalSheet) {
+            if let computer {
+                FactoryGoalSheet(head: head, computer: computer, onGone: projectGone)
+            }
         }
     }
 
@@ -43,7 +57,7 @@ struct FactoryProjectView: View {
             } else if case let .success((tasks, live)) = loaded, let computer {
                 let board = FactoryProjectBoard(head: head, tasks: tasks, asks: computer.questions, computerName: name, live: live)
                 VStack(alignment: .leading, spacing: 12) {
-                    FactoryHeadCard(item: board.summary, computer: computer.snapshot, dialog: nil, answer: { _, _ in }, project: board, onGone: projectGone)
+                    FactoryHeadCard(item: board.summary, computer: computer.snapshot, dialog: nil, answer: { _, _ in }, project: board, onGone: projectGone, onGoal: { showsGoalSheet = true })
                     if board.showsCoordinatorButton {
                         Button("Coordinator") { showsCoordinator = true }
                             .buttonStyle(.bordered).controlSize(.large)
@@ -69,7 +83,11 @@ struct FactoryProjectView: View {
                         ForEach(group.tasks, content: row)
                     }
                     if !board.doneTasks.isEmpty {
-                        DisclosureGroup(board.doneFoldLabel) { ForEach(board.doneTasks, content: row) }.accessibilityIdentifier("factoryProject.doneFold")
+                        Button { showDone.toggle() } label: {
+                            HStack(spacing: 6) { Text(board.doneFoldLabel).font(.subheadline.weight(.semibold)); Spacer(); Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).rotationEffect(.degrees(showDone ? 90 : 0)).accessibilityHidden(true) }
+                                .foregroundStyle(Theme.muted).frame(minHeight: 44).contentShape(Rectangle())
+                        }.buttonStyle(.plain).accessibilityValue(showDone ? "Shown" : "Hidden").accessibilityIdentifier("factoryProject.doneFold")
+                        if showDone { ForEach(board.doneTasks, content: row) }
                     }
                 }
                 .frame(maxWidth: 660, alignment: .leading).padding(16)
@@ -80,21 +98,28 @@ struct FactoryProjectView: View {
         }
         .background(Theme.surface).navigationTitle(head.name)
         .navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar)
-        .task(id: "\(computer?.factoryChanges[head.id] ?? 0):\(head.state.rawValue)") { await load() }
+        .task(id: "\(computer?.factoryChanges[head.id] ?? 0):\(head.state.rawValue):\(head.goal)") { await load() }
         .onChange(of: head.state) { feedback = nil }
     }
 
     private func row(_ row: FactoryProjectBoard.Row) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("\(row.ref) \(row.task.title)").fontWeight(.semibold)
-            Text(row.stepSummary).accessibilityValue(row.stepPosition ?? "")
-            if let why = row.whyWaiting { Text(why).foregroundStyle(Theme.muted) }
-            if let run = row.runLine { Text(run).foregroundStyle(Theme.muted) }
-            if let decision = row.lastDecisionLine { Text(decision).foregroundStyle(Theme.muted) }
+        HStack(spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("\(row.ref) \(row.task.title)").fontWeight(.semibold).accessibilityAddTraits(.isButton).accessibilityHint("Opens task details").accessibilityAction { selectedTask = row.task }
+                Text(row.stepSummary).accessibilityValue(row.stepPosition ?? "")
+                if let why = row.whyWaiting { Text(why).foregroundStyle(Theme.muted) }
+                if let run = row.runLine { Text(run).foregroundStyle(Theme.muted) }
+                if let decision = row.lastDecisionLine { Text(decision).foregroundStyle(Theme.muted) }
+            }
+            Spacer(minLength: 0)
+            Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).foregroundStyle(Theme.chevron).accessibilityHidden(true)
         }
         .font(.subheadline).padding(10).frame(maxWidth: .infinity, alignment: .leading)
         .background(Theme.card, in: .rect(cornerRadius: Theme.Radius.card))
-        .accessibilityElement(children: .contain).accessibilityIdentifier("factoryProject.task.\(row.ref)")
+        .contentShape(Rectangle())
+        .onTapGesture { selectedTask = row.task }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("factoryProject.task.\(row.ref)")
     }
 
     private func composer(_ board: FactoryProjectBoard, on computer: ComputerModel) -> some View {

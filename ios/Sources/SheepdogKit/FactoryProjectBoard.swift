@@ -50,16 +50,21 @@ public struct FactoryProjectBoard {
         let groups = Dictionary(grouping: tasks.sorted { $0.layer < $1.layer }.map { task in
             let elapsed = task.runStartedAt.map { "\(Int(max(0, now.timeIntervalSince($0)) / 60)) min" }
             let run = [task.runRole, task.runCLI, elapsed].compactMap { $0 }.joined(separator: " · ")
-            return Row(task: task, runLine: head.state == .stopped ? nil : run.nonEmpty)
+            return Row(task: task, runLine: head.state == .running ? run.nonEmpty : nil)
         }, by: \.task.stage)
-        let stages = [("owner_gate", "needs your approval", true), ("owner_answer", "waiting on you", true),
-                      ("blocked_or_failed", "blocked", true), ("ci", "waiting on CI", false), ("working", "working", false),
-                      ("waiting_on_dep", "waiting on others", false), ("queued", "queued", false)]
-        let unknown = groups.keys.filter { key in key != "done" && !stages.contains { $0.0 == key } }.sorted()
-        activeGroups = (stages + unknown.map { ($0, $0.replacingOccurrences(of: "_", with: " "), false) }).compactMap { stage, label, alert in
+        let unknown = groups.keys.filter { key in key != "done" && !Self.stageOrder.contains { $0.0 == key } }.sorted()
+        activeGroups = (Self.stageOrder + unknown.map { ($0, Self.stageLabel(for: $0), false) }).compactMap { stage, label, alert in
             groups[stage].map { (stage, label, alert, $0) }
         }
         doneTasks = groups["done"] ?? []
+    }
+
+    private static let stageOrder = [
+        ("owner_gate", "needs your approval", true), ("owner_answer", "waiting on you", true), ("blocked_or_failed", "blocked", true),
+        ("ci", "waiting on CI", false), ("working", "working", false), ("waiting_on_dep", "waiting on others", false), ("queued", "queued", false)]
+
+    public static func stageLabel(for stage: String) -> String {
+        stage == "done" ? "done" : stageOrder.first { $0.0 == stage }?.1 ?? stage.replacingOccurrences(of: "_", with: " ")
     }
 
     public var head: FactoryProjectHead { summary.head }
@@ -74,11 +79,14 @@ public struct FactoryProjectBoard {
     public var coordinatorAccessibilityLabel: String { "Open the \(head.name) coordinator's window" }
     public var canStop: Bool { head.state == .running || (head.state == .finished && live) }
     public var canResume: Bool { summary.resumableFolder != nil }
+    public var canChangeGoal: Bool { head.folder?.trimmed.nonEmpty != nil }
+    public var goalActionLabel: String { head.state == .finished ? "Reopen with a new goal" : "New goal" }
+    public func goalForm(draft: String) -> FactoryGoalForm { .init(state: head.state, hasFolder: canChangeGoal, draft: draft) }
     public var stopAccessibilityLabel: String { "Stop this project" }
     public var resumeAccessibilityLabel: String { "Resume this project" }
     public var barNote: String? {
         if head.state == .stopped { return "Stopped. No agent is running. Resume goes on with the same goal." }
-        if head.state == .finished { return live ? "Finished. An agent is still running." : "Finished. Give it a new goal." }
+        if head.state == .finished { return live ? "Finished. An agent is still running." : "Finished. To go on, reopen it with a new goal." }
         return nil
     }
     public var stopConfirm: (title: String, message: String, keepLabel: String, confirmLabel: String) {
@@ -131,4 +139,72 @@ public struct FactorySayBox {
         return "Delivered when the coordinator is next free. To answer an ask, use its card."
     }
     public var sentStatus: String { state == .running && hasCoordinator ? "Told the \(projectName) factory." : defaultNote }
+}
+
+public struct FactoryGoalForm: Equatable, Sendable {
+    public let state: FactoryProjectState
+    public let hasFolder: Bool
+    public let draft: String
+    public init(state: FactoryProjectState, hasFolder: Bool, draft: String) { self.state = state; self.hasFolder = hasFolder; self.draft = draft }
+
+    public var isReopen: Bool { state == .finished }
+    public var canSubmit: Bool { hasFolder && !draft.trimmed.isEmpty }
+    public var title: String { isReopen ? "Reopen with a new goal" : "New goal" }
+    public var fieldLabel: String { "New goal" }
+    public var hint: String { "The folder and the settings stay as they are. " + (isReopen ? "To change a model first, use settings." : "The coordinator plans the new goal.") }
+    public var quotaHint: String { "Starting runs agents on your model accounts. They use your quota." }
+    public var submitLabel: String { state == .stopped ? "Start with this goal" : state == .finished ? "Reopen with this goal" : "Give it this goal" }
+    public var cancelLabel: String { "Cancel" }
+    public var emptyValidationMessage: String { "Write a goal first." }
+
+    public static func errorMessage(_ error: Error, state: FactoryProjectState, computerName: String, linkUsable: Bool = true) -> String {
+        factoryStartError(error, action: state == .finished ? "Reopen" : "New goal", computerName: computerName, linkUsable: linkUsable)
+    }
+}
+
+public struct FactoryTaskDetail: Equatable, Sendable {
+    public struct Step: Identifiable, Equatable, Sendable {
+        public let id: Int
+        public let name, state: String
+        public let text: String?
+        public var stateWord: String { state == "todo" ? "to come" : state }
+        public var accessibilityLabel: String { text.map { "\(name), \(stateWord): \($0)" } ?? "\(name), \(stateWord)" }
+    }
+
+    public struct LastDecision: Equatable, Sendable {
+        public let actorLabel, decision: String
+        public let whyLine: String?
+        public let at: Date?
+        public var heading: String { "Last decision" }
+        public var accessibilityLabel: String { [heading, "\(actorLabel): \(decision)", whyLine].compactMap { $0 }.joined(separator: ". ") }
+    }
+
+    public let task: FactoryTask
+    public let stageLabel: String
+    public let afterLine, runLine, runAccessibilityLabel, roundsLine, brief: String?
+    public let steps: [Step]
+    public let lastDecision: LastDecision?
+    public let showsWorkerWindowButton = false
+    public var isEmptySteps: Bool { steps.isEmpty }
+    public var emptyStepsMessage: String { "No steps recorded yet." }
+
+    public init(task: FactoryTask, projectName _: String = "", projectState: FactoryProjectState, now: Date = .now) {
+        self.task = task
+        stageLabel = FactoryProjectBoard.stageLabel(for: task.stage)
+        afterLine = task.after.isEmpty ? nil : "after \(task.after.joined(separator: ", "))"
+        roundsLine = task.rounds <= 0 ? nil : "\(task.rounds) review \(task.rounds == 1 ? "round" : "rounds")"
+        brief = task.brief?.trimmed.nonEmpty
+        steps = task.steps.enumerated().map { Step(id: $0.offset, name: $0.element.name, state: $0.element.state, text: $0.element.text?.trimmed.nonEmpty) }
+        lastDecision = task.lastActorDecision.flatMap { e in
+            e.decision?.trimmed.nonEmpty.map { LastDecision(actorLabel: e.by == "owner" ? "you" : e.by, decision: $0, whyLine: e.why?.trimmed.nonEmpty.map { "Why: \($0)" }, at: e.at) }
+        }
+        let role = task.runRole?.trimmed.nonEmpty, cli = task.runCLI?.trimmed.nonEmpty
+        if projectState == .running, role != nil || cli != nil || task.runStartedAt != nil {
+            let mins = task.runStartedAt.map { Int(max(0, now.timeIntervalSince($0)) / 60) }, model = task.model?.trimmed.nonEmpty
+            runLine = [role, cli, model, mins.map { "\($0) min" }].compactMap { $0 }.joined(separator: " · ").nonEmpty
+            let started = mins.map { "started \($0) \($0 == 1 ? "minute" : "minutes") ago" }
+            let spoken = [role, cli, model, started].compactMap { $0 }.joined(separator: ", ")
+            runAccessibilityLabel = spoken.isEmpty ? nil : "Running now: \(spoken)"
+        } else { runLine = nil; runAccessibilityLabel = nil }
+    }
 }
