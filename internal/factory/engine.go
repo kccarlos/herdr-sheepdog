@@ -106,7 +106,7 @@ type Engine struct {
 	ghUnavail         map[string]bool                 // project fact github_unavailable (design.md 7.3)
 	hcUnavail         map[string]bool                 // project fact hc_unavailable (design.md 7.3)
 	onInvariant       func([]flow.InvariantViolation) // test hook; nil in production
-	ChangeStream                                      // Ask/Answer/Say subscribers
+	changes           ChangeStream                    // Ask/Answer/Say subscribers
 }
 
 func (e *Engine) now() time.Time {

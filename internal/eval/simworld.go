@@ -188,9 +188,6 @@ func newSimWorld(ctx context.Context, sc SimScenario, o simWorldOptions) (*simWo
 			w.factory.SetProject(p)
 			if p.State == "running" && p.CoordinatorPane != "" {
 				alias := "factory:" + p.ID
-				for w.panes[alias] != "" {
-					alias += ":"
-				}
 				w.panes[alias], w.aliasOf[p.CoordinatorPane], w.kinds[alias] = p.CoordinatorPane, alias, orDefault(p.CoordinatorKind, "claude")
 			}
 		}

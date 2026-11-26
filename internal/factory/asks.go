@@ -52,9 +52,11 @@ func PublishChange(s *ChangeStream, c Change) {
 	}
 }
 
+func (e *Engine) Changes() <-chan Change { return e.changes.Changes() }
+
 func (e *Engine) notifyChangeLocked(id string, seq int64, c Change) {
 	c.Project, c.Seq = id, seq
-	PublishChange(&e.ChangeStream, c)
+	PublishChange(&e.changes, c)
 }
 
 func (e *Engine) commitChangeLocked(id string, s *flow.State, l LogLine, c Change) error {
