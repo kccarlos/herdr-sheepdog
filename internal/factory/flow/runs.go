@@ -74,7 +74,7 @@ type RunEvent struct {
 	StatusAt                                                                         time.Time
 	SessionID                                                                        string
 	LimitLine, Tail                                                                  string
-	Inferred, Urgent, HandoffUsed, RetryCoordWake, WakeConfirmed                     bool
+	Inferred, Urgent, HandoffUsed, WakeConfirmed                                     bool
 	WakeSeq                                                                          int64
 	WakeReason                                                                       string
 }

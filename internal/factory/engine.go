@@ -759,9 +759,9 @@ func (e *Engine) checkInvariantsLocked(id string, s *flow.State, skipped map[str
 }
 
 func clearCoordTrack(p *flow.Project, stucks, lastWake bool) {
-	p.CoordErrorAt, p.CoordErrorTurn, p.CoordWakeAt = time.Time{}, 0, time.Time{}
+	p.CoordErrorAt, p.CoordErrorTurn = time.Time{}, 0
 	if len(p.CoordWakesInFlight) == 0 {
-		p.CoordWakeTurn, p.CoordWakeSeq, p.CoordWakeRetried = 0, 0, false
+		p.CoordWakeAt, p.CoordWakeTurn, p.CoordWakeSeq, p.CoordWakeRetried = time.Time{}, 0, 0, false
 	}
 	p.CoordDialogStucks, p.CoordLastWakeAt = map[bool]int{false: p.CoordDialogStucks}[stucks], map[bool]time.Time{false: p.CoordLastWakeAt}[lastWake]
 }

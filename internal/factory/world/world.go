@@ -544,45 +544,6 @@ func agyTrustDrawing(text string) bool {
 	return false
 }
 
-// retryCoordWake reports an interruption or a newer submitted non-wake prompt.
-func retryCoordWake(cli, clean string) bool {
-	prompt := map[string]string{"claude": "❯", CodexCLI: "›", AgyCLI: ">"}[cli]
-	if prompt == "" {
-		return false
-	}
-	lines := strings.Split(strings.TrimRight(clean, "\n \t"), "\n")
-	if anchor := uiAnchor(cli, lines); anchor >= 0 {
-		lines = lines[:anchor]
-	} else if strings.HasPrefix(lines[len(lines)-1], prompt) {
-		lines = lines[:len(lines)-1]
-	}
-	for i := len(lines) - 1; i >= 0; i-- {
-		line := lines[i]
-		switch cli {
-		case CodexCLI:
-			if strings.HasPrefix(strings.TrimSpace(line), "■ Conversation interrupted") {
-				return true
-			}
-			if !codexPromptRe.MatchString(line) {
-				continue
-			}
-		case AgyCLI, "claude":
-			marker := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "⎿"))
-			if marker == "Interrupted · What should Antigravity CLI do instead?" && cli == AgyCLI ||
-				marker == "Interrupted · What should Claude do instead?" && cli == "claude" {
-				return true
-			}
-			if !strings.HasPrefix(line, prompt+" ") || cli == AgyCLI && i > 0 && !isRuleLine(lines[i-1]) {
-				continue
-			}
-		}
-		text := strings.TrimSpace(strings.TrimPrefix(line, prompt))
-		count, ok := strings.CutPrefix(text, flow.CoordWakePromptPrefix)
-		return !ok || count == "" || count[0] < '0' || count[0] > '9'
-	}
-	return false
-}
-
 // coordWakeEvidence finds the newest numbered wake and reads only its reply.
 func coordWakeEvidence(cli, clean string) (seq int64, confirmed bool, reason string) {
 	if strings.TrimSpace(clean) == "" {
@@ -604,9 +565,15 @@ func coordWakeEvidence(cli, clean string) (seq int64, confirmed bool, reason str
 		if !submitted {
 			continue
 		}
-		if header, ok := strings.CutPrefix(strings.TrimSpace(strings.TrimPrefix(line, prompt)), flow.CoordWakePromptPrefix+"#"); ok {
-			num, _, _ := strings.Cut(header, " ")
-			if seq, err := strconv.ParseInt(num, 10, 64); err == nil && seq > 0 {
+		body := strings.TrimSpace(strings.TrimPrefix(line, prompt))
+		if draft, header, ok := strings.Cut(body, flow.CoordWakePromptPrefix+"#"); ok {
+			num, rest, _ := strings.Cut(header, " ")
+			// agy appends a wake to an existing composer draft. Require a wake count
+			// and label there so an owner mentioning a sequence does not match.
+			count, label, _ := strings.Cut(rest, " ")
+			batchSize, _ := strconv.Atoi(count)
+			if seq, err := strconv.ParseInt(num, 10, 64); err == nil && seq > 0 &&
+				(draft == "" || cli == AgyCLI && batchSize > 0 && strings.HasPrefix(label, "task wake(s)")) {
 				confirmed, reason := coordWakeReply(cli, lines[i+1:end])
 				return seq, confirmed, reason
 			}
@@ -620,10 +587,12 @@ func coordWakeReply(cli string, lines []string) (bool, string) {
 	settings, confirmed, blank := false, false, false
 	for _, line := range lines {
 		trim := strings.TrimSpace(line)
-		marker := strings.TrimSpace(strings.TrimPrefix(trim, "⎿"))
+		subline, tool := strings.CutPrefix(trim, "⎿")
+		marker, interrupted := strings.CutPrefix(strings.TrimSpace(subline), "Interrupted")
+		marker = strings.TrimSpace(marker)
 		if cli == CodexCLI && strings.HasPrefix(trim, "■ Conversation interrupted") ||
-			cli == AgyCLI && marker == "Interrupted · What should Antigravity CLI do instead?" ||
-			cli == "claude" && marker == "Interrupted · What should Claude do instead?" {
+			tool && interrupted && (cli == AgyCLI && strings.HasPrefix(marker, "· What should Antigravity") ||
+				cli == "claude" && strings.HasPrefix(marker, "· What should Claude")) {
 			return false, "wake reply interrupted"
 		}
 		if strings.HasPrefix(trim, "Settings that differ") {
@@ -764,7 +733,6 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, opti
 			}
 		}
 		tick.WakeSeq, tick.WakeConfirmed, tick.WakeReason = coordWakeEvidence(rec.CLI, evidence)
-		tick.RetryCoordWake = !opts.PendingWake && nonEmpty && retryCoordWake(rec.CLI, clean)
 	}
 	return append(evs, tick), nil
 }
