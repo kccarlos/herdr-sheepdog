@@ -169,7 +169,7 @@ func TestFactoryChangedEventOnLogOrHeadChangeAndQuietSave(t *testing.T) {
 	}
 	eng.mu.Lock()
 	st.Project.RunID, st.Project.Run = "coord-notes-1", &flow.RunRecord{Role: flow.RoleCoordinator, State: flow.PhaseWorking}
-	eng.saveLocked(id, st)                                                                             // head change fires
+	eng.saveLocked(id, st)                                                                                // head change fires
 	_ = eng.commitLocked(id, &st, LogLine{By: "coordinator", Rule: "note", Decision: "noted", Why: "ok"}) // log line fires
 	eng.mu.Unlock()
 	if got := rec.projects(); !slices.Equal(got, []string{id, id, id, id}) {
