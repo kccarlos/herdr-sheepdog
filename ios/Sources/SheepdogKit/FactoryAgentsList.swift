@@ -84,9 +84,11 @@ public struct FactoryAgentsList: Equatable, Sendable {
 }
 
 func factoryActionError(_ error: Error, computerName: String, linkUsable: Bool, prefix: String = "", retry: String) -> String {
-    let isPair = (error as? FactoryRefusal)?.code == "proof_required"
-        || { if case let .rejected(403, msg) = error as? DaemonError { msg.hasPrefix("proof_required") } else { false } }()
-    if isPair {
+    var needsPair = (error as? FactoryRefusal)?.code == "proof_required"
+    if case let .rejected(403, msg) = error as? DaemonError, msg.hasPrefix("proof_required") {
+        needsPair = true
+    }
+    if needsPair {
         return "\(prefix)\(computerName) no longer knows this phone. Pair this phone again in Settings ▸ \(computerName), then \(retry)."
     }
     return RequestFailure(error, linkUsable: linkUsable, name: computerName).message

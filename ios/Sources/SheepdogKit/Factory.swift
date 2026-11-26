@@ -196,58 +196,67 @@ public struct FactoryAsk: Decodable, Equatable, Identifiable, Sendable {
 }
 
 /// A structured refusal from a factory write route (`code`, `error`, optional `fix`).
-public struct FactoryRefusal: Error, Equatable, Sendable { public var status: Int; public var code, message: String; public var fix: String? }
+public struct FactoryRefusal: Error, Equatable, Sendable {
+    public var status: Int
+    public var code: String
+    public var message: String
+    public var fix: String?
+}
 
 /// One row of `GET /api/factory/projects/{id}/settings` (Go `flow.SettingRow`).
 public struct FactorySettingRow: Decodable, Equatable, Identifiable, Sendable {
-    public var name, label, value, defaultValue: String
-    public var min, max: Int
+    public var name: String
+    public var label: String
+    public var value: String
+    public var defaultValue: String
+    public var min: Int
+    public var max: Int
     @FactoryDefaultEmpty public var allowed: [String]
     @FactoryDefaultEmpty public var clis: [String]
     @FactoryDefaultEmpty public var models: [String: [String]]
-    public var problem, note: String?
+    public var problem: String?
+    public var note: String?
     @FactoryDefaultEmpty public var top: Bool
+
     public var id: String { name }
     public var isModels: Bool { !clis.isEmpty }
     public var isChoice: Bool { !isModels && !allowed.isEmpty }
     public var isNumber: Bool { !isModels && !isChoice && max >= min && (min != 0 || max != 0) }
     public var isChanged: Bool { value != defaultValue && problem == nil }
     public var displayDefault: String { defaultValue.nonEmpty ?? "not set" }
-    public var displayValue: String { isModels ? FactoryModelCandidate.parse(value).map { "\($0.cli) · \($0.model) · \($0.effort)" }.joined(separator: ", ").nonEmpty ?? "not set" : value.nonEmpty ?? "not set" }
+    public var displayValue: String { value.nonEmpty ?? "not set" }
+
     public var metaLine: String {
-        isModels ? "default \(FactoryModelCandidate.format(FactoryModelCandidate.parse(defaultValue), separator: " then ").nonEmpty ?? "not set")"
-            : isNumber ? "default \(displayDefault) · allowed \(min)–\(max)" : isChoice ? "default \(displayDefault) · allowed \(allowed.map { $0.nonEmpty ?? "not set" }.joined(separator: ", "))" : "default \(displayDefault)"
+        if isNumber { return "default \(displayDefault) · allowed \(min)–\(max)" }
+        if isChoice {
+            let list = allowed.map { $0.nonEmpty ?? "not set" }.joined(separator: ", ")
+            return "default \(displayDefault) · allowed \(list)"
+        }
+        return "default \(displayDefault)"
     }
-    public var storedProblemMessage: String? { problem?.nonEmpty.map { isNumber ? "The stored value \(value.nonEmpty ?? "not set") is not allowed (allowed \(min)–\(max)). Change it before the next start." : "\($0). Change it before the next start." } }
-    public func keptNotice(was: String?) -> String { "Kept at \(isModels ? (FactoryModelCandidate.format(FactoryModelCandidate.parse(was ?? ""), separator: " then ").nonEmpty ?? "not set") : (was?.trimmed.nonEmpty ?? "not set")). Nothing changed." }
+
+    public var storedProblemMessage: String? {
+        guard let text = problem?.nonEmpty else { return nil }
+        let prefix = isNumber
+            ? "The stored value \(value.nonEmpty ?? "not set") is not allowed (allowed \(min)–\(max))"
+            : text
+        return "\(prefix). Change it before the next start."
+    }
+
     public static func errorMessage(_ error: Error, computerName: String, linkUsable: Bool = true) -> String {
         if let r = error as? FactoryRefusal, r.code != "proof_required", !r.message.isEmpty { return r.message }
-        if case let .rejected(status, msg) = error as? DaemonError, !(status == 403 && msg.hasPrefix("proof_required")), !msg.isEmpty { return msg }
-        return factoryActionError(error, computerName: computerName, linkUsable: linkUsable, prefix: "Not changed: ", retry: "try again")
+        if case let .rejected(status, msg) = error as? DaemonError,
+           !(status == 403 && msg.hasPrefix("proof_required")), !msg.isEmpty { return msg }
+        return factoryActionError(
+            error, computerName: computerName, linkUsable: linkUsable,
+            prefix: "Not changed: ", retry: "try again"
+        )
     }
-    public static func answerError(_ raw: String, computerName: String) -> String {
-        let text = raw.hasPrefix("The daemon refused: ") ? String(raw.dropFirst(20)) : raw
-        if text.hasPrefix("proof_required") { return factoryActionError(DaemonError.rejected(status: 403, message: "proof_required"), computerName: computerName, linkUsable: true, prefix: "Not saved: ", retry: "try again") }
-        return text.hasPrefix("out_of_range:") ? "Not saved: another setting changed after you asked. \(String(text.dropFirst(13)).trimmed)" : text
-    }
-    public static func parseFix(_ fix: String) -> (command: String?, rest: String) {
-        let s = fix.trimmed; guard s.lowercased().hasPrefix("run:") else { return (nil, s) }
-        let body = String(s.dropFirst(4)).trimmed, cut = [body.range(of: " ("), body.range(of: ", then ")].compactMap { $0?.lowerBound }.min()
-        return cut.map { (String(body[..<$0]).trimmed, String(body[$0...]).trimmed) } ?? (body.nonEmpty, "")
-    }
-    enum CodingKeys: String, CodingKey { case name, label, value, min, max, allowed, clis, models, problem, note, top; case defaultValue = "default" }
-}
 
-/// One CLI/model/effort candidate in a `models.<role>` setting value.
-public struct FactoryModelCandidate: Equatable, Sendable {
-    public var cli, model, effort: String
-    public static let efforts = ["low", "medium", "high"]
-    public init(cli: String, model: String, effort: String = "medium") { (self.cli, self.model, self.effort) = (cli, model, effort) }
-    public static func parse(_ raw: String) -> [FactoryModelCandidate] {
-        raw.split(separator: ",").compactMap { let s = $0.trimmingCharacters(in: .whitespacesAndNewlines), p = s.split(separator: "/", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }; return s.isEmpty ? nil : p.count >= 3 ? .init(cli: p[0], model: p.dropFirst().dropLast().joined(separator: "/"), effort: p.last!.nonEmpty ?? "medium") : .init(cli: "", model: s) }
+    enum CodingKeys: String, CodingKey {
+        case name, label, value, min, max, allowed, clis, models, problem, note, top
+        case defaultValue = "default"
     }
-    public static func format(_ candidates: [FactoryModelCandidate], separator: String = ", ") -> String { candidates.map { "\($0.cli.trimmed)/\($0.model.trimmed)/\($0.effort.trimmed)" }.joined(separator: separator) }
-    public static func ordinal(_ i: Int) -> String { i < 9 ? "\(["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth"][i]) choice" : "#\(i + 1) choice" }
 }
 
 // Go can omit an ask's project and send null for nil collections.
@@ -305,14 +314,23 @@ extension DaemonClient {
 
     /// `GET /api/factory/projects/{id}/settings`.
     public func factorySettings(projectID: String) async throws -> [FactorySettingRow] {
-        struct Reply: Decodable { let rows: [FactorySettingRow] }; return try await factoryGet(Reply.self, encodedPath: "/api/factory/projects/\(factoryPathSegment(projectID))/settings", what: "the settings").rows
+        struct Reply: Decodable { let rows: [FactorySettingRow] }
+        let path = "/api/factory/projects/\(factoryPathSegment(projectID))/settings"
+        return try await factoryGet(Reply.self, encodedPath: path, what: "the settings").rows
     }
 
     /// `POST /api/factory/projects/{id}/settings`: proposes a change as a read-back `rule` ask.
     public func proposeFactorySetting(projectID: String, name: String, value: String) async throws -> FactoryAsk {
-        struct Reply: Decodable { let ok: Bool; let ask: FactoryAsk }
-        let r: Reply = try await factoryPost("/api/factory/projects/\(factoryPathSegment(projectID))/settings", ["name": name, "value": value], what: "the setting proposal", structuredRefusal: true)
-        guard r.ok else { throw DaemonError.malformed("the setting proposal did not complete") }; return r.ask
+        struct Reply: Decodable {
+            let ok: Bool
+            let ask: FactoryAsk
+        }
+        let path = "/api/factory/projects/\(factoryPathSegment(projectID))/settings"
+        let reply: Reply = try await factoryPost(
+            path, ["name": name, "value": value], what: "the setting proposal", structuredRefusal: true
+        )
+        guard reply.ok else { throw DaemonError.malformed("the setting proposal did not complete") }
+        return reply.ask
     }
 
     /// Resume with the project's existing goal using the paired-device start route.
@@ -331,12 +349,16 @@ extension DaemonClient {
 
     private func factoryPost(_ path: String, _ fields: [String: String]) async throws {
         struct Reply: Decodable { let ok: Bool }
-        guard try await (factoryPost(path, fields, what: "the project action reply") as Reply).ok else { throw DaemonError.malformed("the project action did not complete") }
+        let reply: Reply = try await factoryPost(path, fields, what: "the project action reply")
+        guard reply.ok else { throw DaemonError.malformed("the project action did not complete") }
     }
 
-    private func factoryPost<T: Decodable>(_ path: String, _ fields: [String: String], what: String, structuredRefusal: Bool = false) async throws -> T {
+    private func factoryPost<T: Decodable>(
+        _ path: String, _ fields: [String: String], what: String, structuredRefusal: Bool = false
+    ) async throws -> T {
         let body = try JSONSerialization.data(withJSONObject: fields, options: .withoutEscapingSlashes)
-        return try await factoryReply(T.self, request: try request(encodedPath: path, method: "POST", body: body), what: what, structuredRefusal: structuredRefusal)
+        let req = try request(encodedPath: path, method: "POST", body: body)
+        return try await factoryReply(T.self, request: req, what: what, structuredRefusal: structuredRefusal)
     }
 
     /// One factory read. Unlike `sendJSON`, a 404 is not "an older daemon":
@@ -346,7 +368,9 @@ extension DaemonClient {
         try await factoryReply(type, request: request(encodedPath: encodedPath), what: what)
     }
 
-    private func factoryReply<T: Decodable>(_ type: T.Type, request: URLRequest, what: String, structuredRefusal: Bool = false) async throws -> T {
+    private func factoryReply<T: Decodable>(
+        _ type: T.Type, request: URLRequest, what: String, structuredRefusal: Bool = false
+    ) async throws -> T {
         let (data, response) = try await perform(request)
         guard let http = response as? HTTPURLResponse else { throw DaemonError.malformed("no HTTP response") }
         switch http.statusCode {
@@ -360,8 +384,12 @@ extension DaemonClient {
             throw DaemonError.unauthorized(endpoint: endpoint.display)
         default:
             let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
-            let msg = (obj?["error"] as? String) ?? "", code = (obj?["code"] as? String) ?? "", fix = (obj?["fix"] as? String)?.trimmed.nonEmpty
-            if structuredRefusal, http.statusCode != 404, !code.isEmpty || fix != nil { throw FactoryRefusal(status: http.statusCode, code: code, message: msg, fix: fix) }
+            let msg = (obj?["error"] as? String) ?? ""
+            let code = (obj?["code"] as? String) ?? ""
+            let fix = (obj?["fix"] as? String)?.trimmed.nonEmpty
+            if structuredRefusal, http.statusCode != 404, !code.isEmpty || fix != nil {
+                throw FactoryRefusal(status: http.statusCode, code: code, message: msg, fix: fix)
+            }
             throw DaemonError.rejected(status: http.statusCode, message: msg)
         }
     }

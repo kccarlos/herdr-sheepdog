@@ -50,10 +50,14 @@ struct FactoryProjectView: View {
                     FactoryHeadCard(item: board.summary, computer: computer.snapshot, dialog: nil, answer: { _, _ in }, project: board, onGone: projectGone)
                     OptionFlow(spacing: 8) {
                         if board.showsCoordinatorButton {
-                            Button("Coordinator") { showsCoordinator = true }.buttonStyle(.bordered).controlSize(.large)
-                                .accessibilityLabel(board.coordinatorAccessibilityLabel).accessibilityIdentifier("factoryProject.coordinator")
+                            Button("Coordinator") { showsCoordinator = true }
+                                .buttonStyle(.bordered).controlSize(.large)
+                                .accessibilityLabel(board.coordinatorAccessibilityLabel)
+                                .accessibilityIdentifier("factoryProject.coordinator")
                         }
-                        Button("Settings") { showsSettings = true }.buttonStyle(.bordered).controlSize(.large).accessibilityIdentifier("factoryProject.settings")
+                        Button("Settings") { showsSettings = true }
+                            .buttonStyle(.bordered).controlSize(.large)
+                            .accessibilityIdentifier("factoryProject.settings")
                     }
                     composer(board, on: computer)
                     if !board.openAsks.isEmpty {
