@@ -541,6 +541,42 @@ func agyTrustDrawing(text string) bool {
 	return false
 }
 
+// retryCoordWake looks for evidence that the last turn ended without doing
+// the wake: the CLI interrupted it, or the last submitted prompt was different.
+func retryCoordWake(cli, clean string) bool {
+	var prompt string
+	switch cli {
+	case "claude":
+		prompt = "❯"
+	case CodexCLI:
+		prompt = "›"
+	case AgyCLI:
+		prompt = ">"
+	default:
+		return false
+	}
+	lines := strings.Split(clean, "\n")
+	if anchor := uiAnchor(cli, lines); anchor >= 0 {
+		lines = lines[:anchor]
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := strings.TrimSpace(lines[i])
+		if cli == CodexCLI && strings.HasPrefix(line, "■ Conversation interrupted") {
+			return true
+		}
+		if cli == "claude" {
+			line = strings.TrimSpace(strings.TrimPrefix(line, "⎿"))
+			if rest, ok := strings.CutPrefix(line, "Interrupted"); ok && strings.HasPrefix(strings.TrimSpace(rest), "· What should Claude do") {
+				return true
+			}
+		}
+		if text, ok := strings.CutPrefix(lines[i], prompt); ok && strings.TrimSpace(text) != "" {
+			return !strings.HasPrefix(strings.TrimSpace(text), flow.CoordWakePromptPrefix)
+		}
+	}
+	return false
+}
+
 // ObserveRun reads rec's terminal and screen from herdr-core and emits the events for one pass (design.md 5, 7.3).
 func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, codexHome ...string) ([]flow.RunEvent, error) {
 	if rec.State == flow.PhaseEnded {
@@ -634,7 +670,8 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 		}
 	}
 	// An empty hash marks an unavailable screen; this tick cannot prove the run stayed quiet.
-	return append(evs, flow.RunEvent{Kind: flow.EvTick, Screen: cls, ScreenHash: hash, LimitLine: limitLine, Tail: tail, Model: t.Labels["sheepdog.model"]}), nil
+	return append(evs, flow.RunEvent{Kind: flow.EvTick, Screen: cls, ScreenHash: hash, LimitLine: limitLine, Tail: tail, Model: t.Labels["sheepdog.model"],
+		RetryCoordWake: rec.Role == flow.RoleCoordinator && nonEmpty && retryCoordWake(rec.CLI, clean)}), nil
 }
 
 // ActRun executes one run-table act against herdr-core.

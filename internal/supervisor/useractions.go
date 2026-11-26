@@ -207,6 +207,9 @@ func (s *Supervisor) UserInterrupt(ctx context.Context, paneID string) (string, 
 // confirm with the agent's name, which is what the protected-agent rail
 // asks the orchestrator for; the daemon's own pane stays refused.
 func (s *Supervisor) UserClose(ctx context.Context, paneID string) (string, error) {
+	if err := s.refuseFactoryPane(ctx, paneID); err != nil {
+		return "", err
+	}
 	row, ok := s.store.Get(paneID)
 	if !ok {
 		return "", ErrNoSuchAgent

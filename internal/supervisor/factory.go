@@ -2,13 +2,16 @@ package supervisor
 
 import (
 	"cmp"
+	"context"
 	"errors"
 	"fmt"
 	"slices"
 	"strings"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/brain"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/push"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
@@ -51,6 +54,40 @@ func (s *Supervisor) coordinatorName(labels map[string]string) string {
 		return s.factoryProjectName(id)
 	}
 	return ""
+}
+
+func (s *Supervisor) factoryPane(paneID string) (factory.Pane, bool) {
+	if f, ok := s.cfg.Factory.(interface {
+		Pane(string) (factory.Pane, bool)
+	}); ok {
+		return f.Pane(paneID)
+	}
+	return factory.Pane{}, false
+}
+
+// refuseFactoryPane holds the factory's pane lifecycle on both action routes.
+func (s *Supervisor) refuseFactoryPane(ctx context.Context, paneID string) error {
+	denied := fmt.Errorf("%w: the factory manages this pane", brain.ErrNotPermitted)
+	if _, ok := s.factoryPane(paneID); ok {
+		return denied
+	}
+	row, ok := s.store.Get(paneID)
+	if row.Labels["sheepdog.project"] != "" {
+		return denied
+	}
+	if ok && s.cfg.Factory == nil {
+		return nil
+	}
+	agents, err := s.herdr.ListAgents(ctx)
+	if err != nil {
+		return err
+	}
+	if slices.ContainsFunc(agents, func(a herdr.AgentInfo) bool {
+		return a.PaneID == paneID && a.Labels["sheepdog.project"] != ""
+	}) {
+		return denied
+	}
+	return nil
 }
 
 // FactoryQuestions returns open gated factory asks in creation order.

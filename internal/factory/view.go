@@ -325,11 +325,13 @@ func (e *Engine) initProjectHeads() {
 		e.projectHeadsMu.Lock()
 		defer e.projectHeadsMu.Unlock()
 		e.projectHeads = map[string]ProjectHead{}
+		e.projectPanes = map[string]map[string]Pane{}
 		entries, _ := e.readProjectDirs()
 		for _, ent := range entries {
 			if ent.IsDir() {
 				if s, err := LoadState(e.Paths.State(ent.Name())); err == nil {
 					e.projectHeads[ent.Name()] = projectHeadOf(s)
+					e.projectPanes[ent.Name()] = projectPanesOf(s)
 				}
 			}
 		}
@@ -361,11 +363,63 @@ func (e *Engine) ProjectName(id string) string {
 	return cmp.Or(e.projectHeads[id].Name, id)
 }
 
+// Pane describes a terminal named by the factory's saved run records.
+type Pane struct {
+	Name, Role, CLI, State string
+	StateSince             time.Time
+	CurrentCoordinator     bool
+}
+
+func projectPanesOf(s flow.State) map[string]Pane {
+	p, panes := s.Project, map[string]Pane{}
+	add := func(id, role string, r *flow.RunRecord) {
+		info := Pane{Name: ProjectName(p.ID, p.Folder), Role: role}
+		if r != nil {
+			id = cmp.Or(id, r.Address)
+			info.CLI, info.State, info.StateSince = r.CLI, r.State, r.StatusSince
+		}
+		if id != "" {
+			info.CurrentCoordinator = role == flow.RoleCoordinator && p.Started && !p.Finished &&
+				id == p.RunID && flow.RunLive(id, r)
+			panes[id] = info
+		}
+	}
+	review := func(r *flow.ReviewRun) {
+		if r != nil {
+			add(r.RunID, r.Role(), r.Run)
+		}
+	}
+	for _, t := range s.Tasks {
+		for _, a := range t.Attempts {
+			add(a.RunID, flow.RoleWorker, a.Run)
+			review(a.Review)
+		}
+	}
+	for _, pr := range p.PlanReviews {
+		review(pr.Run)
+	}
+	add(p.RunID, flow.RoleCoordinator, p.Run)
+	return panes
+}
+
+// Pane looks up a run by terminal address using the project-head cache lock.
+func (e *Engine) Pane(id string) (Pane, bool) {
+	e.initProjectHeads()
+	e.projectHeadsMu.RLock()
+	defer e.projectHeadsMu.RUnlock()
+	for _, panes := range e.projectPanes {
+		if pane, ok := panes[id]; ok {
+			return pane, true
+		}
+	}
+	return Pane{}, false
+}
+
 func (e *Engine) publishProjectHead(id string, s flow.State, logLine bool) {
-	h := projectHeadOf(s)
+	h, panes := projectHeadOf(s), projectPanesOf(s)
 	e.projectHeadsMu.Lock()
 	changed := !reflect.DeepEqual(e.projectHeads[id], h)
-	e.projectHeads[id] = h
+	e.projectHeads[id], e.projectPanes[id] = h, panes
 	e.projectHeadsMu.Unlock()
 	if logLine || changed {
 		e.logEvent("factory.changed", map[string]string{"project": id})

@@ -126,7 +126,7 @@ func taskFacts(t flow.Task, f flow.Facts, now time.Time) string {
 // differs from its default.
 func wakeMessage(s flow.State) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Wake: %d task wake(s) wait on you.\n", len(s.Project.Wakes))
+	fmt.Fprintf(&b, "%s%d task wake(s) wait on you.\n", flow.CoordWakePromptPrefix, len(s.Project.Wakes))
 	for i, w := range s.Project.Wakes {
 		if i == maxFactsWakes {
 			fmt.Fprintf(&b, "- and %d more.\n", len(s.Project.Wakes)-i)

@@ -876,6 +876,17 @@ These are mechanics: how a thing is done once a row has asked for it. They decid
 
 **Wakes.** The coordinator is woken by rules, each wake once per key, batched and delivered when it is idle (J12): a task waits on it (N3–N8, N12–N14, N18, N25, N30, N34, N35, N37, N38, N41, N43), a PR was merged outside the accept bar (N2), a worker asked, a retro finished, a plan review asked for changes, a milestone finished, a pool or the base changed, the owner spoke. A heartbeat covers silence (J13). Each wake starts with a facts block built in code: the tasks waiting on it and why, pools, slots, every setting that differs from its default, and the retro table (section 11.2).
 
+J12 keeps the delivered batch in flight until the engine observes its outcome.
+
+| Run observation | In-flight wakes |
+|---|---|
+| Working, blocked, or idle on the delivery turn | Keep the batch in flight. J9 still watches a wake that gets no turn. |
+| Idle on a later turn with a terminal interruption or a different submitted prompt visible | Put the batch back in the queue, once per task and wake key. J12 sends it when the coordinator is idle. |
+| Idle on a later turn with no such evidence | Retire the batch. |
+| Ended on quota, or ended without a later turn | Put the batch back in the queue for the next coordinator. |
+| Ended after a later turn for another reason | Retire the batch. |
+
+
 **Rotation.** A long coordinator session was 41.5% of day one's Claude cost. J11 gives it a fresh session at an idle moment, with a written handoff.
 
 **Standing rules** reach it two ways: settings are enforced in code and listed in the facts block; text rules are a section of its prompt, rebuilt at every start.

@@ -12,6 +12,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 )
@@ -74,12 +75,41 @@ type Screen struct {
 	Hash string `json:"hash"`
 }
 
+// WindowAvailable checks whether the pane may be opened on /term.
+func (s *Supervisor) WindowAvailable(paneID string) bool {
+	_, _, ok := s.windowAgent(paneID, false)
+	return ok
+}
+
+// windowAgent projects window metadata without adding a coordinator to the table.
+func (s *Supervisor) windowAgent(paneID string, allowDialog bool) (row state.Agent, coordinator, ok bool) {
+	row, tracked := s.store.Get(paneID)
+	if p, named := s.factoryPane(paneID); named {
+		if !p.CurrentCoordinator {
+			return state.Agent{}, false, false
+		}
+		name := p.Name + " coordinator"
+		if !tracked || row.State != herdr.StateBlocked {
+			row.State, row.StateSince = herdr.State(p.State), p.StateSince
+		}
+		row.PaneID, row.Alias, row.Spoken, row.Kind = paneID, name, name, p.CLI
+		return row, true, true
+	}
+	if row.Labels["sheepdog.project"] != "" {
+		// The watcher can report a coordinator's dialog before the engine
+		// has recorded the pane. Keep its existing dialog access.
+		coordinator = allowDialog && row.Labels["sheepdog.role"] == flow.RoleCoordinator && row.State == herdr.StateBlocked
+		return row, coordinator, coordinator
+	}
+	return row, false, tracked
+}
+
 // Screen reads the tracked agent in paneID's window: the herdr read the
 // orchestrator's read_screen makes, without making the agent the subject
 // (looking is not talking). lines <= 0 is WindowDefaultLines; it is
 // capped at WindowMaxLines.
 func (s *Supervisor) Screen(ctx context.Context, paneID string, lines int) (Screen, error) {
-	row, ok := s.store.Get(paneID)
+	row, _, ok := s.windowAgent(paneID, false)
 	if !ok {
 		return Screen{}, ErrNoSuchAgent
 	}
@@ -121,7 +151,7 @@ func (s *Supervisor) ScreenANSI(ctx context.Context, paneID string) (Screen, err
 	if !ok {
 		return s.Screen(ctx, paneID, 0)
 	}
-	row, ok := s.store.Get(paneID)
+	row, _, ok := s.windowAgent(paneID, false)
 	if !ok {
 		return Screen{}, ErrNoSuchAgent
 	}
@@ -160,20 +190,38 @@ func (s *Supervisor) WindowPrompt(ctx context.Context, paneID, text string) (Win
 	if text == "" || len(text) > WindowMaxText {
 		return WindowResult{}, fmt.Errorf("%w: the text must be 1 to %d bytes", ErrWindowInput, WindowMaxText)
 	}
-	row, ok := s.store.Get(paneID)
+	if _, _, ok := s.windowAgent(paneID, true); !ok {
+		return WindowResult{}, ErrNoSuchAgent
+	}
+	ps := s.paneSend(paneID)
+	ps.Lock()
+	row, coordinator, ok := s.windowAgent(paneID, true)
 	if !ok {
+		ps.Unlock()
 		return WindowResult{}, ErrNoSuchAgent
 	}
 	name := aliasOr(state.Say(row))
-	ps := s.paneSend(paneID)
-	ps.Lock()
-	if row, ok := s.store.Get(paneID); ok && row.State == herdr.StateBlocked {
+	blocked := func(err error) error {
+		return fmt.Errorf("%s is waiting at a prompt; answer it first (%w)", name, err)
+	}
+	if row.State == herdr.StateBlocked {
 		ps.Unlock()
-		return WindowResult{}, fmt.Errorf("%s is waiting at a prompt; answer it first (%w)", name, herdr.ErrAgentBlocked)
+		return WindowResult{}, blocked(herdr.ErrAgentBlocked)
 	}
 	if err := s.checkTypedInput(ctx, paneID); err != nil {
 		ps.Unlock()
 		return WindowResult{}, err
+	}
+	if coordinator {
+		err := s.prompt(ctx, row, text)
+		ps.Unlock()
+		if err != nil {
+			if errors.Is(err, herdr.ErrAgentBlocked) {
+				err = blocked(err)
+			}
+			return WindowResult{}, err
+		}
+		return WindowResult{Kind: "prompt", Spoken: "Sent to " + name + "."}, nil
 	}
 	// The row records the prompt before the RPC (see sendInstruction): a
 	// quick turn's transitions can land before Prompt returns.
@@ -211,7 +259,7 @@ func (s *Supervisor) WindowPrompt(ctx context.Context, paneID, text string) (Win
 	ps.Unlock()
 	if err != nil {
 		if errors.Is(err, herdr.ErrAgentBlocked) {
-			return WindowResult{}, fmt.Errorf("%s is waiting at a prompt; answer it first (%w)", name, err)
+			return WindowResult{}, blocked(err)
 		}
 		return WindowResult{}, err
 	}
@@ -235,11 +283,11 @@ func (s *Supervisor) WindowKeys(ctx context.Context, paneID string, keys []strin
 			return WindowResult{}, fmt.Errorf("%w: key %q is not allowed", ErrWindowInput, k)
 		}
 	}
-	row, ok := s.store.Get(paneID)
+	row, coordinator, ok := s.windowAgent(paneID, true)
 	if !ok {
 		return WindowResult{}, ErrNoSuchAgent
 	}
-	if id, option, ok := s.windowAnswer(paneID, keys); ok {
+	if id, option, ok := s.windowAnswer(paneID, keys); ok && !coordinator {
 		res, err := s.AnswerTap(ctx, id, option)
 		if err == nil {
 			return WindowResult{Kind: "answer", Spoken: res.Spoken}, nil
@@ -255,6 +303,10 @@ func (s *Supervisor) WindowKeys(ctx context.Context, paneID string, keys []strin
 	}
 	ps := s.paneSend(paneID)
 	ps.Lock()
+	if _, _, ok := s.windowAgent(paneID, true); !ok {
+		ps.Unlock()
+		return WindowResult{}, ErrNoSuchAgent
+	}
 	err := s.herdr.SendKeys(ctx, paneID, keys...)
 	ps.Unlock()
 	if err != nil {
@@ -264,7 +316,7 @@ func (s *Supervisor) WindowKeys(ctx context.Context, paneID string, keys []strin
 		s.startReprompt(paneID)
 	}
 	name := aliasOr(state.Say(row))
-	if s.brain != nil {
+	if !coordinator && s.brain != nil {
 		s.brain.Daemon(fmt.Sprintf("the user pressed %s in %s's window", strings.Join(keys, " "), name))
 	}
 	return WindowResult{Kind: "keys", Spoken: "Pressed " + strings.Join(keys, " ") + " in " + name + "'s window."}, nil

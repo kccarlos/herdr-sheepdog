@@ -93,6 +93,7 @@ type Engine struct {
 	projectHeadsOnce  sync.Once
 	projectHeadsMu    sync.RWMutex
 	projectHeads      map[string]ProjectHead
+	projectPanes      map[string]map[string]Pane
 	wake              chan struct{}
 	lastPass          map[string]time.Time            // monotonic reading of previous pass per project (design.md 2.5)
 	lastSweep         map[string]time.Time            // per-process last sweep per project (design.md 7.3)
@@ -447,7 +448,7 @@ func (e *Engine) Stop(project string) error {
 	}
 	if s.Project.Run != nil {
 		stopRec(&s.Project.Run, flow.RoleCoordinator, s.Settings, now)
-		reconcileCoordWakes(&s.Project)
+		reconcileCoordWakes(&s.Project, false)
 	}
 	acts := map[bool][]flow.Act{true: slices.DeleteFunc(s.Project.Acts, func(a flow.Act) bool { return a.Key == flow.AskStopCoordinator })}[s.Project.Finished]
 	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.Invariants, s.Project.WaitKey, s.Project.CoordSilentStops = "", "", nil, false, acts, nil, false, 0, nil, "", 0
@@ -494,6 +495,7 @@ func (e *Engine) projectDirs() []os.DirEntry {
 		for id := range e.projectHeads {
 			if !dirs[id] {
 				delete(e.projectHeads, id)
+				delete(e.projectPanes, id)
 				removed = append(removed, id)
 			}
 		}
@@ -764,12 +766,12 @@ func clearCoordTrack(p *flow.Project, stucks, lastWake bool) {
 	p.CoordDialogStucks, p.CoordLastWakeAt = map[bool]int{false: p.CoordDialogStucks}[stucks], map[bool]time.Time{false: p.CoordLastWakeAt}[lastWake]
 }
 
-func reconcileCoordWakes(p *flow.Project) bool {
+func reconcileCoordWakes(p *flow.Project, retry bool) bool {
 	r := p.Run
 	if len(p.CoordWakesInFlight) == 0 || r == nil || (r.State != flow.PhaseEnded && (r.State != flow.PhaseIdle || r.Turn <= p.CoordWakeTurn)) {
 		return false
 	}
-	if r.State == flow.PhaseEnded && (r.Result == flow.EndQuota || r.Turn <= p.CoordWakeTurn) {
+	if retry || r.State == flow.PhaseEnded && (r.Result == flow.EndQuota || r.Turn <= p.CoordWakeTurn) {
 		for _, w := range p.CoordWakesInFlight {
 			if !slices.ContainsFunc(p.Wakes, func(queued flow.Wake) bool { return queued.Task == w.Task && queued.Key == w.Key }) {
 				p.Wakes = append(p.Wakes, w)
@@ -821,7 +823,7 @@ func (e *Engine) observeCoordLocked(ctx context.Context, id string, s *flow.Stat
 	if p.NewGoal && len(s.Tasks) > p.NewGoalTasks && slices.ContainsFunc(s.Tasks[p.NewGoalTasks:], func(t flow.Task) bool { return t.SplitFrom == "" }) {
 		p.NewGoal, p.NewGoalTasks, dirty = false, 0, true
 	}
-	if reconcileCoordWakes(p) {
+	if reconcileCoordWakes(p, false) {
 		dirty = true
 	}
 	if r := p.Run; r != nil && r.State == flow.PhaseEnded && (p.RunID != "" || p.RunTokenHash != "" || !p.CoordWakeAt.IsZero() || !p.CoordErrorAt.IsZero() || (!flow.IsCoordR29(r) && p.CoordDialogStucks != 0) || (r.Result != flow.EndStopped && p.CoordSilentStops != 0)) {
@@ -923,7 +925,7 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 			return
 		}
 		stopRec(&s.Project.Run, flow.RoleCoordinator, s.Settings, now)
-		reconcileCoordWakes(&s.Project)
+		reconcileCoordWakes(&s.Project, false)
 		s.Project.RunID, s.Project.RunTokenHash = "", ""
 		clearCoordTrack(&s.Project, true, false)
 		if s.Project.CoordSilentStops = map[bool]int{true: s.Project.CoordSilentStops + 1}[r.ID == "J9"]; s.Project.CoordSilentStops >= 2 {
@@ -1565,7 +1567,12 @@ events:
 			break // Observe the screen again before acting on its timeout.
 		}
 	}
-	if !reflect.DeepEqual(before, **recp) {
+	// A terminal turn can end without handling a delivered batch. Reconcile
+	// with the same screen sample before saving the idle run.
+	reconciled := role == flow.RoleCoordinator && len(evs) > 0 &&
+		evs[len(evs)-1].Kind == flow.EvTick && (*recp).State == flow.PhaseIdle &&
+		reconcileCoordWakes(&s.Project, evs[len(evs)-1].RetryCoordWake)
+	if reconciled || !reflect.DeepEqual(before, **recp) {
 		e.saveLocked(id, *s)
 	}
 	return (*recp).TaskRun(), nil

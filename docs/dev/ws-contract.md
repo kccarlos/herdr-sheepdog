@@ -1196,10 +1196,11 @@ answer a question by tap. All three need a paired device under "Auth".
 ## Agent window: screen and input
 
 Not part of `/ws`: two device-authenticated JSON routes let the app show an
-agent's live terminal window and operate it. Both serve only the agents
-the daemon tracks (the rows of `GET /api/agents`); any other pane id is
-`404 {"error":"no such agent"}`, so the user's other herdr panes are never
-reachable. A pane id with `:` or `%` is path-escaped as usual.
+agent's terminal window and operate it. Both serve ordinary tracked agents
+and the factory's current coordinator, even without a row in
+`GET /api/agents`. Worker and reviewer pane IDs are refused with
+`404 {"error":"no such agent"}`. A pane id with `:` or `%` is path-escaped
+as usual.
 
 - **`GET /api/agents/{pane_id}/screen?lines=N&hash=H`** — the agent's
   current screen: the same herdr read the orchestrator's `read_screen` uses
@@ -1249,6 +1250,11 @@ reachable. A pane id with `:` or `%` is path-escaped as usual.
   as it is: the user may have moved the cursor with `up`/`down`, so the
   recorded default is not necessarily what it selects; the transition
   off `blocked` closes the question. A herdr send that fails is `502`.
+
+  Coordinator input goes straight to the terminal without creating a roster
+  row, an owner wake, or an answer proof. A blocked coordinator refuses text
+  with `409` and still takes keys for its terminal dialog. The input route
+  also handles a tracked blocked coordinator while the engine catches up.
 
 ## Agent actions
 
@@ -1733,8 +1739,8 @@ frame at once and then whenever the window changes.
 
 - **`screen-subscribe {pane_id}`** starts the subscription. **At most
   one per client**: a second subscribe replaces the first (to switch
-  agents, or to get a fresh frame at once). Only agents the daemon
-  tracks, as on the route. The window is the coloured one (feature
+  agents, or to get a fresh frame at once). It accepts the same panes as
+  the screen route. The window is the coloured one (feature
   `screen-ansi`): herdr's visible screen with its SGR colours kept
   (`pane.read` format `ansi`), one line per row at the pane's own width.
   Its frames carry `ansi: true`. `GET /api/agents/{pane_id}/screen?ansi=1`
@@ -1763,7 +1769,7 @@ frame at once and then whenever the window changes.
   ```
 
 - **`screen-error {pane_id, message, ended?}`**: `ended: true` when the
-  subscription is over — the pane is not (or no longer) a tracked agent
+  subscription is over. The screen route would refuse the pane
   (`no such agent`), or the daemon has no supervisor. Otherwise a read
   failed (herdr down): it is sent once per run of failures, reads go on,
   and the next good read sends a full `screen` frame even if nothing
