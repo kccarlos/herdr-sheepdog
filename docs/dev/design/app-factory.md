@@ -23,6 +23,7 @@ sample project is called `notes`.
 | D7 | No separate reply mechanism. `say_reply` is dropped: after an instruction the owner hears a confirmation, sees asks as cards, and asks "what did it do, and why?" through D6. | OK |
 | D8 | **The phone can do everything `/factory` can**: stop, resume, new goal, reopen, settings with models per role, and new project. Every route it needs is already open to a paired device, and every proof and read-back the daemon requires stays in code. | asked for |
 | D9 | Per-worker narration stays off. A stuck worker is the engine's to handle and is not shown as a needs-you card. | OK |
+| D10 | **The coordinator's window is live and the owner can type in it** (owner, 2026-11-25: "this one is a must"), so the owner can ask the coordinator a clarifying question before answering its ask. It is the live terminal with an input box, as for an ordinary agent, offered only while a coordinator runs. Typing there is the owner's own hands: it is never an ask's answer, which still needs a proved tap or a live voice answer. Worker and reviewer windows stay snapshot and read-only. **Later (wanted, not v1):** a "clarify" box on the ask card itself, with the coordinator's answer written onto the card and spoken (section 6.7). | asked for |
 
 ## Questions that remain for the owner
 
@@ -290,13 +291,21 @@ engine names it: a project's coordinator run, or a task's live run.
   state file each time, as `Projects()` does. The supervisor's `Factory`
   interface gets one read for it, answered from what the engine already
   holds in memory or from a small cache rebuilt on an engine change.
-- **Read-only, by construction.** The routes that type into a pane, send
-  keys, interrupt, close or rename it, and the live terminal attach, each
-  do their own table lookup and are not changed. They keep refusing a pane
-  with no row.
-- **So a run's window is the snapshot window, not the live terminal.** On
+- **Read-only for runs, by construction.** The routes that type into a
+  pane, send keys, interrupt, close or rename it, and the live terminal
+  attach, each do their own table lookup and are not changed for runs.
+  They keep refusing a worker or reviewer pane with no row.
+- **So a worker's or reviewer's window is the snapshot window.** On
   herdr-core the app's agent window is the live terminal, whose attach
-  needs a row. The boards must not draw a live terminal for a factory run.
+  needs a row. The boards must not draw a live terminal for a worker or
+  reviewer.
+- **The coordinator's window is the exception (D10): live, with input.**
+  The live attach and the input route accept the project's current
+  coordinator pane, found through the same engine lookup (the project
+  entry's coordinator pane), and nothing else the engine names. Close,
+  rename and interrupt stay refused for it: the engine owns its life.
+  Typed text is the owner's own hands, as in an ordinary agent's window;
+  it is not logged as an owner wake and can never answer an ask.
 - **In the app's first version only the coordinator's window is offered.**
   The daemon lookup is the same code for any run, so worker and reviewer
   windows can follow without daemon work. The owner steers at project
@@ -707,6 +716,16 @@ pointed at the transcript) applies.
 
 What `say_reply` would have added is an *unprompted* report after each
 instruction: narration the owner did not ask for, on new engine state.
+
+### 6.7 Later: clarify on the ask card (wanted, not v1)
+
+The owner wants to ask a clarifying question on an ask card itself, by
+typing or by voice, and hear the coordinator's answer without opening its
+terminal. That needs one engine action the engine lacks today: the
+coordinator adds a note to an open ask (shown on the card, spoken once,
+kept in the log), and an owner wake that names the ask it is about. It is
+its own design round after the first version ships; until then the live
+coordinator window (D10) covers clarification.
 
 ## 7. What is narrated and what stays quiet (D9)
 
