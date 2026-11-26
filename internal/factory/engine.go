@@ -528,15 +528,6 @@ func (e *Engine) passProject(ctx context.Context, id string, _ ...bool) {
 	defer e.mu.Unlock()
 	s, err := LoadState(e.Paths.State(id))
 	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			e.projectHeadsMu.Lock()
-			_, hadHead := e.projectHeads[id]
-			delete(e.projectHeads, id)
-			e.projectHeadsMu.Unlock()
-			if hadHead {
-				e.logEvent("factory.changed", map[string]string{"project": id})
-			}
-		}
 		return
 	}
 	if err := e.freshLocked(id, s); err != nil {

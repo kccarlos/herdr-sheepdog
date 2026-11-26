@@ -1,6 +1,7 @@
 package state
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -245,7 +246,7 @@ func pidSessionForKind(source, kind string) bool {
 // one (auto).
 func (s *Store) defaultAlias(a *Agent) (alias string, auto bool) {
 	if a.ProjectName != "" {
-		return a.ProjectName, false
+		return s.uniqueFor(a.PaneID, cmp.Or(Slug(a.ProjectName), "factory")), false
 	}
 	if alias, ok := s.opts.Aliases[a.PaneID]; ok && alias != "" {
 		return s.uniqueFor(a.PaneID, alias), false

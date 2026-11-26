@@ -147,7 +147,7 @@ func projectLive(s flow.State) bool {
 
 func ProjectName(id, folder string) string {
 	base := strings.TrimSpace(filepath.Base(strings.TrimSpace(folder)))
-	if base == "" || base == "." || base == "/" || base == string(filepath.Separator) {
+	if base == "" || base == "." || base == string(filepath.Separator) {
 		return id
 	}
 	return base
