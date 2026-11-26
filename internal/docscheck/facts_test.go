@@ -139,3 +139,19 @@ func TestDocFacts(t *testing.T) {
 		"There is no rate limiting",
 	)
 }
+
+// Pins app-factory.md §4 and §10 PR 1: new /api/state factory list keys,
+// factory.changed, TaskView keys and PendingView.factory are written into
+// docs/dev/ws-contract.md with the code.
+func TestDocWSContractFactoryPR1Keys(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join(repoRoot(t), "docs/dev/ws-contract.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	doc := string(b)
+	for _, key := range []string{"coordinator_pane", "factory.changed", "run_role", "run_cli", "run_started_at", "last_actor_decision"} {
+		if !strings.Contains(doc, key) {
+			t.Errorf("docs/dev/ws-contract.md is missing PR 1 key %q", key)
+		}
+	}
+}
