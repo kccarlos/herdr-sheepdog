@@ -16,8 +16,8 @@ import (
 
 const factoryAskPrefix, factoryPanePrefix, factoryVoiceDeviceID = "fask-", "factory:", "voice-session"
 
-// factoryControl is the ask bridge and owner voice start/stop contract.
-type factoryControl interface {
+// Factory is the ask bridge and owner voice start/stop contract.
+type Factory interface {
 	Projects() []factory.ProjectView
 	Asks(open bool) []flow.Ask
 	MintProof(askID, option, inputKind, deviceID string) (factory.AnswerProof, error)
@@ -27,15 +27,13 @@ type factoryControl interface {
 	Changes() <-chan factory.Change
 }
 
-// Factory adds the views the orchestrator reads for project contacts.
-type Factory interface {
-	factoryControl
+type factoryBoard interface {
 	ProjectHeads() []factory.ProjectHead
 	Graph(project string) (factory.GraphView, error)
 	LogLines(project string, n int, task string, observations bool) ([]factory.LogEntry, error)
 }
 
-var _ Factory = (*factory.Engine)(nil)
+var _ factoryBoard = (*factory.Engine)(nil)
 
 type factoryAnnounce struct{ id, paneID, text string }
 

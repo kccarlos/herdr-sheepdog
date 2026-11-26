@@ -183,9 +183,8 @@ type Config struct {
 	// mutes existed.
 	Mutes *attention.Mutes
 	// Factory is the optional factory engine bridged into supervisor asks and
-	// owner voice start/stop commands. An engine implementing Factory also
-	// supplies project contacts to the orchestrator.
-	Factory factoryControl
+	// owner voice start/stop commands (design.md 12.3).
+	Factory Factory
 	// Now overrides the clock (tests).
 	Now func() time.Time
 	// WorkerLog reads the workers' own session transcripts for the work
