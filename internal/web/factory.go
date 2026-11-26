@@ -2,6 +2,7 @@ package web
 
 import (
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -42,6 +43,34 @@ type factorySettings interface {
 type factoryOwner interface {
 	CheckStart(folder string, set map[string]string) ([]onboard.Result, error)
 	StartSet(folder, goal string, set map[string]string) error
+}
+
+func (s *Server) handleFactorySay(w http.ResponseWriter, r *http.Request) {
+	if dev := deviceOf(r); dev == "" || dev == localDevice {
+		writeJSON(w, http.StatusForbidden, map[string]string{"code": "proof_required", "error": "proof_required"})
+		return
+	}
+	f, ok := s.deps.Factory.(interface {
+		SayByID(context.Context, string, string, string) (factory.ProjectHead, error)
+	})
+	if !ok {
+		writeError(w, http.StatusServiceUnavailable, "factory is not available")
+		return
+	}
+	var req struct{ Text string }
+	if err := readJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, `want {"text": "…"}`)
+		return
+	}
+	_, err := f.SayByID(r.Context(), r.PathValue("id"), req.Text, "")
+	switch {
+	case errors.Is(err, factory.ErrProjectNotFound):
+		writeError(w, http.StatusNotFound, err.Error())
+	case err != nil:
+		writeFactoryRefusal(w, err)
+	default:
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	}
 }
 
 // handleFactory serves POST /api/factory/{start,stop,report}. A start or stop

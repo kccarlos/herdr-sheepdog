@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/world"
@@ -114,28 +115,82 @@ func (e *Engine) Answer(askID, option string, proof AnswerProof) error {
 	return err
 }
 
-// Say queues the owner's verbatim words as a coordinator wake on project.
+// Say queues the owner's words on a project identified by ID or folder.
 func (e *Engine) Say(project, text string) error {
-	project, msg := strings.TrimSpace(project), strings.TrimSpace(text)
+	project = strings.TrimSpace(project)
+	if project == "" {
+		return ErrProjectNotFound
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), lockGitTimeout)
 	defer cancel()
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	id, s, err := e.findProjectLocked(ctx, project)
-	if project == "" || err != nil {
+	if err != nil {
 		return fmt.Errorf("%w: %s", ErrProjectNotFound, project)
+	}
+	return e.sayLocked(ctx, id, s, text, "", "the project is finished; start it with a different goal")
+}
+
+// SayByID queues an instruction on an exact project ID. Heard carries the
+// owner's original words when the orchestrator relays the instruction.
+func (e *Engine) SayByID(ctx context.Context, id, text, heard string) (ProjectHead, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	s, err := e.loadProjectState(id)
+	if err != nil {
+		return ProjectHead{}, err
+	}
+	head := projectHeadOf(s)
+	return head, e.sayLocked(ctx, id, s, text, heard, head.Name+" is finished. Give it a new goal.")
+}
+
+var sayLineBreaks = strings.NewReplacer("\r\n", " ", "\r", " ", "\n", " ", "\v", " ", "\f", " ", "\u0085", " ", "\u2028", " ", "\u2029", " ")
+
+// NormalizeSay makes an instruction and its optional source safe to write on
+// one wake line. The simulator uses the same input bounds as the engine.
+func NormalizeSay(text, heard string) (string, string, *Refusal) {
+	text = strings.TrimSpace(sayLineBreaks.Replace(text))
+	heard = strings.TrimSpace(sayLineBreaks.Replace(heard))
+	if text == "" {
+		return "", "", &Refusal{Code: "why_missing", Why: "Say requires non-empty text."}
+	}
+	if utf8.RuneCountInString(text) > 1000 || utf8.RuneCountInString(heard) > 1000 {
+		return "", "", &Refusal{Code: "text_too_long", Why: "Too long. Keep it under 1,000 characters."}
+	}
+	return text, heard, nil
+}
+
+func (e *Engine) sayLocked(ctx context.Context, id string, s flow.State, text, heard, closedWhy string) error {
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	if err := e.freshLocked(id, s); err != nil {
 		return err
 	}
 	if s.Project.Finished {
-		return e.refuse(id, flow.RefuseClosed, "the project is finished; start it with a different goal")
+		return e.refuse(id, flow.RefuseClosed, closedWhy)
 	}
-	if msg == "" {
-		return e.refuse(id, "why_missing", "Say requires non-empty text.")
+	msg, heard, ref := NormalizeSay(text, heard)
+	if ref != nil {
+		return e.refuse(id, ref.Code, ref.Why)
 	}
-	holdProjectWake(&s, fmt.Sprintf("owner_say:%d", s.Seq+1), "owner said", msg, e.now())
-	return e.commitChangeLocked(id, &s, LogLine{By: owner, Input: map[string]string{"verb": "say", "text": msg}, Rule: "say", Asked: []string{flow.AskWake}, Decision: "owner said", Why: msg}, Change{Kind: "say"})
+	input := map[string]string{"verb": "say", "text": msg}
+	why, facts := "owner said (typed)", fmt.Sprintf("%q", msg)
+	if heard != "" {
+		input["heard"] = heard
+		why = "owner said, relayed by the orchestrator"
+		punct := ""
+		if !strings.ContainsRune(".?!", rune(msg[len(msg)-1])) {
+			punct = "."
+		}
+		facts = fmt.Sprintf("%s%s Heard: %q", msg, punct, heard)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	holdProjectWake(&s, fmt.Sprintf("%s%d", ownerSayPrefix, s.Seq+1), why, facts, e.now())
+	return e.commitChangeLocked(id, &s, LogLine{By: owner, Input: input, Rule: "say", Asked: []string{flow.AskWake}, Decision: "owner said", Why: msg}, Change{Kind: "say"})
 }
 
 func (e *Engine) acceptAskLocked(id string, s *flow.State, role string, ti int, runID string, args json.RawMessage) error {

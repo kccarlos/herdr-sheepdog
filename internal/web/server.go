@@ -577,6 +577,7 @@ func (s *Server) routeTable() ([]route, error) {
 		route{"POST /api/factory/projects/check", accessDevice, s.handleFactoryOwner("check")},
 		route{"POST /api/factory/projects/start", accessDevice, s.handleFactoryOwner("start")},
 		route{"POST /api/factory/projects/stop", accessDevice, s.handleFactoryOwner("stop")},
+		route{"POST /api/factory/projects/{id}/say", accessDevice, s.handleFactorySay},
 		route{"GET /api/factory/projects/{id}/graph", accessDevice, s.handleFactoryView("graph")},
 		route{"GET /api/factory/projects/{id}/log", accessDevice, s.handleFactoryView("log")},
 		route{"GET /api/factory/settings", accessDevice, s.handleFactorySettings},

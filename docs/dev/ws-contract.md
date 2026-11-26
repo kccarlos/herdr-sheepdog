@@ -1895,7 +1895,7 @@ app's `UserDefaults` as `hotkey.shortcut`.
 
 ## Factory
 
-The factory engine (`internal/factory`) serves nine HTTP routes alongside the
+The factory engine (`internal/factory`) serves HTTP routes alongside the
 `/factory` board (`accessLoopback`). Per rule V1 in
 [`engine-v2/design.md`](engine-v2/design.md#121-what-the-surfaces-read), the
 Go structs returned by `internal/factory` and `internal/web/factory.go` are
@@ -1906,6 +1906,12 @@ the single source of truth for factory JSON shapes.
   `GET /api/factory/asks`, and `POST /api/factory/asks/{id}/answer` (refuses
   ticketless loopback with `403 proof_required` and mints an in-process
   `AnswerProof` for paired devices).
+- To tell a project, `POST /api/factory/projects/{id}/say` takes
+  `{"text":"…"}` and returns `{"ok":true}` when it queues an instruction,
+  including while stopped. It requires a paired-device identity and returns
+  `403 proof_required` to ticketless loopback. It takes an exact project ID
+  (`404` if unknown), refuses empty text or text over 1,000 characters with `400`, and
+  refuses a finished project with `409 already_closed`.
 - **Loopback only (`accessLoopback`):** `GET /api/factory/status`,
   `POST /api/factory/start`, `POST /api/factory/stop`, and
   `POST /api/factory/report`.

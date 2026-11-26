@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 )
 
@@ -282,11 +283,13 @@ func (s SimScenario) validate() error {
 		return fmt.Errorf("no agents and no factory projects")
 	}
 	projects := map[string]bool{}
+	projectNames := map[string]bool{}
 	for _, p := range s.Factory {
 		if p.ID == "" || projects[p.ID] || !slices.Contains([]string{"running", "stopped", "finished"}, p.State) || !validState(p.CoordinatorState) {
 			return fmt.Errorf("invalid or duplicate factory project %q (state %q, coordinator state %q)", p.ID, p.State, p.CoordinatorState)
 		}
 		projects[p.ID] = true
+		projectNames[factory.ProjectName(p.ID, p.Folder)] = true
 	}
 	switch s.Language {
 	case "", "en", "zh":
@@ -342,6 +345,7 @@ func (s SimScenario) validate() error {
 			}
 		}
 	}
+	knownActionTarget := func(alias string) bool { return known(alias) || projectNames[alias] }
 	for _, list := range [][]SimAction{s.Expect.Actions, s.Expect.Forbid} {
 		for _, a := range list {
 			switch a.Kind {
@@ -349,7 +353,7 @@ func (s SimScenario) validate() error {
 			default:
 				return fmt.Errorf("action kind %q: want prompt, keys or interrupt", a.Kind)
 			}
-			if a.Agent != "" && !aliases[a.Agent] {
+			if !knownActionTarget(a.Agent) {
 				return fmt.Errorf("action agent %q is not in the roster", a.Agent)
 			}
 			if a.Kind == ActionPrompt && a.Matches != "" {
@@ -359,7 +363,7 @@ func (s SimScenario) validate() error {
 			}
 		}
 	}
-	if s.Expect.Agent != "" && !aliases[s.Expect.Agent] {
+	if !knownActionTarget(s.Expect.Agent) {
 		return fmt.Errorf("expect.agent %q is not in the roster", s.Expect.Agent)
 	}
 	for _, k := range s.Expect.Skip {

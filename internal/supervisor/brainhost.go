@@ -241,6 +241,9 @@ func (h brainHost) Investigations() []brain.InvestigationInfo {
 // command goes bare, without the trailer or trailing punctuation
 // (withSignOff).
 func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, error) {
+	if id, project := strings.CutPrefix(paneID, factoryPanePrefix); project {
+		return h.sayToProject(ctx, id, text)
+	}
 	row, ok := h.s.store.Get(paneID)
 	if !ok {
 		return "", errors.New("that agent is gone")
