@@ -260,10 +260,11 @@ public struct SeenTracker: Equatable, Sendable {
 
 /// How the live events concern attention.
 public enum AttentionEvents {
-    /// `agent.attention` and `space.muted` mean the state moved: clients
-    /// re-read `/api/state` (debounced, as for `herdr.transition`).
+    /// `agent.attention`, `space.muted` and `factory.changed` mean the state
+    /// moved: clients re-read `/api/state` (debounced, as for
+    /// `herdr.transition`).
     public static func refreshesState(_ type: String) -> Bool {
-        type == "agent.attention" || type == "space.muted"
+        type == "agent.attention" || type == "space.muted" || type == "factory.changed"
     }
 
     /// A question or finish in a muted space does not buzz the phone

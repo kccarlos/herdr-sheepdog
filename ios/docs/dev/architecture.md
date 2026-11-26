@@ -163,6 +163,20 @@ Everything is in SheepdogKit and tested there:
 - The offline demo serves the same fields; `-sheepdogDemoAttention` gives it a
   fixed list (one unread agent) for the tests.
 
+## Factory models and routes
+
+`Factory.swift` (SheepdogKit, `FactoryTests`) mirrors Go's `internal/factory`
+views, with no UI yet (docs/dev/ws-contract.md "Factory",
+docs/dev/design/app-factory.md section 4): `DaemonState.factory`
+(`FactoryProjectHead`, nil from a daemon with no projects),
+`PendingAction.factory` (`FactoryAskMeta` on a `fask-` card), and the reads
+`DaemonClient.factoryProjects()`, `factoryGraph(projectID:)` and
+`factoryAsks()`. Decoding is lenient: an unknown project state reads as
+`.unknown` and a malformed factory key never fails `/api/state`. Unlike the
+other routes, a 404 or 503 here is `DaemonError.rejected` with the daemon's
+words, not "an older daemon". `factory.changed` re-reads `/api/state`
+(`AttentionEvents.refreshesState`).
+
 ## Events
 
 `GET /events` is the app's second input. It carries agent state changes
