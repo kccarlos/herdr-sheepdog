@@ -71,23 +71,15 @@ func (s *Supervisor) refuseFactoryPane(ctx context.Context, paneID string) error
 	if _, ok := s.factoryPane(paneID); ok {
 		return denied
 	}
-	row, ok := s.store.Get(paneID)
+	row, _ := s.store.Get(paneID)
 	if row.Labels["sheepdog.project"] != "" {
 		return denied
 	}
-	if ok && s.cfg.Factory == nil {
-		return nil
-	}
-	agents, err := s.herdr.ListAgents(ctx)
-	if err != nil {
-		return err
-	}
-	if slices.ContainsFunc(agents, func(a herdr.AgentInfo) bool {
-		return a.PaneID == paneID && a.Labels["sheepdog.project"] != ""
-	}) {
+	labels, err := herdr.PaneLabels(ctx, s.herdr, paneID)
+	if labels["sheepdog.project"] != "" {
 		return denied
 	}
-	return nil
+	return err
 }
 
 // FactoryQuestions returns open gated factory asks in creation order.

@@ -193,6 +193,8 @@ type Project struct {
 	CoordErrorTurn     uint64            `json:"coord_error_turn,omitempty"`    // J8: coordinator turn at last go-on tell
 	CoordWakeAt        time.Time         `json:"coord_wake_at,omitempty"`       // J9: oldest delivered wake awaiting a turn
 	CoordWakesInFlight []Wake            `json:"coord_wakes_in_flight,omitempty"`
+	CoordWakeActed     bool              `json:"coord_wake_acted,omitempty"`
+	CoordWakeRetried   bool              `json:"coord_wake_retried,omitempty"`
 	CoordWakeTurn      uint64            `json:"coord_wake_turn,omitempty"`    // J9: coordinator turn when CoordWakeAt was sent
 	CoordLastWakeAt    time.Time         `json:"coord_last_wake_at,omitempty"` // J13: last wake or heartbeat delivered
 	WaitKey            string            `json:"wait_key,omitempty"`           // episode key for J4/J6/J7 wait deduplication

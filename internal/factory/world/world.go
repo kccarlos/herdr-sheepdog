@@ -541,40 +541,43 @@ func agyTrustDrawing(text string) bool {
 	return false
 }
 
-// retryCoordWake looks for evidence that the last turn ended without doing
-// the wake: the CLI interrupted it, or the last submitted prompt was different.
+// retryCoordWake recognizes a CLI cancellation or an input surface where
+// the wake's submitted prompt is missing. A visible wake takes precedence
+// over prompt-shaped output and composer hints.
 func retryCoordWake(cli, clean string) bool {
-	var prompt string
-	switch cli {
-	case "claude":
-		prompt = "❯"
-	case CodexCLI:
-		prompt = "›"
-	case AgyCLI:
-		prompt = ">"
-	default:
+	prompt := map[string]string{"claude": "❯", CodexCLI: "›", AgyCLI: ">"}[cli]
+	if prompt == "" {
 		return false
 	}
 	lines := strings.Split(clean, "\n")
-	if anchor := uiAnchor(cli, lines); anchor >= 0 {
+	anchor := uiAnchor(cli, lines)
+	sawInput := anchor >= 0
+	if sawInput {
 		lines = lines[:anchor]
 	}
 	for i := len(lines) - 1; i >= 0; i-- {
 		line := strings.TrimSpace(lines[i])
-		if cli == CodexCLI && strings.HasPrefix(line, "■ Conversation interrupted") {
-			return true
-		}
-		if cli == "claude" {
+		switch cli {
+		case CodexCLI:
+			if strings.HasPrefix(line, "■ Conversation interrupted") {
+				return true
+			}
+		case AgyCLI:
+			if line == "Request cancelled by user." {
+				return true
+			}
+		case "claude":
 			line = strings.TrimSpace(strings.TrimPrefix(line, "⎿"))
-			if rest, ok := strings.CutPrefix(line, "Interrupted"); ok && strings.HasPrefix(strings.TrimSpace(rest), "· What should Claude do") {
+			if strings.HasPrefix(line, "Interrupted · What should Claude do") {
 				return true
 			}
 		}
-		if text, ok := strings.CutPrefix(lines[i], prompt); ok && strings.TrimSpace(text) != "" {
-			return !strings.HasPrefix(strings.TrimSpace(text), flow.CoordWakePromptPrefix)
+		if text, ok := strings.CutPrefix(lines[i], prompt+" "+flow.CoordWakePromptPrefix); ok && text != "" && text[0] >= '0' && text[0] <= '9' {
+			return false
 		}
+		sawInput = sawInput || (cli != AgyCLI && strings.HasPrefix(lines[i], prompt))
 	}
-	return false
+	return sawInput
 }
 
 // ObserveRun reads rec's terminal and screen from herdr-core and emits the events for one pass (design.md 5, 7.3).

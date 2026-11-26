@@ -178,9 +178,6 @@ func (s *Supervisor) UserRename(ctx context.Context, paneID, name string) (strin
 	if name == "" || len(name) > 60 {
 		return "", fmt.Errorf("%w: a name is 1 to 60 characters", ErrUserAction)
 	}
-	if _, ok := s.store.Get(paneID); !ok {
-		return "", ErrNoSuchAgent
-	}
 	echo, err := s.rename(ctx, paneID, name)
 	if err == nil {
 		s.tellBrain(fmt.Sprintf("the user renamed an agent from the phone: %s", echo))
@@ -192,10 +189,7 @@ func (s *Supervisor) UserRename(ctx context.Context, paneID, name string) (strin
 // orchestrator's interrupt does (Ctrl-C, checked, a second one if the
 // turn still runs).
 func (s *Supervisor) UserInterrupt(ctx context.Context, paneID string) (string, error) {
-	row, ok := s.store.Get(paneID)
-	if !ok {
-		return "", ErrNoSuchAgent
-	}
+	row, _ := s.store.Get(paneID)
 	echo, err := brainHost{s}.Interrupt(ctx, paneID)
 	if err == nil {
 		s.tellBrain(fmt.Sprintf("the user stopped %s's turn from the phone: %s", aliasOr(state.Say(row)), echo))

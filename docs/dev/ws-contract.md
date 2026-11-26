@@ -1238,9 +1238,9 @@ as usual.
   "…"}`. The authority is the user's own tap, so this does not pass the
   orchestrator's approval rail (docs/dev/roles.md "The one rail"); instead every
   input is logged as `web.agent_input {kind, len}` (a prompt's length,
-  never its text) or `{kind, keys}`, and the orchestrator is told in a
-  transcript line ("the user typed a prompt in Auth fix's window: …", "the
-  User pressed esc in Auth fix's window") so its picture stays right. When
+  never its text) or `{kind, keys}`. For regular agents the orchestrator gets
+  a transcript line ("the user typed a prompt in Auth fix's window: …", "the
+  User pressed esc in Auth fix's window"). When
   the keys select one option of the open approval question for that
   agent (the option's own keys or the digit it is listed under), they answer
   it through the tap path (`POST /api/pending/answer`'s
@@ -1252,9 +1252,10 @@ as usual.
   off `blocked` closes the question. A herdr send that fails is `502`.
 
   Coordinator input goes straight to the terminal without creating a roster
-  row, an owner wake, or an answer proof. A blocked coordinator refuses text
-  with `409` and still takes keys for its terminal dialog. The input route
-  also handles a tracked blocked coordinator while the engine catches up.
+  row, a transcript line, an owner wake, or an answer proof. A blocked
+  coordinator refuses text with `409` and still takes keys for its terminal
+  dialog. The input route also handles a tracked blocked coordinator while
+  the engine catches up.
 
 ## Agent actions
 
@@ -1264,7 +1265,8 @@ The tap is the user's own, so these do not pass the words rail that
 guards the orchestrator's writes ([roles.md](roles.md#the-users-own-actions));
 the rails that are not about who asked stay in the supervisor. Errors are
 `{"error": "…"}` in plain words: `400` a bad name, kind or branch, `403` a
-rail (outside the project roots, the runaway cap, the daemon's own pane),
+rail (outside the project roots, the runaway cap, the daemon's own pane,
+or a factory pane for rename, interrupt or close),
 `404` an agent the daemon does not track, `502` herdr failed or cannot
 do it here. Every call is logged as `web.agent_action {action, …}` with
 metadata only (a first prompt's length, never its text), and the

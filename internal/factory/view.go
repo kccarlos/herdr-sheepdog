@@ -172,6 +172,10 @@ func projectAlert(alerts map[string]flow.Alert) *ProjectAlert {
 	return &ProjectAlert{Kind: a.Kind, Cause: a.Cause, Fix: a.Fix}
 }
 
+func currentCoordinator(p flow.Project) bool {
+	return p.RunID != "" && flow.RunLive(p.RunID, p.Run)
+}
+
 func projectHeadOf(s flow.State) ProjectHead {
 	p := s.Project
 	h := ProjectHead{ID: p.ID, Name: ProjectName(p.ID, p.Folder), Goal: p.Goal, Folder: p.Folder,
@@ -181,7 +185,7 @@ func projectHeadOf(s flow.State) ProjectHead {
 	} else if p.Started {
 		h.State = "running"
 	}
-	if flow.RunLive(p.RunID, p.Run) {
+	if currentCoordinator(p) {
 		h.CoordinatorPane = p.RunID
 	}
 	for _, t := range s.Tasks {
@@ -363,42 +367,44 @@ func (e *Engine) ProjectName(id string) string {
 	return cmp.Or(e.projectHeads[id].Name, id)
 }
 
-// Pane describes a terminal named by the factory's saved run records.
+// Pane describes a live terminal named by the factory's saved run records.
 type Pane struct {
-	Name, Role, CLI, State string
-	StateSince             time.Time
-	CurrentCoordinator     bool
+	Name, CLI, State   string
+	StateSince         time.Time
+	CurrentCoordinator bool
 }
 
 func projectPanesOf(s flow.State) map[string]Pane {
 	p, panes := s.Project, map[string]Pane{}
-	add := func(id, role string, r *flow.RunRecord) {
-		info := Pane{Name: ProjectName(p.ID, p.Folder), Role: role}
+	name := ProjectName(p.ID, p.Folder)
+	add := func(id string, r *flow.RunRecord, coordinator bool) {
+		if !flow.RunLive(id, r) {
+			return
+		}
+		info := Pane{Name: name, CurrentCoordinator: coordinator}
 		if r != nil {
 			id = cmp.Or(id, r.Address)
 			info.CLI, info.State, info.StateSince = r.CLI, r.State, r.StatusSince
 		}
-		if id != "" {
-			info.CurrentCoordinator = role == flow.RoleCoordinator && p.Started && !p.Finished &&
-				id == p.RunID && flow.RunLive(id, r)
+		if _, exists := panes[id]; id != "" && (!exists || coordinator) {
 			panes[id] = info
 		}
 	}
 	review := func(r *flow.ReviewRun) {
 		if r != nil {
-			add(r.RunID, r.Role(), r.Run)
+			add(r.RunID, r.Run, false)
 		}
 	}
 	for _, t := range s.Tasks {
 		for _, a := range t.Attempts {
-			add(a.RunID, flow.RoleWorker, a.Run)
+			add(a.RunID, a.Run, false)
 			review(a.Review)
 		}
 	}
 	for _, pr := range p.PlanReviews {
 		review(pr.Run)
 	}
-	add(p.RunID, flow.RoleCoordinator, p.Run)
+	add(p.RunID, p.Run, currentCoordinator(p))
 	return panes
 }
 
@@ -407,12 +413,16 @@ func (e *Engine) Pane(id string) (Pane, bool) {
 	e.initProjectHeads()
 	e.projectHeadsMu.RLock()
 	defer e.projectHeadsMu.RUnlock()
-	for _, panes := range e.projectPanes {
-		if pane, ok := panes[id]; ok {
-			return pane, true
+	var best Pane
+	var project string
+	found := false
+	for key, panes := range e.projectPanes {
+		if pane, ok := panes[id]; ok && (!found || pane.CurrentCoordinator && !best.CurrentCoordinator ||
+			pane.CurrentCoordinator == best.CurrentCoordinator && key < project) {
+			best, project, found = pane, key, true
 		}
 	}
-	return Pane{}, false
+	return best, found
 }
 
 func (e *Engine) publishProjectHead(id string, s flow.State, logLine bool) {

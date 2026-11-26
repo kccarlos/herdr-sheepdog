@@ -880,12 +880,10 @@ J12 keeps the delivered batch in flight until the engine observes its outcome.
 
 | Run observation | In-flight wakes |
 |---|---|
-| Working, blocked, or idle on the delivery turn | Keep the batch in flight. J9 still watches a wake that gets no turn. |
-| Idle on a later turn with a terminal interruption or a different submitted prompt visible | Put the batch back in the queue, once per task and wake key. J12 sends it when the coordinator is idle. |
-| Idle on a later turn with no such evidence | Retire the batch. |
-| Ended on quota, or ended without a later turn | Put the batch back in the queue for the next coordinator. |
-| Ended after a later turn for another reason | Retire the batch. |
-
+| Working, blocked, idle on the delivery turn, or idle with an unreadable screen | Keep the batch in flight. J9 still watches for a wake that gets no turn. |
+| Idle on a later turn with a readable screen and no evidence of a missed wake, a coordinator record, or a turn error | Retire the batch. J8 handles turn errors. |
+| Idle on a later turn with a readable screen and an interruption or CLI input showing no submitted wake | Requeue the batch once for the same coordinator, including when Claude or Agy scrollback or the Codex viewport loses the prompt. If the retry is still unconfirmed, J9 can replace the coordinator with the batch still held. |
+| Ended with a batch still in flight | Requeue after a quota exit, before a later turn, or during J9 recovery. A later turn otherwise retires the batch unless a retry remained unconfirmed. |
 
 **Rotation.** A long coordinator session was 41.5% of day one's Claude cost. J11 gives it a fresh session at an idle moment, with a written handoff.
 

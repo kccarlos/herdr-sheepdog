@@ -2,7 +2,6 @@ package supervisor
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"strings"
 	"sync"
@@ -172,7 +171,7 @@ func (s *Supervisor) rename(ctx context.Context, paneID, name string) (string, e
 	}
 	row, ok := s.store.Get(paneID)
 	if !ok {
-		return "", errors.New("that agent is gone")
+		return "", ErrNoSuchAgent
 	}
 	old := state.Say(row)
 	name = strings.Join(strings.Fields(name), " ")

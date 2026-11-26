@@ -190,7 +190,7 @@ func (e *Engine) deliverWakesLocked(ctx context.Context, id string, s *flow.Stat
 				s.Project.CoordWakesInFlight = append(s.Project.CoordWakesInFlight, w)
 			}
 		}
-		s.Project.CoordWakeTurn = s.Project.Run.Turn
+		s.Project.CoordWakeTurn, s.Project.CoordWakeActed = s.Project.Run.Turn, false
 	}
 	s.Project.Wakes, s.Project.CoordLastWakeAt = s.Project.Wakes[n:], now
 	e.commitLogLocked(id, s, LogLine{By: "engine", Rule: "J12", Asked: keys, Decision: fmt.Sprintf("delivered %d wake(s) to the coordinator", len(keys)), Why: "wakes held and the coordinator is idle"})

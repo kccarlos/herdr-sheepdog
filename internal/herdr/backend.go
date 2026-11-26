@@ -32,3 +32,24 @@ type Backend interface {
 }
 
 var _ Backend = (*Client)(nil)
+
+// PaneLabels reads labels by address, using a single terminal lookup where available.
+func PaneLabels(ctx context.Context, backend interface {
+	ListAgents(context.Context) ([]AgentInfo, error)
+}, paneID string) (map[string]string, error) {
+	if h, ok := backend.(interface {
+		TerminalLabels(context.Context, string) (map[string]string, error)
+	}); ok {
+		return h.TerminalLabels(ctx, paneID)
+	}
+	agents, err := backend.ListAgents(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, a := range agents {
+		if a.PaneID == paneID {
+			return a.Labels, nil
+		}
+	}
+	return nil, nil
+}
