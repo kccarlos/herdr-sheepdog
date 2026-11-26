@@ -42,14 +42,6 @@ button{cursor:pointer}
         <button style="min-height: 44px; padding: 0 18px; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface2}}; color: {{c.ink}}; font-size: {{ f.btn }}px; font-weight: 600">Try again</button>
       </div>
     </sc-if>
-
-    <sc-if value="{{ s.gone }}" hint-placeholder-val="{{ false }}">
-      <div role="alert" style="flex-shrink: 0; border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.line}}; padding: 14px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start">
-        <span style="font-size: {{ f.row }}px; font-weight: 600">notes is gone from Work Mac</span>
-        <span style="font-size: {{ f.small }}px; line-height: 1.4; color: {{c.ink2}}">Its project was removed, so nothing was sent. Your words are still in the box below.</span>
-        <a href="FactoryAgents.dc.html" style="min-height: 44px; display: flex; align-items: center; padding: 0 18px; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface2}}; color: {{c.ink}}; text-decoration: none; font-size: {{ f.btn }}px; font-weight: 600">Back to Agents</a>
-      </div>
-    </sc-if>
     <sc-if value="{{ s.loading }}" hint-placeholder-val="{{ false }}">
       <div role="status" aria-label="Loading notes" style="flex-shrink: 0; display: flex; flex-direction: column; gap: 10px">
         <span style="height: 40px; width: 180px; border-radius: 20px; background: {{c.surface2}}"></span>
@@ -176,7 +168,7 @@ button{cursor:pointer}
   </sc-if>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "ax": {"editor": "boolean", "default": false}, "state": {"editor": "enum", "options": ["running", "told", "stopped", "finished", "coordoff", "stopconfirm", "newgoal", "resumefail", "reopen", "pairagain", "loadfail", "toolong", "gone", "loading", "pairsay"], "default": "running"}, "$preview": {"width": 390, "height": 844}}'>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "ax": {"editor": "boolean", "default": false}, "state": {"editor": "enum", "options": ["running", "told", "stopped", "finished", "coordoff", "stopconfirm", "newgoal", "resumefail", "reopen", "pairagain", "loadfail", "toolong", "loading", "pairsay"], "default": "running"}, "$preview": {"width": 390, "height": 844}}'>
 class Component extends DCLogic {
   renderVals() {
     const light = {"bg": "#FAF8F3", "surface": "#FFFFFF", "surface2": "#F1EEE7", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7", "accent": "#D98718", "accentText": "#8A5700", "blocked": "#D99417", "blue": "#1F5F9E", "green": "#1D6B46", "idle": "#5C6370", "red": "#B42318", "redBg": "#FEF3F2", "redLine": "#F4C7C3", "chevron": "#8E929A", "dash": "#8E8A80", "scrim": "rgba(31,31,34,0.32)", "pop": "0 12px 40px rgba(31,31,34,0.18), 0 0 0 1px #E4E0D7"};
@@ -184,7 +176,7 @@ class Component extends DCLogic {
     const d = !!this.props.dark, ax = !!this.props.ax;
     const c = d ? dark : light;
     const st = this.props.state ?? 'running';
-    const kind = { stopconfirm: 'running', pairagain: 'running', told: 'running', coordoff: 'running', newgoal: 'running', toolong: 'running', pairsay: 'running', gone: 'loadfail', loading: 'loadfail', resumefail: 'stopped', reopen: 'finished' }[st] || st;
+    const kind = { stopconfirm: 'running', pairagain: 'running', told: 'running', coordoff: 'running', newgoal: 'running', toolong: 'running', pairsay: 'running', loading: 'loadfail', resumefail: 'stopped', reopen: 'finished' }[st] || st;
     const btn = (label, aria, danger) => ({ label, aria, border: c.line, color: danger ? c.red : c.ink });
     const actions = {
       running: [btn("Stop", "Stop this project"), btn("New goal", "New goal")],
@@ -197,7 +189,6 @@ class Component extends DCLogic {
       told: ["Told the notes factory.", c.green, 600],
       toolong: ["", c.ink2, 400],
       pairsay: ["Not sent: Work Mac no longer knows this phone. Pair this phone again in Settings ▸ Work Mac, then send again.", c.red, 600],
-      gone: ["", c.ink2, 400],
       coordoff: ["The notes coordinator is not running. It gets this when it is back.", c.ink2, 400],
       stopped: ["notes is stopped. It gets this when you resume it.", c.ink2, 400],
       finished: ["notes is finished. Give it a new goal.", c.ink2, 400]
@@ -209,7 +200,7 @@ class Component extends DCLogic {
       dot: { running: c.blue, stopped: c.idle, finished: c.green, loadfail: c.blue }[kind],
       counts: { running: "3 working · 1 waiting on you · 9 of 14 done", stopped: "1 waiting on you · 9 of 14 done", finished: "14 of 14 done", loadfail: "" }[kind],
       coordBtn: kind === 'running' && st !== 'coordoff',
-      loadfail: st === 'loadfail', gone: st === 'gone', loading: st === 'loading', board: kind !== 'loadfail', actions,
+      loadfail: st === 'loadfail', loading: st === 'loading', board: kind !== 'loadfail', actions,
       oneLine: !ax && st !== 'toolong', areaEmpty: ax && st !== 'toolong', toolong: st === 'toolong',
       barNote: kind === 'stopped' || kind === 'finished',
       barNoteText: kind === 'stopped' ? "Stopped. No agent is running. Resume goes on with the same goal." : "Finished. To go on, reopen it with a new goal.",

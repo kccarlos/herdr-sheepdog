@@ -843,11 +843,19 @@
   },
   {
    "id": "FactoryWindow",
-   "title": "Factory — the coordinator's window: a read-only snapshot",
+   "title": "Factory — the coordinator's window: live, with the key bar and a box to type in (D10)",
    "file": "FactoryWindow.dc.html",
    "png": "png/FactoryWindow.png",
    "w": 390,
    "h": 844
+  },
+  {
+   "id": "FactoryWindowStates",
+   "title": "Factory — the coordinator's window: not running, stopped, and dark",
+   "file": "FactoryWindowStates.dc.html",
+   "png": "png/FactoryWindowStates.png",
+   "w": 1330,
+   "h": 962
   },
   {
    "id": "FactoryVoice",

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Sheepdog — the coordinator's window: a read-only snapshot</title>
+<title>Sheepdog — the coordinator's window: live, and you can type in it</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -13,60 +13,99 @@
 <style>
 body{margin:0}
 a{color:inherit;text-decoration:none}
-button{font:inherit;cursor:pointer}
+button,input{font:inherit}
+button{cursor:pointer}
 </style>
 </helmet>
 <div style="width: 390px; height: 844px; display: flex; flex-direction: column; overflow: hidden; background: {{c.bg}}; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
   <div style="height: 54px; flex-shrink: 0"></div>
   <header style="height: 52px; flex-shrink: 0; display: grid; grid-template-columns: 52px minmax(0, 1fr) 52px; align-items: center; padding: 0 4px; border-bottom: 1px solid {{c.line}}">
-    <a href="FactoryProject.dc.html" aria-label="Back to notes" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: {{c.ink}}; text-decoration: none;"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg></a>
-    <div style="display: flex; flex-direction: column; align-items: center; min-width: 0">
-      <span style="display: flex; align-items: center; gap: 6px; font-size: 17px; font-weight: 600"><span style="width: 8px; height: 8px; border-radius: 4px; background: {{c.blue}}"></span>notes coordinator</span>
-      <span style="font-size: 12px; color: {{c.ink2}}">claude · claude-opus-5-5 · high</span>
-    </div>
+    <a href="FactoryProject.dc.html" aria-label="Back to notes" style="width: 44px; height: 44px; display: flex; align-items: center; justify-content: center; color: {{c.ink}}"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg></a>
+    <h1 aria-label="{{ s.titleAria }}" style="margin: 0; display: flex; align-items: center; justify-content: center; gap: 6px; min-width: 0; font-size: 17px; font-weight: 600"><span aria-hidden="true" style="flex-shrink: 0; width: 8px; height: 8px; border-radius: 4px; background: {{ s.dot }}"></span><span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis">notes · Coordinator</span></h1>
     <span></span>
   </header>
-  <div role="note" style="flex-shrink: 0; display: flex; align-items: flex-start; gap: 8px; padding: 9px 14px; border-bottom: 1px solid {{c.line}}; background: {{c.surface2}}; font-size: 12.5px; line-height: 17px; color: {{c.fill2}}">
-    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>
-    <span>View only. To tell the coordinator something, use the box on the notes page. An ask is answered on its card.</span>
-  </div>
-  <main aria-label="The coordinator's terminal, a snapshot" style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 10px 14px; display: flex; flex-direction: column; font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; line-height: 18px">
-    <sc-for list="{{ lines }}" as="l" hint-placeholder-count="14">
-      <div style="white-space: pre-wrap; color: {{ l.color }}">{{ l.t }}</div>
-    </sc-for>
-  </main>
-  <div role="status" style="flex-shrink: 0; padding: 10px 16px 34px; border-top: 1px solid {{c.line}}; display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: {{c.ink2}}">
-    <span style="width: 7px; height: 7px; border-radius: 4px; background: {{c.green}}"></span>Updated 2 s ago
-  </div>
+
+  <sc-if value="{{ s.live }}" hint-placeholder-val="{{ true }}">
+    <main aria-label="The notes coordinator's terminal, live" style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 12px 14px; display: flex; flex-direction: column; justify-content: flex-end; font-family: 'SF Mono', 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px; line-height: 18px">
+      <sc-for list="{{ lines }}" as="l" hint-placeholder-count="20">
+        <div style="white-space: pre-wrap; color: {{ l.color }}; font-weight: {{ l.weight }}">{{ l.t }}</div>
+      </sc-for>
+    </main>
+
+    <a href="FactoryProject.dc.html" aria-label="T10 is waiting on your answer. Answer it on its card on the notes page." style="flex-shrink: 0; margin: 0 10px 8px; min-height: 44px; box-sizing: border-box; padding: 8px 12px; border-radius: 12px; background: {{c.askBg}}; border: 1px solid {{c.blocked}}; display: flex; align-items: center; gap: 8px; font-size: 14px; line-height: 19px; color: {{c.ink}}">
+      <span style="flex-grow: 1; min-width: 0"><b style="font-weight: 600">T10 is waiting on your answer.</b> Answer it on its card; typing here is not an answer.</span>
+      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; color: {{c.chevron}}"><path d="M9 6l6 6-6 6"></path></svg>
+    </a>
+
+    <div role="toolbar" aria-label="Keys" style="flex-shrink: 0; display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 6px; padding: 0 10px 8px">
+      <button aria-label="Escape" style="height: 40px; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-family: 'SF Mono', ui-monospace, monospace; font-size: 13px; font-weight: 500">esc</button>
+      <button aria-label="Tab" style="height: 40px; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 16px">⇥</button>
+      <button aria-label="Up" style="height: 40px; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 16px">↑</button>
+      <button aria-label="Down" style="height: 40px; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 16px">↓</button>
+      <button aria-label="Return" style="height: 40px; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 16px">⏎</button>
+      <button aria-label="Type in the terminal" style="height: 40px; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; display: flex; align-items: center; justify-content: center"><svg width="19" height="19" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="12" rx="2"></rect><path d="M7 10h.01M11 10h.01M15 10h.01M7 14h10"></path></svg></button>
+      <button aria-label="More keys" style="height: 40px; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; display: flex; align-items: center; justify-content: center"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="5.5" cy="12" r="1.6"></circle><circle cx="12" cy="12" r="1.6"></circle><circle cx="18.5" cy="12" r="1.6"></circle></svg></button>
+    </div>
+
+    <div style="flex-shrink: 0; display: flex; align-items: center; gap: 8px; padding: 0 10px 34px">
+      <label style="flex-grow: 1; min-width: 0; height: 40px; border-radius: 20px; border: 1px solid {{c.line}}; background: {{c.surface}}; display: flex; align-items: center; padding: 0 6px 0 14px; box-sizing: border-box">
+        <input type="text" placeholder="Ask the notes coordinator…" aria-label="Message to the notes coordinator" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; font-size: 16px; outline: none; color: {{c.ink}}">
+        <button aria-label="Send" style="width: 30px; height: 30px; border-radius: 15px; border: 0; background: {{c.line}}; color: {{c.surface}}; display: flex; align-items: center; justify-content: center"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"></path></svg></button>
+      </label>
+    </div>
+  </sc-if>
+
+  <sc-if value="{{ s.off }}" hint-placeholder-val="{{ false }}">
+    <main aria-label="{{ s.offTitle }}" style="flex-grow: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 0 32px 80px; text-align: center">
+      <svg width="40" height="40" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="{{c.ink2}}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"></rect><path d="M7 9l3 3-3 3M13 15h4"></path></svg>
+      <h2 style="margin: 0; font-size: 20px; line-height: 25px; font-weight: 600">{{ s.offTitle }}</h2>
+      <p style="margin: 0; font-size: 15px; line-height: 21px; color: {{c.ink2}}">{{ s.offBody }}</p>
+      <a href="FactoryProject.dc.html" style="margin-top: 4px; min-height: 44px; padding: 0 22px; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 15px; font-weight: 600; display: flex; align-items: center">Back to notes</a>
+    </main>
+  </sc-if>
 </div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "$preview": {"width": 390, "height": 844}}'>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "state": {"editor": "enum", "options": ["running", "coordoff", "stopped"], "default": "running"}, "$preview": {"width": 390, "height": 844}}'>
 class Component extends DCLogic {
   renderVals() {
-    const light = {"bg": "#FAF8F3", "surface2": "#F1EEE7", "ink": "#1F1F22", "ink2": "#6B6E75", "fill2": "#5C5F66", "line": "#E4E0D7", "blue": "#1F5F9E", "green": "#1D6B46"};
-    const dark = {"bg": "#16181C", "surface2": "#26292F", "ink": "#F5F2EA", "ink2": "#A3A7AF", "fill2": "#A3A7AF", "line": "#2E3138", "blue": "#6AA8EB", "green": "#5CC792"};
+    const light = {"bg": "#FAF8F3", "surface": "#FFFFFF", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7", "blue": "#1F5F9E", "green": "#1D6B46", "idle": "#5C6370", "blocked": "#D99417", "askBg": "#FDF1DC", "chevron": "#8E929A"};
+    const dark = {"bg": "#16181C", "surface": "#1F2126", "ink": "#F5F2EA", "ink2": "#A3A7AF", "line": "#2E3138", "blue": "#6AA8EB", "green": "#5CC792", "idle": "#9AA1AD", "blocked": "#F0A92A", "askBg": "#2E2615", "chevron": "#8E929A"};
     const d = !!this.props.dark;
     const c = d ? dark : light;
+    const st = this.props.state ?? 'running';
     const raw = [
-      ["Wake: owner said (typed): \"skip the export task\"", "ink"],
-      ["● factory task drop T9", "ink"],
-      ["  --why \"owner said to skip the export\"", "ink2"],
-      ["  ⎿ T9 dropped", "ink2"],
-      ["", "ink"],
-      ["Wake: event:review T8, changes asked", "ink"],
-      ["● factory task send-back T8", "ink"],
-      ["  --why \"the tag index must be", "ink2"],
-      ["  case-insensitive\"", "ink2"],
-      ["  ⎿ T8 back to implementing", "ink2"],
-      ["", "ink"],
-      ["Wake: event:ask T10 open", "ink"],
-      ["  Delete the old notes table?", "ink2"],
-      ["  waiting on the owner", "ink2"],
-      ["", "ink"],
-      ["Idle. Next wake on a change.", "ink2"]
+      ["● factory task send-back T8", "ink", 400],
+      ["  --why \"the tag index must be", "ink2", 400],
+      ["  case-insensitive\"", "ink2", 400],
+      ["  ⎿ T8 back to implementing", "ink2", 400],
+      ["", "ink", 400],
+      ["● factory ask T10 \"Delete the old notes", "ink", 400],
+      ["  table in the migration?\"", "ink", 400],
+      ["  ⎿ waiting on the owner", "ink2", 400],
+      ["", "ink", 400],
+      ["> Why does T10 want to drop the old table?", "ink", 600],
+      ["", "ink", 400],
+      ["● The import writes to notes_v2. Only the", "ink", 400],
+      ["  export read the old table, and the export", "ink", 400],
+      ["  task (T9) was dropped, so nothing reads it", "ink", 400],
+      ["  after T10. Keeping it means a second", "ink", 400],
+      ["  migration later. Your call, on its card.", "ink", 400],
+      ["", "ink", 400],
+      ["> █", "ink", 400]
     ];
-    const lines = raw.map((l) => ({ t: l[0] === "" ? " " : l[0], color: l[1] === "ink2" ? c.ink2 : c.ink }));
-    return { c, lines };
+    const col = { ink: c.ink, ink2: c.ink2, green: c.green };
+    const lines = raw.map((l) => ({ t: l[0] === "" ? " " : l[0], color: col[l[1]], weight: l[2] }));
+    const off = st !== 'running';
+    const s = {
+      live: !off, off,
+      dot: off ? c.idle : c.blue,
+      titleAria: off ? "notes coordinator, not running" : "notes coordinator, running",
+      offTitle: st === 'stopped' ? "notes is stopped" : "The notes coordinator is not running",
+      offBody: st === 'stopped'
+        ? "No coordinator runs while a project is stopped, so there is nothing to type into. Resume notes on its page; it goes on with the same goal."
+        : "The factory starts a new one on its next change, and this window comes back with it. To tell it something now, use the box on the notes page; it gets it when it is back."
+    };
+    return { c, s, lines };
   }
 }
 </script>

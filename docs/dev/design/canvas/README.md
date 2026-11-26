@@ -50,8 +50,9 @@ is re-exported after every change.
   revised after design review 1. Boards: the project head and its states
   (`FactoryHead`, `FactoryHeadStates`), the ask card and its four kinds
   (`FactoryAskCard`, `FactoryAskCardStates`), Agents (`FactoryAgents…`), the project board (`FactoryProject…`,
-  `FactoryProjectActions`), the task view (`FactoryTask`), the read-only
-  coordinator window, the iPad list and graph (`FactoryIPad`,
+  `FactoryProjectActions`), the task view (`FactoryTask`), the coordinator's
+  live window that the owner can type in (`FactoryWindow`, decision D10)
+  with its not-running states (`FactoryWindowStates`), the iPad list and graph (`FactoryIPad`,
   `FactoryIPadBoard…`), Settings and models (`FactorySettings`,
   `FactoryModels`, `FactorySettingsStates`), new project
   (`FactoryNewProject…`), voice (`FactoryVoice`, `FactoryVoiceWhy`) and the
@@ -63,6 +64,9 @@ is re-exported after every change.
   `FactoryOverrideCard` (now a kind of `FactoryAskCard`) and the dark
   copies `FactoryAskDark`, `FactoryWindowDark`, `FactoryTaskDark`,
   `FactoryNewProjectDark`, `FactoryIPadDark`; after review 2 `FactoryAsk`
-  and `FactoryStatesDark`. Their PNGs were rendered from
+  and `FactoryStatesDark`. On 2026-11-25 `FactoryWindow` was redrawn
+  from a read-only snapshot to the live window (D10), `FactoryWindowStates`
+  was added, and the unused `gone` state left `FactoryProject`. Their PNGs
+  were rendered from
   the board sources in headless Chrome with the canvas runtime, not
   exported from the canvas.
