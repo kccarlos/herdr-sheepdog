@@ -1,10 +1,11 @@
 # The factory in the app and in voice: integration design
 
-Status: step 1 of 2, revision 7 (2026-11-25). Revision 4 was accepted
-after four rounds of independent review; revision 5 applied the owner's
-answers to the decisions, revision 6 corrected it after a fifth review,
-and revision 7 closes the gaps the first review of the boards found. This
-page is the integration design only; the boards are Part 5 of the
+Status: step 1 of 2, revision 10 (2026-11-25). Revision 4 was accepted
+after four rounds of independent review; revisions 5 and 6 applied the
+owner's answers and a fifth review; revisions 7 to 9 follow the board
+reviews and D10; revision 10 settles the gaps the implementation split
+found and orders the PRs (sections 10 and 11). This page is the
+integration design only; the boards are Part 3 of the
 [design canvas](canvas/README.md).
 
 Words are the [glossary](../glossary.md)'s. "Owner" is the user. The
@@ -23,7 +24,9 @@ sample project is called `notes`.
 | D7 | No separate reply mechanism. `say_reply` is dropped: after an instruction the owner hears a confirmation, sees asks as cards, and asks "what did it do, and why?" through D6. | OK |
 | D8 | **The phone can do everything `/factory` can**: stop, resume, new goal, reopen, settings with models per role, and new project. Every route it needs is already open to a paired device, and every proof and read-back the daemon requires stays in code. | asked for |
 | D9 | Per-worker narration stays off. A stuck worker is the engine's to handle and is not shown as a needs-you card. | OK |
-| D10 | **The coordinator's window is live and the owner can type in it** (owner, 2026-11-25: "this one is a must"), so the owner can ask the coordinator a clarifying question before answering its ask. It is the live terminal with an input box, as for an ordinary agent, offered only while a coordinator runs. Typing there is the owner's own hands: it is never an ask's answer, which still needs a proved tap or a live voice answer. Worker and reviewer windows stay snapshot and read-only. **Later (wanted, not v1):** a "clarify" box on the ask card itself, with the coordinator's answer written onto the card and spoken (section 6.7). | asked for |
+| D10 | **The coordinator's window is live and the owner can type in it** (owner, 2026-11-25: "this one is a must"), so the owner can ask the coordinator a clarifying question before answering its ask. It is the live terminal with an input box, as for an ordinary agent, offered only while a coordinator runs. Typing there is the owner's own hands: it is never an ask's answer, which still needs a proved tap or a live voice answer. Worker and reviewer windows are not in the app's first version (section 4). **Later (wanted, not v1):** a "clarify" box on the ask card itself, with the coordinator's answer written onto the card and spoken (section 6.7). | asked for |
+| D11 | **A finished project's settings stay editable on the phone**, with the same read-back ask as a running one: the owner sometimes gives a finished project a new goal and may change models or parallelism first. `Engine.ProposeSetting` already accepts a proposal on a stopped or finished project. | decided |
+| D12 | **Another computer's project opens its board directly**, against that computer's connection, with no "Talk to <computer>" step. | decided |
 
 ## Questions that remain for the owner
 
@@ -207,7 +210,8 @@ it moves into the daemon so every surface agrees.
   because the spoken name is read from the row first; it must be announced
   as "the notes factory".
 - Names are unique per computer at best. Where the app lists projects of
-  several computers, it shows the computer's label, as it does for agents.
+  several computers, it shows the computer's label, as it does for agents,
+  and a tap opens that project's board directly (D12).
 
 ## 4. Where the grouping comes from (D3)
 
@@ -236,15 +240,33 @@ rows were gone.
 | The coordinator's screen | the screen reads, with the second lookup below | the lookup |
 
 **The `factory` list in `/api/state`** (this settles what earlier
-revisions left to the boards). One entry per project: id, name, state,
-counts, folder, the coordinator's pane or none, and the open alert's cause
-and fix when there is one.
+revisions left to the boards). One entry per project, with these keys and
+no others: `id`, `name`, `goal`, `state` (the project view's word:
+running, stopped or finished), `counts` (the project view's map),
+`folder`, `coordinator_pane` (left out when no coordinator runs) and
+`alert` (`{kind, cause, fix}`, left out when none is open). A project can
+hold several alerts (`flow.Project.Alerts` is a map); the entry shows one:
+the stopping alert (`flow.StoppingAlert`), else `agents_down`, else the
+first by key. The same `alert` goes on the project view. The keys are
+written into [ws-contract.md](../ws-contract.md) with the code.
 
 - It is built from the same in-memory read the screen lookup below needs,
   **not** from `Projects()`, which loads every project's state file on
   each call. `/api/state` is refetched on every event burst.
 - So the app never polls for heads: they arrive with the state it already
   refetches. The project's page and its graph are read when opened.
+- **What makes the app refetch.** The app re-reads `/api/state` on
+  `herdr.transition`, `agent.attention` and `space.muted`
+  (`AttentionEvents.refreshesState`), and the engine logs none of these
+  when a project starts, stops, finishes, replaces its coordinator, moves a
+  task or opens or clears an alert. So the engine logs one new event,
+  `factory.changed` `{project}`, after it writes a project's state, at
+  most once per project every 2 s, and the app adds it to
+  `refreshesState`. It is logged by the engine (`logEvent`), not sent on
+  `Changes()`, whose buffer drops when full and must keep carrying asks.
+  It is not a notification: only `pending.created` and `herdr.transition`
+  make one (`internal/app/mutelog.go`, the Mac's notification service),
+  and nothing pushes it.
 - Installed app builds ignore the unknown key.
 
 **What a row shows, and what it does not:**
@@ -255,12 +277,16 @@ and fix when there is one.
   not on rows**; they are in the task view, where `TaskView.model` already
   serves the model.
 - **No "idle" or "working" for the coordinator.** The head says running or
-  not running; the snapshot window shows the rest. The engine's view sends
+  not running; the live window shows the rest. The engine's view sends
   no such word today, and none is added.
 - **The Coordinator button shows only when a coordinator runs**, that is
   when the entry has a coordinator pane. A stopped or finished project has
   no terminal and the screen read accepts only a pane the engine names, so
-  there is no window to open and no empty window state.
+  there is no window to open. If the coordinator goes while its window is
+  open (it is replaced, or the project stops), the window shows why in
+  place of the terminal, with no key bar and no box: the
+  coordinator-not-running sentence of 6.1, or "notes is stopped" with
+  Resume on the project's page (board `FactoryWindowStates`).
 - **Why the coordinator is not running.** The engine already records an
   alert with a cause and a fix (`flow.Alert`; for example cause "claude
   coordinator is signed out", fix "sign in to claude at this Mac"; also no
@@ -270,6 +296,24 @@ and fix when there is one.
 - **Last decision and why in the task view** come from the same selection
   as the board text (5.3), exposed on `TaskView`, so the phone and the
   orchestrator share one piece of code.
+- **The new `TaskView` keys.** `TaskView` has `model` and `terminal` but
+  no CLI. It gains `run_role`, `run_cli` and `run_started_at` (from the
+  run record, left out when no run is live) and `last_actor_decision`
+  `{by, decision, why, at}`, where `at` is the log line's time, which the
+  task view shows ("Today, 11:05"). The existing `last_rule` and
+  `last_decision` stay for `/factory`.
+- **The kind and task on a factory ask card.** A `fask-` question card
+  carries only the question, the options and the command today. Its
+  `PendingView` gains an optional `factory` object, `{project, task,
+  kind}`, filled from the `flow.Ask` the bridge already reads, and left
+  out for every other card. That is smaller than having the app join
+  `GET /api/factory/asks`. The read-back's new and current values are in
+  the question text already.
+- **The blocked coordinator is shown once.** Its real row stays in
+  `agents` for older app builds. The new app leaves out of the ordinary
+  agents any row whose pane is a `factory` entry's `coordinator_pane`,
+  draws its dialog on that head, and counts it once in Needs you and the
+  badge.
 - **Badge and Live Activity: unchanged in the first version.** The Agents
   badge counts question cards and blocked agents as today (an open ask and
   a stuck coordinator are already among them). Projects add nothing to the
@@ -295,7 +339,8 @@ engine names it: a project's coordinator run, or a task's live run.
   pane, send keys, interrupt, close or rename it, and the live terminal
   attach, each do their own table lookup and are not changed for runs.
   They keep refusing a worker or reviewer pane with no row.
-- **So a worker's or reviewer's window is the snapshot window.** On
+- **So a worker's or reviewer's window, when the app offers one, is a
+  snapshot window.** On
   herdr-core the app's agent window is the live terminal, whose attach
   needs a row. The boards must not draw a live terminal for a worker or
   reviewer.
@@ -304,6 +349,14 @@ engine names it: a project's coordinator run, or a task's live run.
   coordinator pane, found through the same engine lookup (the project
   entry's coordinator pane), and nothing else the engine names. Close,
   rename and interrupt stay refused for it: the engine owns its life.
+  **They are refused in code, not by the missing row.** `UserRename`,
+  `UserInterrupt` and `UserClose` check only `state.Store`, and a
+  blocked coordinator has a row there (`IsFactoryQuiet` is false for a
+  coordinator going to `blocked`), so on `main` all three accept its pane
+  while it is blocked. Each refuses a pane labelled `sheepdog.project` or
+  named by the engine, blocked or not, and a test pins the blocked case.
+  The window's key bar has no Ctrl+C; that is a choice of the app, not a
+  rail (section 12).
   Typed text is the owner's own hands, as in an ordinary agent's window;
   it is not logged as an owner wake and can never answer an ask.
 - **In the app's first version only the coordinator's window is offered.**
@@ -357,9 +410,11 @@ coordinator has a real row with its own alias and a pending prompt. Then:
 
 **A dialog option that asks for free text** (Claude's "No, and tell Claude
 what to do differently") is answered as the key it is: "No". Nothing on
-the head types into the coordinator's terminal, and its window is view
-only. What to do instead goes in the project's text box (6.2) or is said
-by voice; the coordinator gets it as an owner wake when it is next free.
+the head, and nothing the orchestrator does, types into the coordinator's
+terminal. What to do instead goes in the project's text box (6.2) or is
+said by voice, and the coordinator gets it as an owner wake when it is
+next free; or the owner types it in the coordinator's live window (D10,
+section 4), which is the owner's own hands and not a wake.
 The card says so in one line. A factory ask has no free-text answer
 either: an ask is a question with a fixed list of options (`flow.Ask`),
 and an answer must be one of them.
@@ -780,6 +835,8 @@ Notes:
   daemon wrote it. Fixes that are commands (`run: …`) are run in a
   terminal on the Mac; the phone offers Copy and "Check again", not a Run
   button.
+- **Settings stay editable on a stopped or finished project (D11)**, with
+  the same read-back ask.
 - **The models rule stays in code:** reviewers must differ from the
   worker, and a CLI a role cannot launch is refused, by the daemon, with
   its sentence shown under the row.
@@ -815,19 +872,21 @@ tools run only in the owner's turn.
 | The project name, and its use in ask lines, the pseudo-pane's name, the blocked coordinator's name, what voice stop and start say back, push titles | `internal/factory/view.go`, `internal/supervisor` |
 | The coordinator's pane on the project view; one read on the `Factory` interface: is this pane a run of a started project | `internal/factory`, `internal/supervisor/factory.go` |
 | The screen reads (`Screen`, `ScreenANSI`, and through them the `/ws` subscription) accept a pane the engine names, read-only | `internal/supervisor/window.go` |
+| The coordinator's live attach and input accept its pane; rename, interrupt and close refuse every factory pane, blocked or not | `internal/web/term.go`, `internal/supervisor/window.go`, `internal/supervisor/useractions.go` |
+| The `factory.changed` event | `internal/factory`; the app's `AttentionEvents` |
 | The muted marker on factory-quiet transitions | `internal/app/mutelog.go` |
 | A fake `Factory` in the eval simulator | `internal/inject`, `internal/eval` (neither has any factory code today) |
 | The synthetic project row; the blocked coordinator merged into it; the helper of 5.2; the board text of 5.3 | `internal/supervisor/brainhost.go`, `internal/brain/tools.go` |
 | `prompt` on a project as `Say`; the heard-words parameter; owner wakes first; the device `say` route; one sentence in `coordinator.md` | `internal/supervisor`, `internal/factory`, `internal/web` |
 | `investigate` on a project row: a target that is not an agent row (the project's folder, name and log path from the engine); each task's last decision and why in the board text | `internal/supervisor/investigate.go`, `internal/supervisor/factory.go`, `internal/factory/view.go` |
-| The `factory` list in `/api/state`; role and start time on a task's run; the last decision and why on `TaskView`; the open alert's cause and fix on the project view | `internal/web`, `internal/factory/view.go`, `internal/supervisor/factory.go` |
-| The app: the permanent project head in Agents, the board, the task view, the coordinator's snapshot window, the text box, stop, resume, new goal, reopen, settings and models, new project, the states | `ios/`; drawn in step 2 |
+| The `factory` list in `/api/state`; the run's role, CLI and start time and the last decision on `TaskView`; the open alert on the project view; the `factory` object on a `fask-` card | `internal/web`, `internal/factory/view.go`, `internal/supervisor/factory.go` |
+| The app: the permanent project head in Agents, the board, the task view, the coordinator's live window, the text box, stop, resume, new goal, reopen, settings and models, new project, the states | `ios/`; drawn in step 2 |
 
 **Left out, or later**
 
 - Any filter on the agent table, and any factory row in it.
 - A needs-you card for a stuck worker; worker and reviewer windows in the
-  app; input on any run's window.
+  app, and input on them.
 - Reading the coordinator's terminal through the orchestrator.
 - A project name in voice stop and start.
 - `say_reply`, dropped. Asking the coordinator's own session (6.6), later.
@@ -846,37 +905,43 @@ tools run only in the owner's turn.
   under the same names for this design, so they are replaced in place,
   not removed.
 
-## 10. Plan (provisional)
+## 10. Plan
 
-The order and the PR split are settled after the decisions above are. In
-outline, daemon first, none of it waiting for the boards:
+Reproduced on `main` first (2026-11-25): a daemon built at v0.1.31 ran a
+two-task project with agy in every role, and no worker or reviewer ever
+appeared in `agents`; the flat list the owner saw is v0.1.30 behaviour.
 
-- **Done: reproduce on `main`. Result (2026-11-25): clean.** A daemon
-  built from `main` at v0.1.31 ran a two-task project on the test
-  repository with agy coordinator, workers and reviewers; `GET /api/state`
-  was sampled every 15 s through implementing and two review rounds per
-  task. No worker or reviewer ever appeared in `agents`; the coordinator
-  appeared in one sample, while blocked. The flat list the owner saw is
-  v0.1.30 behaviour.
-- The project name everywhere; the muted marker; the coordinator's pane
-  on the project view; the read-only screen lookup.
-- The eval simulator learns the factory.
-- The project row, its helper, the board text. Roster wording is held to
-  the scale-ten bar of [eval/README.md](../eval/README.md).
-- `Say` behind `prompt`, the device `say` route, the `coordinator.md`
-  sentence with its own evidence.
-- `investigate` on a project row with its default source, with the
-  loopback reach test on the Codex backend; eval scenarios for choosing
-  `investigate` or `prompt` on a project.
-- The app, after the boards. Parity (section 8) needs no daemon work. If
-  the boards need an order: stop, resume and the text box; then new goal
-  and reopen; then settings; then new project.
-- Later, each on its own: the coordinator session fork (6.6); a remove or
-  archive for projects.
-- Docs: [factory.md](../../factory.md), [iphone-app.md](../../iphone-app.md),
-  [safety.md](../../safety.md), [ws-contract.md](../ws-contract.md),
-  [roles.md](../roles.md),
-  [ios architecture](../../../ios/docs/dev/architecture.md).
+The PRs, in order. Each one updates the docs its code changes, so there
+is no docs PR at the end. Sizes are net lines without tests.
+
+| # | PR | After | Size |
+|---|---|---|---|
+| 1 | `feat(factory): project names, the factory list in /api/state, factory.changed, and the TaskView and ask-card keys` (with the muted marker; keys into ws-contract.md) | — | ~250 |
+| 2 | `feat(window): read-only run screens, the coordinator's live window, and factory panes refused for rename, interrupt and close` | 1 | ~140 |
+| 3 | `test(eval): a fake factory in the eval simulator` | 1 | ~220 |
+| 4 | `feat(brain): project rows, the tool helper, and board text in read_screen` (golden zero-project roster; scale-ten bar) | 1, 3 | ~250 |
+| 5 | `feat(factory): Say behind prompt, the device say route, owner wakes first, and the coordinator prompt sentence` | 4 | ~210 |
+| 6 | `feat(supervisor): investigate on a project from its record` (with the Codex loopback check) | 4, 5 | ~150 |
+| 7 | `feat(ios): factory models and routes in SheepdogKit` | 1; 5's route | ~260 |
+| 8 | `feat(ios): project heads in Agents, factory ask cards, and the Stopped section` | 7 | ~260 |
+| 9 | `feat(ios): the project board, the text box, stop and resume, and the coordinator's window` | 2, 5, 8 | ~275 |
+| 10 | `feat(ios): the task view, new goal and reopen` | 9 | ~200 |
+| 11 | `feat(ios): settings and models per role` | 9 | ~290 |
+| 12 | `feat(ios): new project from the + menu, with start checks` | 8, 11 | ~280 |
+| 13 | `feat(ios): the iPad list and graph` | 9, 10 | ~270 |
+
+2 and 3 run side by side after 1; 7 runs beside 3 to 6 once 1's keys are
+in ws-contract.md.
+
+**Deleted or deferred**, after asking of each PR what can go:
+
+- The split's separate docs PR: each PR carries its own docs.
+- The worker and reviewer snapshot sheet in 10: no worker window in v1.
+- In 1, the in-memory snapshot cache, unless the first check of section 12
+  finds that the engine does not hold project states in memory.
+- 13 can wait: until it lands, the iPad shows the phone's board.
+- Later, each on its own: the coordinator session fork (6.6), clarify on
+  the ask card (6.7), a remove or archive for projects.
 
 ## 11. The reviews, and what changed
 
@@ -957,6 +1022,21 @@ spec's, each checked in code.
 | A dialog option that needs typed text | 5.1: answered as its key; the text goes in the project's text box. An ask has fixed options only. |
 | Badge and Live Activity | Section 4: unchanged in the first version. |
 
+**The implementation split** (revision 10): the gaps another model found
+while splitting the work into PRs, each checked in code.
+
+| Gap | Answer |
+|---|---|
+| Stale read-only wording; header revision; the board drew model and effort | Header, D10, 4, 5.1, 9; the boards: `FactoryWindow` redrawn, `FactoryWindowStates` added. |
+| Nothing makes the app refetch on a factory change | Section 4: `factory.changed`, logged by the engine, no notification. |
+| The `factory` list's keys, `goal` missing, which alert | Section 4: the keys pinned, `goal` added, the alert order. |
+| `TaskView` has no CLI and the decision no time | Section 4: `run_role`, `run_cli`, `run_started_at`, `last_actor_decision.at`. |
+| A factory ask card has no kind or task | Section 4: `factory` on `PendingView`. |
+| The blocked coordinator twice in the app | Section 4: shown once, on its head. |
+| Rename, interrupt and close accept a blocked coordinator today | Section 4: refused in code for every factory pane. |
+| Finished projects' settings; another computer's project | D11, D12. |
+| The PR order | Section 10. |
+
 ## 12. Not verified
 
 - Whether the engine holds every project's state in memory between
@@ -971,7 +1051,6 @@ spec's, each checked in code.
   directory (the later step of 6.6 only).
 - How large a real project's log gets, and whether a read-only agent finds
   a task's lines in it quickly.
-- Proposing a setting on a stopped or finished project.
 - What a `rule` read-back ask looks like as a question card in the app
   today.
 - What `GET /api/spaces` returns when herdr-core runs but no space is
@@ -985,3 +1064,9 @@ spec's, each checked in code.
   daemon on v0.1.30; nobody looked at the phone.
 - `Say` on a stopped project end to end: the code keeps the wake; there is
   no test yet.
+- Ctrl+C typed as raw input in the coordinator's window. The live attach
+  sends raw bytes, so a 0x03 or an Esc from the phone's keyboard reaches
+  the coordinator as it would on the Mac. Whether the engine recovers from
+  an interrupted coordinator turn as from any idle one is not checked.
+- Whether the engine writes a project's state only when it changed; if
+  not, `factory.changed` must compare before it logs.
