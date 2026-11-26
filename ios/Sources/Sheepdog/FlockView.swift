@@ -989,6 +989,7 @@ struct FactoryHeadCard: View {
     let answer: (String, Int) -> Void
     var project: FactoryProjectBoard?
     var onGone: (() -> Void)?
+    var onGoal: (() -> Void)?
 
     @EnvironmentObject private var model: SessionViewModel
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -1019,7 +1020,8 @@ struct FactoryHeadCard: View {
             }
             item.alertLine.map { Text($0).font(.subheadline.weight(.semibold)) }
             item.alertFixLine.map { Text($0).font(.footnote).foregroundStyle(Theme.muted) }
-            Group {
+            let actionLayout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
+            actionLayout {
                 if let project, project.canStop {
                     let confirm = project.stopConfirm
                     Button("Stop") { confirmingStop = true }
@@ -1038,6 +1040,10 @@ struct FactoryHeadCard: View {
                     }
                     .disabled(resuming).accessibilityLabel(resuming ? "Resuming \(item.head.name)" : project?.resumeAccessibilityLabel ?? "Resume \(item.head.name)")
                     .accessibilityIdentifier(project == nil ? "" : "factoryProject.resume")
+                }
+                if let project, project.canChangeGoal, let onGoal {
+                    Button(project.goalActionLabel, action: onGoal)
+                        .accessibilityIdentifier(item.head.state == .finished ? "factoryProject.reopen" : "factoryProject.newGoal")
                 }
             }.buttonStyle(.bordered).tint(Theme.ink).controlSize(.large)
             actionError.map { Text($0).font(.footnote).foregroundStyle(Theme.danger) }
