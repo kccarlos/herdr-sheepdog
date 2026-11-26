@@ -145,7 +145,7 @@ func (e *Engine) observeCoordSignInLocked(ctx context.Context, id string, s *flo
 	if flow.RunLive(s.Project.RunID, s.Project.Run) {
 		if r := s.Project.Run; r != nil && (r.Turn > 0 || !r.LastTurnEnd.IsZero()) {
 			for _, k := range []string{flow.AlertAgentsDown, flow.AlertAgentsDown + "@j6", flow.AlertAgentsDown + "@j10", flow.AlertAgentsDown + "@j9"} {
-				if k != flow.AlertAgentsDown+"@j9" || len(s.Project.Wakes) == 0 && s.Project.CoordWakeAt.IsZero() {
+				if k != flow.AlertAgentsDown+"@j9" || len(s.Project.Wakes) == 0 && len(s.Project.CoordWakesInFlight) == 0 && s.Project.CoordWakeAt.IsZero() {
 					e.reconcileAlertLocked(id, s, k, false, flow.Alert{}, "", "")
 				}
 			}

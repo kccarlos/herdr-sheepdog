@@ -34,6 +34,13 @@ func TestJ12KeepsUnlistedWakes(t *testing.T) {
 	if len(held) != 1 || held[0].Key != "batch-key-20" || len(logs[0].Asked) != 20 {
 		t.Fatalf("first batch left %d wakes and logged %d delivered keys, want 1 and 20", len(held), len(logs[0].Asked))
 	}
+	// Same-turn idle observation must hold batch 2 while batch 1 is still in flight (PR 2b J12 guard).
+	h.coordIdleWithStatus(addr, "idle")
+	if sends := sendsTo(t, h.srv.Requests(), addr); len(sends) != 1 || len(h.state().Project.Wakes) != 1 {
+		t.Fatalf("same-turn idle delivered batch 2 while batch 1 was in flight: sends=%q wakes=%+v", sends, h.state().Project.Wakes)
+	}
+	// Once batch 1 completes with matching wake evidence, J12 delivers the 21st wake.
+	h.completeWakeTurn(addr)
 	h.coordIdleWithStatus(addr, "idle")
 	sends = sendsTo(t, h.srv.Requests(), addr)
 	logs = logRules(t, h.paths.Log(h.id), "J12")

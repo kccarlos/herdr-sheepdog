@@ -963,7 +963,7 @@ is no docs PR at the end. Sizes are net lines without tests.
 | 1b | `feat(factory): the TaskView run and decision keys, and the factory object on ask cards` (keys into ws-contract.md) | 1a | ~90 |
 | 2 | `feat(window): the coordinator's live window, and one rail refusing rename, interrupt and close on factory panes` | 1a | ~120 |
 | 3 | `test(eval): a fake factory in the eval simulator` | 1a | ~220 |
-| 2b | `fix(factory): coordinator wakes without positive evidence (scrolled screen, Codex inferred mode, owner turn)` — state table first, design review, before 9 (split from 2, 2026-11-26) | 2 | ~100 |
+| 2b | `fix(factory): retry coordinator wakes when the turn is unconfirmed` (design review first, before 9, split from 2) | 2 | ~120 |
 | 4 | `feat(brain): project rows, the tool helper, and board text in read_screen` (golden zero-project roster; scale-ten bar) | 1a, 3 | ~250 |
 | 5 | `feat(factory): Say behind prompt, the device say route, owner wakes first, and the coordinator prompt sentence` | 4 | ~210 |
 | 6 | `feat(supervisor): investigate on a project from its record` (with the Codex loopback check) | 4, 5 | ~150 |
@@ -980,15 +980,75 @@ and asks. 2 and 3 run side by side after 1a; 7 runs beside 3 to 6 once
 1a's and 1b's keys are in ws-contract.md. 13 is in the first version and
 comes last.
 
-**PR 2 is done when** a test shows the engine still handles, or delivers
-again, the wakes in flight after (a) an Esc that interrupts a coordinator
-turn and (b) a turn the owner started by typing in the window. The second
-is likely to break today: the engine clears `CoordWakeAt` once `Run.Turn`
-passes `CoordWakeTurn` (`engine.go`), and `Turn` is read from the
-terminal's own status (`world/world.go`, `flow/runs.go`), so an owner's
-question probably moves it and switches off the silent-coordinator watch
-(`flow/project.go`) while the delivered wakes were never acted on. This is
-engine state: a state table first, then the code.
+### PR 2b coordinator wake recovery
+
+A scrolled reply, a short Codex viewport, and a dialog redraw can hide
+whether a coordinator handled a wake. The [proposed wake state table](../engine-v2/design.md#10-the-coordinator)
+keeps J9 on the no-turn case and gives an unconfirmed later idle turn
+one retry per wake. If that retry also ends unconfirmed, the factory log
+records the wake keys and the reason. If the run ends first, the
+replacement gets the pending batch with its retry bits intact.
+
+**Finish fixtures.** One extra delivery before finish is acceptable
+when the wake outcome is unconfirmed. Use a small test helper that
+builds the completed echo and reply from the last recorded
+`terminal.send`. Call it explicitly for successful wake turns and
+supply explicit screens for unconfirmed cases.
+
+- `TestQuotaEndedCoordinatorRestartsBeforeFinish` and
+  `TestSayBeforeFinishReachesNextCoordinator/during_final_journal_turn`
+  keep their send counts and ordering. Cover an unconfirmed replacement
+  turn and an unconfirmed Say separately. The quota-recovered wake
+  precedes the final journal request, the accepted Say drains before
+  stop, and the journal request is sent once. Keep
+  `TestSayBeforeFinishReachesNextCoordinator/lost_before_j12` as written.
+- `TestFinishedProjectReopen/same_goal_with_held_wake`,
+  `TestFinishedProjectClearsMainRed`, and
+  `TestJ4KeepsNewGoalWhileTasksOpenUntilPlanApplied` need completed
+  evidence in place of the working stub or empty screen.
+- Give `j9_second_silent_stop_raises_agents_down_and_clears_on_coord_turn`
+  the replacement's completed wake. Check the alert stays active while
+  a batch is still in flight. In `TestJ12KeepsUnlistedWakes`, observe
+  the same-turn hold, then complete the first batch before expecting the
+  twenty-first wake to be sent.
+
+**Transcript fixtures.** Bind the existing literal echoes to the actual
+send sequence in `TestCodexCoordinatorLaunchWakeAndSecondTurn`,
+`TestAgyCoordinatorRealEscWakeRecovery`, and these
+`TestCoordinatorWakeRequeueDoesNotLoopOrDoubleDeliver` subtests:
+
+- `agy_blockquote_does_not_loop`
+- `claude_placeholder_without_rule_does_not_loop`
+- `handled_wake_followed_by_owner_question_does_not_double_deliver`
+- `repeated_esc_is_bounded`
+
+Use a matching echo and reply to prove the handled wake before the
+owner follow-up. Preserve the blockquote and placeholder in their
+fixtures so they still exercise the prompt and composer boundaries.
+Update the world-level agy classifier fixture to check confirmation
+and interruption evidence from the same captured turns.
+
+**Done when.** Restore the scrolled-Claude and inferred-Codex cases,
+each with exactly one retry when the wake is absent from the 200-line
+evidence read. Also cover an inferred Codex reply whose wake is above
+the viewport but still in that read. Keep the first-Esc and
+owner-submits-after-Esc cases from the captured agy screens. Two Escs
+produce two sends and a logged unconfirmed result, with no J9
+replacement for a completed later idle turn. Cover a stale delivery
+marker, a later owner turn interrupted after a completed wake, a
+transient blank or failed read, a readable dialog redraw and an
+observation outage with no tick. Pin the J8 error path, exit after turn
+advance but before idle, owner stop and restart, mixed retry bits,
+newer held duplicates, and failed reconciliation commit. Check that a
+heartbeat and J4 wait while the batch is pending. During implementation,
+render the numbered header on narrow Claude, Codex and agy panes and
+check how Claude renders a collapsed tool-only reply.
+
+**Size estimate.** About 120 net production lines (roughly 100–130),
+excluding tests, comments and blanks. Allow about 55 for transcript
+observation, 45 for reconciliation and logging, and 20 for delivery
+metadata and rule guards, with the old retry heuristic and
+`CoordWakeActed` hook removed. The cap is 300.
 
 **Deleted or deferred**, after asking of each PR what can go:
 

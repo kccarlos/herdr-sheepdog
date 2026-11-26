@@ -34,6 +34,7 @@ type factoryBoard interface {
 	ProjectHeads() []factory.ProjectHead
 	Graph(project string) (factory.GraphView, error)
 	LogLines(project string, n int, task string, observations bool) ([]factory.LogEntry, error)
+	ProjectLogPath(id string) string
 }
 
 var _ factoryBoard = (*factory.Engine)(nil)

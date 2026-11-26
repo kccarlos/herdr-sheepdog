@@ -630,7 +630,7 @@ func TestFinishedProjectClearsMainRed(t *testing.T) {
 		s.Tasks[0].Dropped = &flow.Dropped{Why: "no longer needed"}
 	})
 	h.coordIdleWithStatus(coord1, "idle") // J12 delivers base_red wake
-	h.setCoordWorking(coord1)
+	h.completeWakeTurn(coord1)
 	h.finishThroughJ4(coord1)
 
 	if st := h.state(); len(h.runs) != 1 || st.Project.RunID != "" || !st.Project.HasAlert(flow.AlertMainRed) || len(st.Project.Wakes) != 0 {

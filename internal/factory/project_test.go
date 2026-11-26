@@ -103,6 +103,17 @@ func (h *projectHarness) setCoordWorking(addr string) {
 	h.pass()
 }
 
+func (h *projectHarness) completeWakeTurn(addr string) {
+	h.t.Helper()
+	cli := "claude"
+	if r := h.state().Project.Run; r != nil && r.CLI != "" {
+		cli = r.CLI
+	}
+	sent := lastSendTo(h.t, h.srv.Requests(), addr)
+	h.setCoordWorking(addr)
+	h.srv.SetScreen(addr, completedWakeScreen(cli, sent, "Handled wake."))
+}
+
 func (h *projectHarness) finishThroughJ4(coord string) {
 	h.t.Helper()
 	h.coordIdleWithStatus(coord, "idle") // J4 asks final journal
@@ -634,13 +645,11 @@ func TestJ4KeepsNewGoalWhileTasksOpenUntilPlanApplied(t *testing.T) {
 		t.Fatal("NewGoal still set after new task T2 was added")
 	}
 
-	// Once T2 also ends and coordinator finishes its final journal, J4 finishes.
+	// Once T2 also ends and coordinator finishes its wake turn and final journal, J4 finishes.
 	h.edit(func(s *flow.State) {
 		s.Tasks[1].Done = &flow.Merged{MergedCommit: "m2"}
 	})
-	h.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
-	h.now = h.now.Add(5 * time.Second)
-	h.pass()
+	h.completeWakeTurn(coord1)
 	h.coordIdleWithStatus(coord1, "idle") // J4 asks final journal
 	h.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
 	h.now = h.now.Add(5 * time.Second)
@@ -903,9 +912,9 @@ func TestQuotaEndedCoordinatorRestartsBeforeFinish(t *testing.T) {
 		t.Fatalf("quota-ended coordinator with put-back wake did not restart: runs=%d runID=%q", len(h.runs), coord2)
 	}
 
-	// Coord 2 goes idle -> J12 delivers the put-back wake -> then J4 asks final_journal.
+	// Coord 2 goes idle -> J12 delivers the put-back wake -> completes it -> J4 asks final_journal.
 	h.coordIdleWithStatus(coord2, "idle")
-	h.setCoordWorking(coord2)
+	h.completeWakeTurn(coord2)
 	h.coordIdleWithStatus(coord2, "idle")
 
 	sends := sendsTo(t, h.srv.Requests(), coord2)
@@ -986,7 +995,7 @@ func TestFinishedProjectReopen(t *testing.T) {
 			t.Fatalf("same goal with held wake did not start coordinator: runs=%d runID=%q", len(h.runs), coord2)
 		}
 		h.coordIdleWithStatus(coord2, "idle") // J12 delivers held wake
-		h.setCoordWorking(coord2)
+		h.completeWakeTurn(coord2)
 		h.finishThroughJ4(coord2)
 		if len(h.runs) != 2 || h.state().Project.RunID != "" {
 			t.Fatalf("same goal with held wake did not finish again: runs=%d runID=%q", len(h.runs), h.state().Project.RunID)

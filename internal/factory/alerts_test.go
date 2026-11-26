@@ -708,9 +708,17 @@ func TestPR5b8_StoppingAlertHoldsNewStartsAndManagesLiveCoordinator(t *testing.T
 		if len(logRules(t, w.paths.Log(w.id), "J12")) <= j12Before || len(st.Project.Wakes) != 0 {
 			t.Fatalf("live coordinator did not receive held wakes (J12) during stopping alert: wakes=%+v", st.Project.Wakes)
 		}
-		w.advance(25 * time.Second)
+		// Complete the delivered wake turn before advancing heartbeat_minutes so J13 can fire.
+		sent := lastSendTo(t, w.srv.Requests(), coordAddr)
+		w.srv.SetStatus(coordAddr, &hc.Status{App: "claude-code", State: "working"})
+		w.advance(5 * time.Second)
+		w.pass()
+		w.srv.SetScreen(coordAddr, completedWakeScreen("claude", sent, "Noted."))
 		w.srv.SetStatus(coordAddr, &hc.Status{App: "claude-code", State: "idle"})
-		w.pass() // R20 -> idle again
+		w.advance(5 * time.Second)
+		w.pass()
+		w.advance(25 * time.Second)
+		w.pass() // R20 -> idle again, batch confirmed
 		j13Before := len(logRules(t, w.paths.Log(w.id), "J13"))
 		w.advance(time.Duration(w.state().Settings.HeartbeatMinutes)*time.Minute + time.Minute)
 		w.pass()

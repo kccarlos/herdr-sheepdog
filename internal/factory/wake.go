@@ -131,7 +131,7 @@ func taskFacts(t flow.Task, f flow.Facts, now time.Time) string {
 // differs from its default.
 func wakeMessage(s flow.State) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "%s%d task wake(s) wait on you.\n", flow.CoordWakePromptPrefix, len(s.Project.Wakes))
+	fmt.Fprintf(&b, "%s#%d %d task wake(s) wait on you.\n", flow.CoordWakePromptPrefix, s.Seq+1, len(s.Project.Wakes))
 	for i, w := range s.Project.Wakes {
 		if i == maxFactsWakes {
 			fmt.Fprintf(&b, "- and %d more.\n", len(s.Project.Wakes)-i)
@@ -188,12 +188,13 @@ func coordSummary(s flow.State, bin string, heartbeat bool) string {
 // deliverWakesLocked is J12: when the coordinator run is idle, one bounded batch
 // of held wakes is sent (at-least-once: a failed send or commit keeps wakes held).
 func (e *Engine) deliverWakesLocked(ctx context.Context, id string, s *flow.State, now time.Time) {
-	if len(s.Project.Wakes) == 0 || s.Project.RunID == "" || e.HC == nil {
+	next := *s
+	p := &next.Project
+	if len(p.Wakes) == 0 || len(p.CoordWakesInFlight) != 0 || p.RunID == "" || p.Run == nil || e.HC == nil {
 		return
 	}
-	batch := *s
-	batch.Project.Wakes = slices.Clone(s.Project.Wakes)
-	slices.SortStableFunc(batch.Project.Wakes, func(a, b flow.Wake) int {
+	p.Wakes = slices.Clone(p.Wakes)
+	slices.SortStableFunc(p.Wakes, func(a, b flow.Wake) int {
 		switch ownerA, ownerB := isOwnerSay(a), isOwnerSay(b); {
 		case ownerA && ownerB:
 			return a.At.Compare(b.At)
@@ -205,26 +206,101 @@ func (e *Engine) deliverWakesLocked(ctx context.Context, id string, s *flow.Stat
 			return 0
 		}
 	})
-	if e.sendCoordLocked(ctx, id, s, wakeMessage(batch), now, true) != nil {
+	run := *p.Run
+	p.Run = &run
+	if e.sendCoordLocked(ctx, id, &next, wakeMessage(next), now, false) != nil {
 		return
 	}
-	s.Project.Wakes = batch.Project.Wakes
-	n := min(len(s.Project.Wakes), maxFactsWakes)
+	n := min(len(p.Wakes), maxFactsWakes)
+	p.CoordWakesInFlight, p.Wakes = p.Wakes[:n], p.Wakes[n:]
+	p.CoordWakeRetried = slices.ContainsFunc(p.CoordWakesInFlight, func(w flow.Wake) bool { return w.Retried })
+	p.CoordWakeAt, p.CoordLastWakeAt, p.CoordWakeTurn, p.CoordWakeSeq = now, now, run.Turn, next.Seq+1
 	keys := make([]string, n)
-	for i, w := range s.Project.Wakes[:n] {
-		keys[i] = cmp.Or(w.Task, "project") + ":" + w.Key
+	for i, w := range p.CoordWakesInFlight {
+		keys[i] = coordWakeKey(w)
 	}
-	if s.Project.Run != nil {
-		for _, w := range s.Project.Wakes[:n] {
-			if !slices.ContainsFunc(s.Project.CoordWakesInFlight, func(f flow.Wake) bool { return f.Task == w.Task && f.Key == w.Key }) {
-				s.Project.CoordWakesInFlight = append(s.Project.CoordWakesInFlight, w)
-			}
+	if e.commitLogLocked(id, &next, LogLine{By: "engine", Rule: "J12", Asked: keys, Decision: fmt.Sprintf("delivered %d wake(s) to the coordinator", n), Why: "wakes held and the coordinator is idle"}) {
+		*s = next
+	}
+}
+
+func coordWakeKey(w flow.Wake) string { return cmp.Or(w.Task, "project") + ":" + w.Key }
+
+func clearCoordBatch(p *flow.Project) {
+	p.CoordWakesInFlight, p.CoordWakeSeq, p.CoordWakeRetried, p.CoordWakeAt = nil, 0, false, time.Time{}
+}
+
+// returnCoordWakes gives newer held duplicates priority and leaves their retry bits intact.
+func returnCoordWakes(p *flow.Project, retry bool) (retried, exhausted []string) {
+	var returned []flow.Wake
+	for _, w := range p.CoordWakesInFlight {
+		if slices.ContainsFunc(p.Wakes, func(held flow.Wake) bool { return held.Task == w.Task && held.Key == w.Key }) {
+			continue
 		}
-		s.Project.CoordWakeRetried = slices.ContainsFunc(s.Project.CoordWakesInFlight, func(w flow.Wake) bool { return w.Retried })
-		s.Project.CoordWakeTurn, s.Project.CoordWakeActed = s.Project.Run.Turn, false
+		if retry {
+			if w.Retried {
+				exhausted = append(exhausted, coordWakeKey(w))
+				continue
+			}
+			w.Retried = true
+			retried = append(retried, coordWakeKey(w))
+		}
+		returned = append(returned, w)
 	}
-	s.Project.Wakes, s.Project.CoordLastWakeAt = s.Project.Wakes[n:], now
-	e.commitLogLocked(id, s, LogLine{By: "engine", Rule: "J12", Asked: keys, Decision: fmt.Sprintf("delivered %d wake(s) to the coordinator", len(keys)), Why: "wakes held and the coordinator is idle"})
+	if len(returned) > 0 {
+		p.Wakes = append(returned, p.Wakes...)
+	}
+	clearCoordBatch(p)
+	return retried, exhausted
+}
+
+func recoverEndedCoordWakes(p *flow.Project) bool {
+	if p.Run == nil || p.Run.State != flow.PhaseEnded || len(p.CoordWakesInFlight) == 0 {
+		return false
+	}
+	returnCoordWakes(p, false)
+	return true
+}
+
+// reconcileCoordWakesLocked handles a later idle tick and persists its outcome.
+func (e *Engine) reconcileCoordWakesLocked(id string, s *flow.State, tick flow.RunEvent, now time.Time) bool {
+	p, r := &s.Project, s.Project.Run
+	if tick.Kind != flow.EvTick || r.State != flow.PhaseIdle || r.Turn <= p.CoordWakeTurn || len(p.CoordWakesInFlight) == 0 {
+		return false
+	}
+	p.CoordWakeAt, p.CoordSilentStops = time.Time{}, 0
+	reason := tick.WakeReason
+	switch {
+	case r.Status == "error":
+		reason = "coordinator turn reported an error"
+	case reason == flow.WakeEvidenceUnavailable:
+		if !r.LastTurnEnd.IsZero() && now.Before(r.LastTurnEnd.Add(time.Duration(s.Settings.IdleGraceSeconds)*time.Second)) {
+			e.saveLocked(id, *s)
+			return true
+		}
+	case p.CoordWakeSeq != 0 && tick.WakeSeq == p.CoordWakeSeq && tick.WakeConfirmed:
+		clearCoordBatch(p)
+		e.saveLocked(id, *s)
+		return true
+	case p.CoordWakeSeq == 0:
+		reason = "wake delivery has no sequence"
+	case tick.WakeSeq != 0 && tick.WakeSeq != p.CoordWakeSeq:
+		reason = "screen shows a stale wake delivery"
+	}
+	next := *s
+	retried, exhausted := returnCoordWakes(&next.Project, true)
+	keys := append(slices.Clone(retried), exhausted...)
+	saved := false
+	if len(keys) == 0 {
+		saved = e.saveLocked(id, next)
+	} else {
+		decision := fmt.Sprintf("unconfirmed wake: retried [%s], exhausted [%s]", strings.Join(retried, ", "), strings.Join(exhausted, ", "))
+		saved = e.commitLogLocked(id, &next, LogLine{By: "engine", Rule: "J12", Asked: keys, Decision: decision, Why: reason})
+	}
+	if saved {
+		*s = next
+	}
+	return true
 }
 
 func (e *Engine) sweepDueLocked(id string, s flow.State, now time.Time) bool {
