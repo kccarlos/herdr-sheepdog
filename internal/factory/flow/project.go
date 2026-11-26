@@ -33,7 +33,7 @@ func AllTasksEnded(tasks []Task) bool {
 
 // ProjectFinished reports whether J4's finished condition holds (design.md section 6).
 func ProjectFinished(p Project, tasks []Task) bool {
-	return AllTasksEnded(tasks) && !p.NewGoal && (len(p.Wakes) == 0 || p.Finished)
+	return AllTasksEnded(tasks) && !p.NewGoal && (p.Finished || len(p.Wakes) == 0 && len(p.CoordWakesInFlight) == 0)
 }
 
 // IsCoordR29 reports whether r ended as stuck at a dialog via R29 (J10).
@@ -176,8 +176,8 @@ var CoordRows = []Row[ProjectIn]{
 		return !in.CoordErrorAt.IsZero() && !in.past(in.CoordErrorAt, in.QuietMinutes)
 	}, pdec("coordinator reported another error within quiet_minutes: stop it", AskStopCoordinator), pdec("coordinator reported an error at turn end: tell it to go on", AskCoordGoOn)),
 	pfix("J9", "coordinator", ProjectIn.coordSilent, "coordinator stayed silent for coordinator_silent_minutes: stop it", AskStopCoordinator),
-	pfix("J12", "coordinator", func(in ProjectIn) bool { return in.idle() && len(in.Wakes) > 0 }, "wakes held and the coordinator is idle", AskDeliverWakes),
-	pfix("J13", "coordinator", func(in ProjectIn) bool { return in.idle() && in.heartbeatDue() }, "no wake for heartbeat_minutes and coordinator is idle", AskHeartbeat),
+	pfix("J12", "coordinator", func(in ProjectIn) bool { return in.idle() && len(in.Wakes) > 0 && len(in.CoordWakesInFlight) == 0 }, "wakes held and the coordinator is idle", AskDeliverWakes),
+	pfix("J13", "coordinator", func(in ProjectIn) bool { return in.idle() && len(in.CoordWakesInFlight) == 0 && in.heartbeatDue() }, "no wake for heartbeat_minutes and coordinator is idle", AskHeartbeat),
 	pcond("J16", "engine", "running", func(in ProjectIn) bool { s, a := in.planReviewStep(); return s || a }, func(in ProjectIn) bool { s, _ := in.planReviewStep(); return s }, pdec("unreviewed tasks waiting and coordinator is idle: start plan reviewer", AskStartPlanReviewer), pdec("accept held plan", AskAcceptPlan)),
 	pfix("J14", "none", nil, "running"),
 }

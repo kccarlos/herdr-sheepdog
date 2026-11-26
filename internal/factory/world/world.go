@@ -19,10 +19,13 @@ import (
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
@@ -580,8 +583,82 @@ func retryCoordWake(cli, clean string) bool {
 	return false
 }
 
+// coordWakeEvidence finds the newest numbered wake and reads only its reply.
+func coordWakeEvidence(cli, clean string) (seq int64, confirmed bool, reason string) {
+	if strings.TrimSpace(clean) == "" {
+		return 0, false, flow.WakeEvidenceUnavailable
+	}
+	prompt := map[string]string{"claude": "❯", CodexCLI: "›", AgyCLI: ">"}[cli]
+	lines := strings.Split(strings.TrimRight(clean, "\n \t"), "\n")
+	if anchor := uiAnchor(cli, lines); anchor >= 0 {
+		lines = lines[:anchor]
+	} else if prompt != "" && strings.HasPrefix(lines[len(lines)-1], prompt) {
+		lines = lines[:len(lines)-1]
+	}
+	end := len(lines)
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		submitted := cli == CodexCLI && codexPromptRe.MatchString(line) ||
+			cli == "claude" && strings.HasPrefix(line, "❯ ") ||
+			cli == AgyCLI && isAgyPromptLine(line) && (i == 0 || isRuleLine(lines[i-1]))
+		if !submitted {
+			continue
+		}
+		if header, ok := strings.CutPrefix(strings.TrimSpace(strings.TrimPrefix(line, prompt)), flow.CoordWakePromptPrefix+"#"); ok {
+			num, _, _ := strings.Cut(header, " ")
+			if seq, err := strconv.ParseInt(num, 10, 64); err == nil && seq > 0 {
+				confirmed, reason := coordWakeReply(cli, lines[i+1:end])
+				return seq, confirmed, reason
+			}
+		}
+		end = i
+	}
+	return 0, false, "missing numbered wake echo"
+}
+
+func coordWakeReply(cli string, lines []string) (bool, string) {
+	settings, confirmed, blank := false, false, false
+	for _, line := range lines {
+		trim := strings.TrimSpace(line)
+		marker := strings.TrimSpace(strings.TrimPrefix(trim, "⎿"))
+		if cli == CodexCLI && strings.HasPrefix(trim, "■ Conversation interrupted") ||
+			cli == AgyCLI && marker == "Interrupted · What should Antigravity CLI do instead?" ||
+			cli == "claude" && marker == "Interrupted · What should Claude do instead?" {
+			return false, "wake reply interrupted"
+		}
+		if strings.HasPrefix(trim, "Settings that differ") {
+			settings, blank = true, false
+			continue
+		}
+		if !settings {
+			continue
+		}
+		switch cli {
+		case "claude":
+			confirmed = confirmed || strings.HasPrefix(line, "⏺") || strings.HasPrefix(line, "●")
+		case CodexCLI:
+			confirmed = confirmed || codexReplyRe.MatchString(line)
+		case AgyCLI:
+			first, _ := utf8.DecodeRuneInString(trim)
+			confirmed = confirmed || (!strings.Contains(line, "(alt+m to send immediately)") &&
+				(strings.HasPrefix(line, "● ") || strings.HasPrefix(line, "▸ Thought ") || blank && unicode.IsLetter(first)))
+		}
+		blank = trim == ""
+	}
+	if confirmed {
+		return true, ""
+	}
+	return false, "missing reply after wake echo"
+}
+
+// RunObservation supplies context for the optional transcript and session lookups.
+type RunObservation struct {
+	CodexHome   string
+	PendingWake bool
+}
+
 // ObserveRun reads rec's terminal and screen from herdr-core and emits the events for one pass (design.md 5, 7.3).
-func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, codexHome ...string) ([]flow.RunEvent, error) {
+func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, options ...RunObservation) ([]flow.RunEvent, error) {
 	if rec.State == flow.PhaseEnded {
 		return nil, nil
 	}
@@ -599,6 +676,10 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 	}
 	if t.State != "live" {
 		return []flow.RunEvent{{Kind: flow.EvExit, Reason: deref(t.Reason)}}, nil
+	}
+	var opts RunObservation
+	if len(options) > 0 {
+		opts = options[0]
 	}
 	cls, limitLine, tail, hash, clean, nonEmpty := "", "", "", "", "", false
 	infer := rec.CLI == CodexCLI && (rec.Role == flow.RoleWorker || rec.Role == flow.RoleCoordinator) && t.Status == nil
@@ -662,8 +743,8 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 	if rec.Role == flow.RoleWorker && rec.SessionID == "" {
 		var sid string
 		if cwd := hc.LocalCwd(t.Address, t.Cwd); cwd != "" {
-			if rec.CLI == CodexCLI && len(codexHome) > 0 {
-				sid = codexSession(codexHome[0], cwd, rec.StartedAt)
+			if rec.CLI == CodexCLI && opts.CodexHome != "" {
+				sid = codexSession(opts.CodexHome, cwd, rec.StartedAt)
 			} else if rec.CLI == AgyCLI {
 				sid = agySession(ctx, client, cwd, rec.StartedAt)
 			}
@@ -673,8 +754,19 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 		}
 	}
 	// An empty hash marks an unavailable screen; this tick cannot prove the run stayed quiet.
-	return append(evs, flow.RunEvent{Kind: flow.EvTick, Screen: cls, ScreenHash: hash, LimitLine: limitLine, Tail: tail, Model: t.Labels["sheepdog.model"],
-		RetryCoordWake: rec.Role == flow.RoleCoordinator && nonEmpty && retryCoordWake(rec.CLI, clean)}), nil
+	tick := flow.RunEvent{Kind: flow.EvTick, Screen: cls, ScreenHash: hash, LimitLine: limitLine, Tail: tail, Model: t.Labels["sheepdog.model"]}
+	if rec.Role == flow.RoleCoordinator {
+		evidence := clean
+		if infer && opts.PendingWake && (rec.State == flow.PhaseIdle || rec.Status == "idle" || codexStatus == "idle") {
+			evidence = ""
+			if rd, err := client.Read(ctx, rec.Address, 200); err == nil {
+				evidence = ansiRe.ReplaceAllString(strings.ReplaceAll(rd.Text, "\r\n", "\n"), "")
+			}
+		}
+		tick.WakeSeq, tick.WakeConfirmed, tick.WakeReason = coordWakeEvidence(rec.CLI, evidence)
+		tick.RetryCoordWake = !opts.PendingWake && nonEmpty && retryCoordWake(rec.CLI, clean)
+	}
+	return append(evs, tick), nil
 }
 
 // ActRun executes one run-table act against herdr-core.
