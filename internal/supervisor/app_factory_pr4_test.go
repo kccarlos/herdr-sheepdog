@@ -3,6 +3,7 @@ package supervisor_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"maps"
 	"os"
 	"path/filepath"
@@ -321,6 +322,373 @@ func TestReadScreenOnProjectReturnsBoardText(t *testing.T) {
 	for _, want := range []string{"<<<BEGIN_WORKER_OUTPUT", "<<<END_WORKER_OUTPUT", "recipes", "stopped", "T1", "Project is stopped"} {
 		if !strings.Contains(recipesOut, want) {
 			t.Errorf("stopped recipes board missing %q", want)
+		}
+	}
+}
+
+// Pins PR 4 review finding 1: ungated internal decision asks (worker/reviewer ->
+// coordinator) are excluded from "waiting on you" counts, roster rows, and
+// read_screen board text, and never shadow a real gated owner ask.
+func TestDecisionAsksExcludedFromRosterCountsAndBoard(t *testing.T) {
+	fac := inject.NewFactory(nil)
+	fac.SetProject(inject.FactoryProject{
+		ProjectHead: factory.ProjectHead{ID: "proj-1a2b3c4d", Folder: "/work/notes", Goal: "Notes", State: "running", Counts: map[string]int{"working": 2, "done": 1}},
+		Tasks:       []factory.TaskView{{Ref: "T1", Title: "feat: db", Stage: "working"}},
+		Asks:        []flow.Ask{{ID: "ask-dec-1", Project: "proj-1a2b3c4d", Task: "T1", Kind: flow.KindDecision, Question: "Use SQLite or Postgres?", Options: []string{"SQLite", "Postgres"}, Recommend: "SQLite", At: pr4T0}},
+	})
+	fac.SetProject(inject.FactoryProject{
+		ProjectHead: factory.ProjectHead{ID: "proj-2b3c4d5e", Folder: "/work/recipes", Goal: "Recipes", State: "running", Counts: map[string]int{"working": 1, "owner_answer": 1}},
+		Tasks:       []factory.TaskView{{Ref: "T2", Title: "feat: release", Stage: "owner_answer"}},
+		Asks: []flow.Ask{
+			{ID: "ask-dec-2", Project: "proj-2b3c4d5e", Task: "T2", Kind: flow.KindDecision, Question: "Index tags lowercase?", Options: []string{"Yes", "No"}, Recommend: "Yes", At: pr4T0},
+			{ID: "ask-rel-1", Project: "proj-2b3c4d5e", Kind: flow.KindRelease, Question: "Tag release 0.2.0?", Options: []string{"Tag", "Wait"}, Recommend: "Wait", At: pr4T0.Add(time.Minute)},
+		},
+	})
+	m := braintest.NewModel()
+	e := newPR4Env(t, m, fac)
+	e.sup.SyncFactoryAsksForTest()
+
+	roster := e.roster()
+	var notesLine, recipesLine string
+	for _, line := range strings.Split(roster, "\n") {
+		if strings.Contains(line, "the notes factory") {
+			notesLine = line
+		}
+		if strings.Contains(line, "the recipes factory") {
+			recipesLine = line
+		}
+	}
+	if !strings.Contains(notesLine, "0 waiting on you") || strings.Contains(notesLine, "Use SQLite or Postgres?") || strings.Contains(notesLine, "Open ask") {
+		t.Errorf("notes roster leaked ungated decision ask: %q", notesLine)
+	}
+	if !strings.Contains(recipesLine, "1 waiting on you") || !strings.Contains(recipesLine, "Tag release 0.2.0?") || strings.Contains(recipesLine, "Index tags lowercase?") {
+		t.Errorf("recipes roster shadowed or miscounted gated ask: %q", recipesLine)
+	}
+
+	notesBoard, notesErr, _ := e.sayTool(m, "how is notes?", braintest.FC(brain.ToolReadScreen, map[string]any{"agent": "the notes factory"}))
+	recipesBoard, recipesErr, _ := e.sayTool(m, "how is recipes?", braintest.FC(brain.ToolReadScreen, map[string]any{"agent": "the recipes factory"}))
+	if notesErr != "" || recipesErr != "" {
+		t.Fatalf("read_screen errors: notes=%q recipes=%q", notesErr, recipesErr)
+	}
+	if !strings.Contains(notesBoard, "0 waiting on you") || strings.Contains(notesBoard, "Use SQLite or Postgres?") || strings.Contains(notesBoard, "Open ask") {
+		t.Errorf("notes board leaked ungated decision ask:\n%s", notesBoard)
+	}
+	if !strings.Contains(recipesBoard, "1 waiting on you") || !strings.Contains(recipesBoard, "Tag release 0.2.0?") || strings.Contains(recipesBoard, "Index tags lowercase?") || strings.Contains(recipesBoard, "Open ask :") {
+		t.Errorf("recipes board misrendered asks:\n%s", recipesBoard)
+	}
+}
+
+// Pins PR 4 review finding 2: read_screen board text stays bounded well below
+// the 16 KiB TailBytes cap, keeps the project header, coordinator project-level
+// decisions, and open gated asks intact, and normalizes multi-line task fields.
+func TestReadScreenBoardTextBoundedPreservesHeaderCoordinatorAndAsks(t *testing.T) {
+	tasks := make([]factory.TaskView, 80)
+	for i := range tasks {
+		tasks[i] = factory.TaskView{
+			Ref:               fmt.Sprintf("T%d", i+1),
+			Title:             fmt.Sprintf("feat: task %d %s", i+1, strings.Repeat("t", 160)),
+			Stage:             "working",
+			WhyWaiting:        fmt.Sprintf("waiting line1\nline2 %s", strings.Repeat("y", 160)),
+			Steps:             []factory.StepView{{Name: "implementing", State: "now", Text: strings.Repeat("s", 120)}},
+			LastActorDecision: &factory.LogEntry{At: pr4T0, By: "coordinator", Decision: "task send-back", Why: strings.Repeat("d", 180)},
+		}
+	}
+	fac := inject.NewFactory(nil)
+	fac.SetProject(inject.FactoryProject{
+		ProjectHead: factory.ProjectHead{ID: "proj-1a2b3c4d", Folder: "/work/notes", Goal: "GOAL_HEAD " + strings.Repeat("g", 400), State: "running", Counts: map[string]int{"working": 80}},
+		Tasks:       tasks,
+		Log:         []factory.LogEntry{{At: pr4T0, By: "coordinator", Decision: "plan amend", Why: "COORD_DECISION_KEEP " + strings.Repeat("w", 400)}},
+		Asks:        []flow.Ask{{ID: "ask-rel-1", Project: "proj-1a2b3c4d", Kind: flow.KindRelease, Question: "RELEASE_ASK_KEEP?", Options: []string{"Tag", "Wait"}, Recommend: "Wait", At: pr4T0}},
+	})
+	m := braintest.NewModel()
+	e := newPR4Env(t, m, fac)
+	out, toolErr, _ := e.sayTool(m, "how is notes?", braintest.FC(brain.ToolReadScreen, map[string]any{"agent": "the notes factory"}))
+	if toolErr != "" {
+		t.Fatalf("read_screen error: %q", toolErr)
+	}
+	if len(out) > 10*1024 {
+		t.Errorf("read_screen board len = %d bytes, want <= %d (bounded well below TailBytes cap)", len(out), 10*1024)
+	}
+	for _, want := range []string{"<<<BEGIN_WORKER_OUTPUT", "<<<END_WORKER_OUTPUT", "notes: running", "GOAL_HEAD", "plan amend", "COORD_DECISION_KEEP", "RELEASE_ASK_KEEP?"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("bounded board missing %q (len=%d)", want, len(out))
+		}
+	}
+	if strings.Contains(out, "Open ask :") {
+		t.Errorf("project-level ask rendered stray space before colon")
+	}
+	if strings.Contains(out, "line1\nline2") {
+		t.Errorf("embedded newline in WhyWaiting was not normalized to one line")
+	}
+}
+
+// Pins PR 4 review finding 3: factory terminal rows never leak into Agents() or
+// Resolve() — and the tool helper never routes interrupt/close/rename to them —
+// even when ProjectHeads() is empty or an engine-named CoordinatorPane lacks labels.
+func TestFactoryTerminalsNeverLeakOrAcceptRefusedToolsWhenUnmatched(t *testing.T) {
+	t.Run("empty_heads_labeled_coordinator", func(t *testing.T) {
+		m := braintest.NewModel()
+		e := newPR4Env(t, m, inject.NewFactory(nil))
+		e.srv.Handle("pane.close", func(json.RawMessage) (any, error) { return map[string]any{"type": "ok"}, nil })
+		e.srv.Handle("agent.rename", func(json.RawMessage) (any, error) { return map[string]any{"type": "ok"}, nil })
+		lbl := map[string]string{"sheepdog.project": "proj-deleted", "sheepdog.role": flow.RoleCoordinator}
+		e.addPane("hc:coord-orphan", "coord-orphan", "claude", herdr.StateWorking, herdr.StateBlocked, lbl, "codex-approval-prompt.screen.txt")
+
+		host := e.sup.BrainHostForTest()
+		for _, a := range host.Agents() {
+			if a.PaneID == "hc:coord-orphan" {
+				t.Errorf("Agents() leaked orphaned factory coordinator pane: %+v", a)
+			}
+		}
+		target := "coord-orphan"
+		if row, ok := e.store.Get("hc:coord-orphan"); ok && row.Alias != "" {
+			target = row.Alias
+		}
+		if got, ok := host.Resolve(target); ok && !got.Project {
+			t.Errorf("Resolve(%q) exposed factory terminal as non-project row: %+v", target, got)
+		}
+		for _, fc := range []*genai.FunctionCall{
+			braintest.FC(brain.ToolInterrupt, map[string]any{"agent": target}),
+			braintest.FC(brain.ToolInterrupt, map[string]any{"agent": target, "close": true}),
+			braintest.FC(brain.ToolNote, map[string]any{"agent": target, "name": "renamed"}),
+		} {
+			e.sayTool(m, "act on orphan coordinator", fc)
+		}
+		if len(e.sendKeys()) != 0 || len(e.srv.RequestsFor("pane.close")) != 0 || len(e.srv.RequestsFor("agent.rename")) != 0 {
+			t.Errorf("refused actions reached orphaned factory pane: sendKeys=%v close=%d rename=%d", e.sendKeys(), len(e.srv.RequestsFor("pane.close")), len(e.srv.RequestsFor("agent.rename")))
+		}
+	})
+
+	t.Run("unlabeled_engine_coordinator_pane", func(t *testing.T) {
+		fac := inject.NewFactory(nil)
+		fac.SetProject(inject.FactoryProject{ProjectHead: factory.ProjectHead{ID: "proj-1a2b3c4d", Folder: "/work/notes", Goal: "Notes", State: "running", CoordinatorPane: "hc:coord-unlabeled"}})
+		m := braintest.NewModel()
+		e := newPR4Env(t, m, fac)
+		e.srv.Handle("pane.close", func(json.RawMessage) (any, error) { return map[string]any{"type": "ok"}, nil })
+		e.srv.Handle("agent.rename", func(json.RawMessage) (any, error) { return map[string]any{"type": "ok"}, nil })
+		e.addPane("hc:coord-unlabeled", "coord-raw", "claude", herdr.StateWorking, herdr.StateBlocked, nil, "codex-approval-prompt.screen.txt")
+
+		host := e.sup.BrainHostForTest()
+		for _, a := range host.Agents() {
+			if a.PaneID == "hc:coord-unlabeled" {
+				t.Errorf("Agents() leaked unlabeled engine CoordinatorPane: %+v", a)
+			}
+		}
+		target := "coord-raw"
+		if row, ok := e.store.Get("hc:coord-unlabeled"); ok && row.Alias != "" {
+			target = row.Alias
+		}
+		if got, ok := host.Resolve(target); ok && !got.Project {
+			t.Errorf("Resolve(%q) exposed unlabeled CoordinatorPane as non-project row: %+v", target, got)
+		}
+		for _, fc := range []*genai.FunctionCall{
+			braintest.FC(brain.ToolInterrupt, map[string]any{"agent": target}),
+			braintest.FC(brain.ToolInterrupt, map[string]any{"agent": target, "close": true}),
+			braintest.FC(brain.ToolNote, map[string]any{"agent": target, "name": "renamed"}),
+		} {
+			e.sayTool(m, "act on unlabeled coordinator", fc)
+		}
+		if len(e.sendKeys()) != 0 || len(e.srv.RequestsFor("pane.close")) != 0 || len(e.srv.RequestsFor("agent.rename")) != 0 {
+			t.Errorf("refused actions reached unlabeled CoordinatorPane: sendKeys=%v close=%d rename=%d", e.sendKeys(), len(e.srv.RequestsFor("pane.close")), len(e.srv.RequestsFor("agent.rename")))
+		}
+	})
+}
+
+// Pins PR 4 review finding 4 (app-factory.md §3.2): when two running projects
+// share a name and one coordinator is blocked (store alias "notes"), resolving
+// "notes" stays an ambiguous tie while each project's unique alias still works.
+func TestBlockedCoordinatorAlternateAliasDoesNotBreakNameTie(t *testing.T) {
+	fac := inject.NewFactory(nil)
+	fac.SetProject(inject.FactoryProject{ProjectHead: factory.ProjectHead{ID: "proj-1a2b3c4d", Folder: "/work/notes", Goal: "Work notes", State: "running", CoordinatorPane: "hc:coord-1"}})
+	fac.SetProject(inject.FactoryProject{ProjectHead: factory.ProjectHead{ID: "proj-4d5e6f70", Folder: "/personal/notes", Goal: "Personal notes", State: "running"}})
+	e := newPR4Env(t, braintest.NewModel(), fac)
+	lbl := map[string]string{"sheepdog.project": "proj-1a2b3c4d", "sheepdog.role": flow.RoleCoordinator}
+	e.addPane("hc:coord-1", "coord-1a2b", "claude", herdr.StateWorking, herdr.StateBlocked, lbl, "codex-approval-prompt.screen.txt")
+
+	host := e.sup.BrainHostForTest()
+	if got, ok := host.Resolve("the notes factory"); ok {
+		t.Errorf("Resolve(the notes factory) = (%+v, true), want false on tie", got)
+	}
+	if got, ok := host.Resolve("notes"); ok {
+		t.Errorf("Resolve(notes) = (%+v, true), want false on tie even when one coordinator is blocked", got)
+	}
+	var alias1, alias2 string
+	for _, a := range host.Agents() {
+		switch a.PaneID {
+		case "factory:proj-1a2b3c4d":
+			alias1 = a.Alias
+		case "factory:proj-4d5e6f70":
+			alias2 = a.Alias
+		}
+	}
+	if got, ok := host.Resolve(alias1); !ok || got.PaneID != "factory:proj-1a2b3c4d" || got.Pending == nil {
+		t.Errorf("Resolve(%q) = (%+v, %v), want proj-1a2b3c4d with Pending", alias1, got, ok)
+	}
+	if got, ok := host.Resolve(alias2); !ok || got.PaneID != "factory:proj-4d5e6f70" || got.Pending != nil {
+		t.Errorf("Resolve(%q) = (%+v, %v), want proj-4d5e6f70 without Pending", alias2, got, ok)
+	}
+}
+
+// Pins Carbon finding 1: an open told fask-* factory ask participates in
+// namedInLocked and shares identity with its project's coordinator, so words
+// answering the told factory ask cannot approve an unheard terminal prompt.
+func TestToldFactoryAskProtectsUnheardPromptsUnderDisplacementRail(t *testing.T) {
+	t.Run("coordinator_dialog_displaced_by_told_factory_ask", func(t *testing.T) {
+		fac := inject.NewFactory(nil)
+		fac.SetProject(inject.FactoryProject{
+			ProjectHead: factory.ProjectHead{ID: "proj-1a2b3c4d", Folder: "/work/notes", Goal: "Notes", State: "running", CoordinatorPane: "hc:coord-1"},
+			Asks:        []flow.Ask{{ID: "ask-1", Project: "proj-1a2b3c4d", Kind: flow.KindRelease, Question: "Tag release 0.2.0?", Options: []string{"Yes", "No"}, Recommend: "No", At: pr4T0}},
+		})
+		m := braintest.NewModel()
+		e := newPR4Env(t, m, fac)
+		e.sup.SyncFactoryAsksForTest()
+		e.sup.OnVoiceEvent(voice.EventPush{Text: "notes: Tag release 0.2.0? Options: 1, Yes; 2, No. Recommended: No.", Urgency: voice.UrgencyIdle, PendingID: "fask-ask-1"})
+
+		e.now = e.now.Add(time.Second)
+		lbl := map[string]string{"sheepdog.project": "proj-1a2b3c4d", "sheepdog.role": flow.RoleCoordinator}
+		e.addPane("hc:coord-1", "coord-1a2b", "claude", herdr.StateWorking, herdr.StateBlocked, lbl, "codex-approval-prompt.screen.txt")
+
+		e.now = e.now.Add(time.Second)
+		if _, toolErr, b := e.sayTool(m, "tell the notes factory yes go ahead", braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "the notes factory", "keys": []any{"y"}})); b != 1 || len(e.sendKeys()) != 0 {
+			t.Fatalf("unheard coordinator dialog bypassed displacement rail: blocked=%d sends=%v err=%q", b, e.sendKeys(), toolErr)
+		}
+
+		p, has := e.store.Pending()
+		if !has {
+			t.Fatal("missing coordinator pending prompt")
+		}
+		e.sup.OnVoiceEvent(voice.EventPush{Text: p.SpokenSummary, Urgency: voice.UrgencyInterrupt, PendingID: p.ID})
+		e.now = e.now.Add(time.Second)
+		if _, toolErr, _ := e.sayTool(m, "yes proceed on the notes factory", braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "the notes factory", "keys": []any{"y"}})); toolErr != "" || !slices.Equal(e.sendKeys(), [][2]string{{"hc:coord-1", "y"}}) {
+			t.Errorf("told coordinator dialog send_keys = (%v, %q), want [[hc:coord-1 y]]", e.sendKeys(), toolErr)
+		}
+	})
+
+	t.Run("ordinary_agent_displaced_when_words_also_name_told_factory_ask", func(t *testing.T) {
+		fac := inject.NewFactory(nil)
+		fac.SetProject(inject.FactoryProject{
+			ProjectHead: factory.ProjectHead{ID: "proj-1a2b3c4d", Folder: "/work/notes", Goal: "Notes", State: "running"},
+			Asks:        []flow.Ask{{ID: "ask-1", Project: "proj-1a2b3c4d", Kind: flow.KindRelease, Question: "Tag release 0.2.0?", Options: []string{"Yes", "No"}, Recommend: "No", At: pr4T0}},
+		})
+		m := braintest.NewModel()
+		e := newPR4Env(t, m, fac)
+		e.sup.SyncFactoryAsksForTest()
+		e.sup.OnVoiceEvent(voice.EventPush{Text: "notes: Tag release 0.2.0? Options: 1, Yes; 2, No. Recommended: No.", Urgency: voice.UrgencyIdle, PendingID: "fask-ask-1"})
+
+		e.now = e.now.Add(time.Second)
+		e.addPane("w5:p1", "auth", "codex", herdr.StateWorking, herdr.StateBlocked, nil, "codex-approval-prompt.screen.txt")
+
+		e.now = e.now.Add(time.Second)
+		if _, toolErr, b := e.sayTool(m, "tell auth and the notes factory yes", braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "auth", "keys": []any{"y"}})); b != 1 || len(e.sendKeys()) != 0 {
+			t.Fatalf("unheard ordinary prompt bypassed displacement when factory ask also named: blocked=%d sends=%v err=%q", b, e.sendKeys(), toolErr)
+		}
+	})
+}
+
+// Pins Carbon finding 2: (a) when Factory is nil, labeled coordinator rows in
+// state.Store still never leak or accept interrupt/close/rename/run_cli/promise;
+// (b) an unlabeled engine-named CoordinatorPane merges its blocked dialog into
+// the project row (so send_keys still works) while refusing run_cli and promise.
+func TestFactoryCoordinatorNilFactoryAndUnlabeledMerge(t *testing.T) {
+	t.Run("nil_factory_labeled_coordinator", func(t *testing.T) {
+		m := braintest.NewModel()
+		e := newPR4Env(t, m, nil)
+		e.srv.Handle("pane.close", func(json.RawMessage) (any, error) { return map[string]any{"type": "ok"}, nil })
+		e.srv.Handle("agent.rename", func(json.RawMessage) (any, error) { return map[string]any{"type": "ok"}, nil })
+		lbl := map[string]string{"sheepdog.project": "proj-orphan", "sheepdog.role": flow.RoleCoordinator}
+		e.addPane("hc:coord-nil", "coord-nil", "claude", herdr.StateWorking, herdr.StateBlocked, lbl, "codex-approval-prompt.screen.txt")
+
+		host := e.sup.BrainHostForTest()
+		if len(host.Agents()) != 0 || strings.Contains(e.roster(), "proj-orphan") {
+			t.Errorf("Factory==nil leaked labeled coordinator: agents=%+v roster=%q", host.Agents(), e.roster())
+		}
+		target := "coord-nil"
+		if row, ok := e.store.Get("hc:coord-nil"); ok && row.Alias != "" {
+			target = row.Alias
+		}
+		if got, ok := host.Resolve(target); ok && !got.Project {
+			t.Errorf("Resolve(%q) exposed factory terminal with Factory==nil: %+v", target, got)
+		}
+		for _, fc := range []*genai.FunctionCall{
+			braintest.FC(brain.ToolRunCLI, map[string]any{"agent": target, "question": "git status"}),
+			braintest.FC(brain.ToolPromise, map[string]any{"agent": target, "text": "tell me", "event": "done"}),
+			braintest.FC(brain.ToolInterrupt, map[string]any{"agent": target}),
+			braintest.FC(brain.ToolInterrupt, map[string]any{"agent": target, "close": true}),
+			braintest.FC(brain.ToolNote, map[string]any{"agent": target, "name": "renamed"}),
+		} {
+			e.sayTool(m, "act on nil-factory coordinator", fc)
+		}
+		if len(e.sendKeys()) != 0 || len(e.srv.RequestsFor("pane.close")) != 0 || len(e.srv.RequestsFor("agent.rename")) != 0 || e.qCall != 0 || len(host.Promises()) != 0 {
+			t.Errorf("Factory==nil leaked side effects: sendKeys=%v close=%d rename=%d qCall=%d promises=%d",
+				e.sendKeys(), len(e.srv.RequestsFor("pane.close")), len(e.srv.RequestsFor("agent.rename")), e.qCall, len(host.Promises()))
+		}
+	})
+
+	t.Run("unlabeled_coordinator_merges_dialog_and_blocks_run_cli_and_promise", func(t *testing.T) {
+		fac := inject.NewFactory(nil)
+		fac.SetProject(inject.FactoryProject{ProjectHead: factory.ProjectHead{ID: "proj-1a2b3c4d", Folder: "/work/notes", Goal: "Notes", State: "running", CoordinatorPane: "hc:coord-unlabeled"}})
+		m := braintest.NewModel()
+		e := newPR4Env(t, m, fac)
+		e.addPane("hc:coord-unlabeled", "coord-raw", "claude", herdr.StateWorking, herdr.StateBlocked, nil, "codex-approval-prompt.screen.txt")
+
+		host := e.sup.BrainHostForTest()
+		var projRow brain.AgentInfo
+		for _, a := range host.Agents() {
+			if a.PaneID == "factory:proj-1a2b3c4d" {
+				projRow = a
+			}
+		}
+		if projRow.Pending == nil {
+			t.Errorf("unlabeled engine CoordinatorPane dialog did not merge onto project row: %+v", projRow)
+		}
+		target := "coord-raw"
+		if row, ok := e.store.Get("hc:coord-unlabeled"); ok && row.Alias != "" {
+			target = row.Alias
+		}
+		if got, ok := host.Resolve(target); !ok || got.PaneID != "factory:proj-1a2b3c4d" || !got.Project {
+			t.Errorf("Resolve(%q) = (%+v, %v), want merged factory:proj-1a2b3c4d", target, got, ok)
+		}
+		for _, fc := range []*genai.FunctionCall{
+			braintest.FC(brain.ToolRunCLI, map[string]any{"agent": target, "question": "git status"}),
+			braintest.FC(brain.ToolPromise, map[string]any{"agent": target, "text": "tell me", "event": "done"}),
+		} {
+			if _, err, b := e.sayTool(m, "query or promise coordinator", fc); b != 1 || !strings.Contains(err, "not on a factory project") {
+				t.Errorf("%s(%s): blocked=%d err=%q", fc.Name, target, b, err)
+			}
+		}
+		if e.qCall != 0 || len(host.Promises()) != 0 {
+			t.Errorf("unlabeled coordinator accepted run_cli/promise: qCall=%d promises=%d", e.qCall, len(host.Promises()))
+		}
+		e.now = e.now.Add(time.Second)
+		if _, err, _ := e.sayTool(m, "tell the notes factory yes", braintest.FC(brain.ToolSendKeys, map[string]any{"agent": "the notes factory", "keys": []any{"y"}})); err != "" || !slices.Equal(e.sendKeys(), [][2]string{{"hc:coord-unlabeled", "y"}}) {
+			t.Errorf("merged unlabeled coordinator send_keys = (%v, %q), want [[hc:coord-unlabeled y]]", e.sendKeys(), err)
+		}
+	})
+}
+
+// Pins Carbon finding 6: reading a factory project's board does not leave
+// lastSubject pointing at an earlier ordinary agent for follow-up "it" turns.
+func TestReadScreenOnProjectClearsStaleOrdinaryAgentFocus(t *testing.T) {
+	fac := inject.NewFactory(nil)
+	fac.SetProject(inject.FactoryProject{
+		ProjectHead: factory.ProjectHead{ID: "proj-1a2b3c4d", Folder: "/work/notes", Goal: "Notes", State: "running"},
+		Tasks:       []factory.TaskView{{Ref: "T9", Title: "feat: export", Stage: "done"}},
+	})
+	m := braintest.NewModel()
+	e := newPR4Env(t, m, fac)
+	e.addPane("w5:p1", "auth", "codex", "", herdr.StateIdle, nil, "")
+	e.srv.SetScreen("w5:p1", "auth screen\n")
+
+	e.sayTool(m, "check auth", braintest.FC(brain.ToolReadScreen, map[string]any{"agent": "auth"}))
+	e.sayTool(m, "how is the notes factory?", braintest.FC(brain.ToolReadScreen, map[string]any{"agent": "the notes factory"}))
+
+	e.sayTool(m, "why did it drop T9?", &genai.FunctionCall{Name: brain.ToolListAgents})
+	for _, msg := range slices.Backward(e.brain.Transcript().Messages()) {
+		if msg.Kind == brain.KindRequest && strings.Contains(msg.Content, "why did it drop T9?") {
+			if strings.Contains(msg.Content, "the one in focus is\n- auth") {
+				t.Errorf("after reading notes factory, pronoun 'it' still bound to auth:\n%s", msg.Content)
+			}
+			break
 		}
 	}
 }
