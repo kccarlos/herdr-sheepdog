@@ -79,7 +79,7 @@ func TestCoordinatorWakeRequeueDoesNotLoopOrDoubleDeliver(t *testing.T) {
 			h.now = h.now.Add(time.Minute)
 			h.pass()
 		}
-		if got := wakeSendsMatching(t, h.srv.Requests(), "worker_failed"); got != 1 {
+		if got := workerFailedWakeSends(t, h.srv.Requests()); got != 1 {
 			t.Errorf("agy blockquote wake sends = %d, want 1 (must not loop on > quote in reply)", got)
 		}
 	})
@@ -93,7 +93,7 @@ func TestCoordinatorWakeRequeueDoesNotLoopOrDoubleDeliver(t *testing.T) {
 			h.now = h.now.Add(time.Minute)
 			h.pass()
 		}
-		if got := wakeSendsMatching(t, h.srv.Requests(), "worker_failed"); got != 1 {
+		if got := workerFailedWakeSends(t, h.srv.Requests()); got != 1 {
 			t.Errorf("claude placeholder wake sends = %d, want 1 (must not loop on input placeholder)", got)
 		}
 	})
@@ -106,7 +106,7 @@ func TestCoordinatorWakeRequeueDoesNotLoopOrDoubleDeliver(t *testing.T) {
 			h.coordIdleWithStatus(coord1, "idle")
 		}
 		st := h.state()
-		sends := wakeSendsMatching(t, h.srv.Requests(), "worker_failed")
+		sends := workerFailedWakeSends(t, h.srv.Requests())
 		if st.Project.RunID == coord1 && sends > 4 {
 			t.Errorf("repeated Esc on same coordinator %s redelivered wake %d times (want bounded <= 4 or escalation/stop)", coord1, sends)
 		}
@@ -128,7 +128,7 @@ func TestCoordinatorWakeRequeueDoesNotLoopOrDoubleDeliver(t *testing.T) {
 		h.coordIdleWithStatus(coord1, "idle")
 		h.now = h.now.Add(time.Minute)
 		h.pass()
-		if got := wakeSendsMatching(t, h.srv.Requests(), "worker_failed"); got != 1 {
+		if got := workerFailedWakeSends(t, h.srv.Requests()); got != 1 {
 			t.Errorf("wake sends = %d after coordinator acted and answered owner follow-up, want 1", got)
 		}
 	})
@@ -151,7 +151,7 @@ func TestCoordinatorWakeSurvivesAgyEscScrolledEvidenceAndUnreadableScreen(t *tes
 		h.srv.SetScreen(coord1, "> Wake: 1 task wake(s) wait on you.\nRequest cancelled by user.\n"+agyIdleBox)
 		h.coordIdleWithStatus(coord1, "idle")
 		for _, step := range []time.Duration{time.Minute, 15 * time.Minute, 15 * time.Minute, time.Minute, 10 * time.Minute, time.Minute} {
-			if wakeSendsMatching(t, h.srv.Requests(), "worker_failed") >= 2 {
+			if workerFailedWakeSends(t, h.srv.Requests()) >= 2 {
 				return
 			}
 			h.now = h.now.Add(step)
@@ -161,7 +161,7 @@ func TestCoordinatorWakeSurvivesAgyEscScrolledEvidenceAndUnreadableScreen(t *tes
 			}
 		}
 		st := h.state()
-		t.Fatalf("agy Esc dropped wake: sends=%d inFlight=%d wakes=%d", wakeSendsMatching(t, h.srv.Requests(), "worker_failed"), len(st.Project.CoordWakesInFlight), len(st.Project.Wakes))
+		t.Fatalf("agy Esc dropped wake: sends=%d inFlight=%d wakes=%d", workerFailedWakeSends(t, h.srv.Requests()), len(st.Project.CoordWakesInFlight), len(st.Project.Wakes))
 	})
 
 	t.Run("claude_scrolled_owner_reply_recovers_wake", func(t *testing.T) {
@@ -179,7 +179,7 @@ func TestCoordinatorWakeSurvivesAgyEscScrolledEvidenceAndUnreadableScreen(t *tes
 		h.srv.SetScreen(coord1, b.String())
 		h.coordIdleWithStatus(coord1, "idle")
 		for _, step := range []time.Duration{time.Minute, 15 * time.Minute, 15 * time.Minute, time.Minute, 10 * time.Minute, time.Minute} {
-			if wakeSendsMatching(t, h.srv.Requests(), "worker_failed") >= 2 {
+			if workerFailedWakeSends(t, h.srv.Requests()) >= 2 {
 				return
 			}
 			h.now = h.now.Add(step)
@@ -189,7 +189,7 @@ func TestCoordinatorWakeSurvivesAgyEscScrolledEvidenceAndUnreadableScreen(t *tes
 			}
 		}
 		st := h.state()
-		t.Fatalf("scrolled >200-line owner reply dropped wake: sends=%d inFlight=%d wakes=%d", wakeSendsMatching(t, h.srv.Requests(), "worker_failed"), len(st.Project.CoordWakesInFlight), len(st.Project.Wakes))
+		t.Fatalf("scrolled >200-line owner reply dropped wake: sends=%d inFlight=%d wakes=%d", workerFailedWakeSends(t, h.srv.Requests()), len(st.Project.CoordWakesInFlight), len(st.Project.Wakes))
 	})
 
 	t.Run("codex_viewport_scrolled_owner_reply_recovers_wake", func(t *testing.T) {
@@ -203,7 +203,7 @@ func TestCoordinatorWakeSurvivesAgyEscScrolledEvidenceAndUnreadableScreen(t *tes
 		})
 		c.srv.SetScreen(coord1, codexIdleScreen("Initial goal", 15))
 		c.turnEnds()
-		if got := wakeSendsMatching(t, c.srv.Requests(), "worker_failed"); got != 1 {
+		if got := workerFailedWakeSends(t, c.srv.Requests()); got != 1 {
 			t.Fatalf("initial codex wake sends = %d, want 1", got)
 		}
 		// Owner asks a question; reply pushes `› why T1?` off the visible viewport (ObserveRun reads lines=0 for Codex).
@@ -212,7 +212,7 @@ func TestCoordinatorWakeSurvivesAgyEscScrolledEvidenceAndUnreadableScreen(t *tes
 		c.srv.SetScreen(coord1, "• Long explanation line 1.\n• Long explanation line 2.\n\n  Worked for 12s • 8:44 PM\n\n› Ask Codex to do anything\n\n  gpt-6.2-sol high · 96% left\n")
 		c.turnEnds()
 		for _, step := range []time.Duration{time.Minute, 15 * time.Minute, 15 * time.Minute, time.Minute, 10 * time.Minute, time.Minute} {
-			if wakeSendsMatching(t, c.srv.Requests(), "worker_failed") >= 2 {
+			if workerFailedWakeSends(t, c.srv.Requests()) >= 2 {
 				return
 			}
 			*c.now = c.now.Add(step)
@@ -224,7 +224,7 @@ func TestCoordinatorWakeSurvivesAgyEscScrolledEvidenceAndUnreadableScreen(t *tes
 		}
 		st := c.state()
 		t.Fatalf("codex viewport-scrolled owner reply dropped wake: sends=%d turn=%d wakeTurn=%d inFlight=%d wakes=%d",
-			wakeSendsMatching(t, c.srv.Requests(), "worker_failed"), st.Project.Run.Turn, st.Project.CoordWakeTurn, len(st.Project.CoordWakesInFlight), len(st.Project.Wakes))
+			workerFailedWakeSends(t, c.srv.Requests()), st.Project.Run.Turn, st.Project.CoordWakeTurn, len(st.Project.CoordWakesInFlight), len(st.Project.Wakes))
 	})
 
 	t.Run("unreadable_screen_does_not_retire_in_flight_wake", func(t *testing.T) {
@@ -236,14 +236,14 @@ func TestCoordinatorWakeSurvivesAgyEscScrolledEvidenceAndUnreadableScreen(t *tes
 		// Screen temporarily empty/unreadable on the idle transition tick.
 		h.srv.SetScreen(coord1, "")
 		h.coordIdleWithStatus(coord1, "idle")
-		if st := h.state(); len(st.Project.CoordWakesInFlight) == 0 && len(st.Project.Wakes) == 0 && wakeSendsMatching(t, h.srv.Requests(), "worker_failed") == 1 {
+		if st := h.state(); len(st.Project.CoordWakesInFlight) == 0 && len(st.Project.Wakes) == 0 && workerFailedWakeSends(t, h.srv.Requests()) == 1 {
 			t.Fatalf("empty/unreadable screen on idle tick silently retired CoordWakesInFlight")
 		}
 		// Once the screen is readable again with the interruption marker, the wake recovers.
 		h.srv.SetScreen(coord1, "❯ Wake: 1 task wake(s) wait on you.\n  ⎿  Interrupted · What should Claude do instead?\n❯ \n")
 		h.now = h.now.Add(time.Minute)
 		h.pass()
-		if got := wakeSendsMatching(t, h.srv.Requests(), "worker_failed"); got < 2 {
+		if got := workerFailedWakeSends(t, h.srv.Requests()); got < 2 {
 			t.Fatalf("wake did not recover once screen became readable: sends=%d", got)
 		}
 	})

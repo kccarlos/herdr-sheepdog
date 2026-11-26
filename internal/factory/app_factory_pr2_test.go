@@ -12,13 +12,13 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/hc/hctest"
 )
 
-func wakeSendsMatching(t *testing.T, reqs []hctest.Request, needle string) (n int) {
+func workerFailedWakeSends(t *testing.T, reqs []hctest.Request) (n int) {
 	t.Helper()
 	for _, r := range reqs {
 		var p struct {
 			Text string `json:"text"`
 		}
-		if r.Method == "terminal.send" && json.Unmarshal(r.Params, &p) == nil && strings.Contains(p.Text, needle) {
+		if r.Method == "terminal.send" && json.Unmarshal(r.Params, &p) == nil && strings.Contains(p.Text, "worker_failed") {
 			n++
 		}
 	}
@@ -35,7 +35,7 @@ func startDeliveredWake(t *testing.T, goal string) (*projectHarness, string) {
 		s.Project.Wakes = []flow.Wake{{Key: "worker_failed", Task: "T1", Why: "N23", Facts: "title x", At: h.now}}
 	})
 	h.coordIdleWithStatus(coord1, "idle") // J12 delivers wake
-	if got := wakeSendsMatching(t, h.srv.Requests(), "worker_failed"); got != 1 {
+	if got := workerFailedWakeSends(t, h.srv.Requests()); got != 1 {
 		t.Fatalf("initial wake sends = %d, want 1", got)
 	}
 	return h, coord1
@@ -49,7 +49,7 @@ func TestCoordinatorWakeRecoveryAfterEscAndOwnerTurn(t *testing.T) {
 	assertRecovered := func(t *testing.T, h *projectHarness, coord1, label string) {
 		t.Helper()
 		for _, step := range []time.Duration{time.Minute, 15 * time.Minute, 15 * time.Minute, time.Minute, 10 * time.Minute, time.Minute} {
-			if wakeSendsMatching(t, h.srv.Requests(), "worker_failed") >= 2 {
+			if workerFailedWakeSends(t, h.srv.Requests()) >= 2 {
 				return
 			}
 			h.now = h.now.Add(step)
@@ -60,7 +60,7 @@ func TestCoordinatorWakeRecoveryAfterEscAndOwnerTurn(t *testing.T) {
 		}
 		st := h.state()
 		t.Fatalf("%s: wake sends = %d (want >= 2); runID=%q turn=%d wakeTurn=%d wakeAt=%v inFlight=%d wakes=%d",
-			label, wakeSendsMatching(t, h.srv.Requests(), "worker_failed"), st.Project.RunID, st.Project.Run.Turn,
+			label, workerFailedWakeSends(t, h.srv.Requests()), st.Project.RunID, st.Project.Run.Turn,
 			st.Project.CoordWakeTurn, st.Project.CoordWakeAt, len(st.Project.CoordWakesInFlight), len(st.Project.Wakes))
 	}
 	t.Run("esc_interrupts_coordinator_turn", func(t *testing.T) {
