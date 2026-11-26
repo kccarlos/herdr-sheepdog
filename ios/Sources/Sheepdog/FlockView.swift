@@ -982,51 +982,47 @@ struct SeenWhileVisible: ViewModifier {
     }
 }
 
-private struct FactoryHeadCard: View {
+struct FactoryHeadCard: View {
     let item: FactoryAgentsList.Item
     let computer: ComputerSnapshot?
     let dialog: ApprovalFlow.Card?
     let answer: (String, Int) -> Void
+    var project: FactoryProjectBoard?
+    var onStop: (() -> Void)?
+    var didResume: (() -> Void)?
 
     @EnvironmentObject private var model: SessionViewModel
-    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var resuming = false
     @State private var resumeError: String?
 
-    private var tint: Color {
-        switch item.head.state {
-        case .running: return Theme.color(for: .working)
-        case .finished: return Theme.done
-        default: return Theme.idle
-        }
-    }
-
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 4) {
-                let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 6))
-                ViewThatFits(in: .horizontal) {
-                    HStack { layout { name; kind }.fixedSize(); Spacer(minLength: 8); state.fixedSize() }
-                    VStack(alignment: .leading, spacing: 4) { layout { name; kind }; state }
-                }
-                Text(item.head.goal).font(.subheadline)
-                Text(counts).font(.footnote).foregroundStyle(Theme.muted)
-                item.caption(computerName: computer?.name).map { Text($0).font(.caption.monospaced()).foregroundStyle(Theme.muted) }
+            if project != nil {
+                summary
+            } else {
+                NavigationLink {
+                    FactoryProjectView(initialHead: item.head, computerID: computer?.id ?? model.currentComputerID)
+                } label: { summary.contentShape(Rectangle()) }
+                .buttonStyle(.plain)
+                .accessibilityLabel([item.accessibilitySummary, computer?.name.trimmedOrNil].compactMap { $0 }.joined(separator: ", "))
+                .accessibilityIdentifier("flock.factory.\(item.id)")
             }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel([item.accessibilitySummary, computer?.name.trimmedOrNil].compactMap { $0 }.joined(separator: ", "))
-            .accessibilityIdentifier("flock.factory.\(item.id)")
             item.alertLine.map { Text($0).font(.subheadline.weight(.semibold)) }
             item.alertFixLine.map { Text($0).font(.footnote).foregroundStyle(Theme.muted) }
+            if let onStop {
+                Button("Stop", action: onStop).accessibilityLabel("Stop this project").accessibilityIdentifier("factoryProject.stop")
+            }
             if let folder = item.resumableFolder {
                 Button(resuming ? "Resuming…" : "Resume") { resume(folder: folder) }
                     .buttonStyle(.bordered)
                     .tint(Theme.ink)
                     .controlSize(.large)
                     .disabled(resuming)
-                    .accessibilityLabel(resuming ? "Resuming \(item.head.name)" : "Resume \(item.head.name)")
+                    .accessibilityLabel(project?.resumeAccessibilityLabel ?? (resuming ? "Resuming \(item.head.name)" : "Resume \(item.head.name)"))
+                    .accessibilityIdentifier(project == nil ? "" : "factoryProject.resume")
                 if let resumeError { Text(resumeError).font(.footnote).foregroundStyle(Theme.danger) }
             }
+            project?.barNote.map { Text($0).font(.footnote).foregroundStyle(Theme.muted) }
             if item.coordinatorBlocked {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.stuckHeading).font(.subheadline.weight(.semibold))
@@ -1049,17 +1045,8 @@ private struct FactoryHeadCard: View {
             .strokeBorder(item.coordinatorBlocked ? Theme.blocked : Theme.line))
     }
 
-    private var counts: AttributedString {
-        var text = AttributedString(item.countsLine)
-        if item.waitingOnYouCount > 0, let range = text.range(of: "\(item.waitingOnYouCount) waiting on you") {
-            text[range].foregroundColor = Theme.blockedText
-            text[range].font = .footnote.weight(.semibold)
-        }
-        return text
-    }
-
     private func resume(folder: String) {
-        guard let session = computer.flatMap({ model.session($0.id) }) ?? (computer == nil ? model.fleet.current : nil) else {
+        guard let session = model.fleet.model(computer?.id ?? model.currentComputerID) else {
             resumeError = "Check the computer's connection, then try again."
             return
         }
@@ -1072,10 +1059,45 @@ private struct FactoryHeadCard: View {
                     try await $0.resumeFactory(folder: folder, goal: goal)
                 }
                 await session.refresh()
+                didResume?()
             } catch {
                 resumeError = FactoryAgentsList.resumeErrorMessage(error, computerName: session.name)
             }
         }
+    }
+
+    @Environment(\.dynamicTypeSize) private var typeSize
+    private var summary: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            let layout = typeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 6))
+            ViewThatFits(in: .horizontal) {
+                HStack { layout { name; kind }.fixedSize(); Spacer(minLength: 8); state.fixedSize() }
+                VStack(alignment: .leading, spacing: 4) { layout { name; kind }; state }
+            }
+            Text(item.head.goal).font(.subheadline)
+            Text(counts).font(.footnote).foregroundStyle(Theme.muted)
+            (project?.caption ?? item.caption(computerName: computer?.name)).map {
+                Text($0).font(.caption.monospaced()).foregroundStyle(Theme.muted)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var tint: Color {
+        switch item.head.state {
+        case .running: return Theme.color(for: .working)
+        case .finished: return Theme.done
+        default: return Theme.idle
+        }
+    }
+
+    private var counts: AttributedString {
+        var text = AttributedString(item.countsLine)
+        if item.waitingOnYouCount > 0, let range = text.range(of: "\(item.waitingOnYouCount) waiting on you") {
+            text[range].foregroundColor = Theme.blockedText
+            text[range].font = .footnote.weight(.semibold)
+        }
+        return text
     }
 
     private var name: some View {
