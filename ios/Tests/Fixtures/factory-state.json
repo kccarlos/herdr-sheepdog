@@ -1,0 +1,220 @@
+{
+  "agents": [
+    {
+      "pane_id": "fake:1",
+      "alias": "auth",
+      "kind": "codex",
+      "workspace": "synthetic",
+      "spoken": "auth",
+      "state": "blocked",
+      "state_since": "2026-11-25T11:00:00Z",
+      "last_block": {
+        "question": "would you like to run the following command",
+        "seen_at": "2026-11-25T11:00:00Z",
+        "answered": false
+      },
+      "last_interaction": "2026-11-25T11:00:00Z",
+      "synthetic": true
+    },
+    {
+      "pane_id": "coord-notes-1",
+      "alias": "notes",
+      "project_name": "notes",
+      "kind": "claude",
+      "workspace": "ws-notes",
+      "spoken": "notes",
+      "state": "blocked",
+      "state_since": "2026-11-25T11:02:00Z",
+      "last_interaction": "2026-11-25T11:02:00Z"
+    }
+  ],
+  "pending_action": {
+    "id": "fask-ask-delete-1",
+    "pane_id": "factory:proj-1a2b3c4d",
+    "kind": "answer_prompt",
+    "spoken_summary": "Delete the old notes table in the migration?",
+    "payload_text": "",
+    "created_at": "2026-11-25T11:05:00Z",
+    "expires_at": "0001-01-01T00:00:00Z",
+    "factory": {
+      "project": "proj-1a2b3c4d",
+      "task": "T10",
+      "kind": "delete"
+    },
+    "question": "Delete the old notes table in the migration?",
+    "agent": "notes",
+    "summary": "Delete the old notes table in the migration?",
+    "options": [
+      {
+        "index": 1,
+        "label": "Delete",
+        "keys": ["1"],
+        "default": true,
+        "recommended": true
+      },
+      {
+        "index": 2,
+        "label": "Keep",
+        "keys": ["2"],
+        "default": false
+      }
+    ]
+  },
+  "questions": [
+    {
+      "id": "fask-ask-delete-1",
+      "pane_id": "factory:proj-1a2b3c4d",
+      "kind": "answer_prompt",
+      "spoken_summary": "Delete the old notes table in the migration?",
+      "payload_text": "",
+      "created_at": "2026-11-25T11:05:00Z",
+      "expires_at": "0001-01-01T00:00:00Z",
+      "factory": {
+        "project": "proj-1a2b3c4d",
+        "task": "T10",
+        "kind": "delete"
+      },
+      "question": "Delete the old notes table in the migration?",
+      "agent": "notes",
+      "summary": "Delete the old notes table in the migration?",
+      "options": [
+        {
+          "index": 1,
+          "label": "Delete",
+          "keys": ["1"],
+          "default": true,
+          "recommended": true
+        },
+        {
+          "index": 2,
+          "label": "Keep",
+          "keys": ["2"],
+          "default": false
+        }
+      ]
+    },
+    {
+      "id": "fask-ask-rule-1",
+      "pane_id": "factory:proj-1a2b3c4d",
+      "kind": "answer_prompt",
+      "spoken_summary": "This project: max running 3 (now 2). Save?",
+      "payload_text": "",
+      "created_at": "2026-11-25T11:06:00Z",
+      "expires_at": "0001-01-01T00:00:00Z",
+      "factory": {
+        "project": "proj-1a2b3c4d",
+        "kind": "rule"
+      },
+      "question": "This project: max running 3 (now 2). Save?",
+      "agent": "notes",
+      "summary": "This project: max running 3 (now 2). Save?",
+      "options": [
+        {
+          "index": 1,
+          "label": "Save",
+          "keys": ["1"],
+          "default": true,
+          "recommended": true
+        },
+        {
+          "index": 2,
+          "label": "Keep current",
+          "keys": ["2"],
+          "default": false
+        }
+      ]
+    },
+    {
+      "id": "ap-ordinary-1",
+      "pane_id": "fake:1",
+      "kind": "answer_prompt",
+      "spoken_summary": "auth asks to run printf.",
+      "payload_text": "",
+      "created_at": "2026-11-25T11:00:00Z",
+      "expires_at": "2026-11-25T11:02:00Z",
+      "question": "would you like to run the following command",
+      "command": "printf 'hi'",
+      "agent": "auth",
+      "summary": "auth asks to run printf.",
+      "options": [
+        {
+          "index": 1,
+          "label": "Yes, proceed",
+          "keys": ["y"],
+          "default": true
+        },
+        {
+          "index": 2,
+          "label": "No",
+          "keys": ["esc"],
+          "default": false
+        }
+      ]
+    }
+  ],
+  "factory": [
+    {
+      "id": "proj-1a2b3c4d",
+      "name": "notes",
+      "goal": "A notes page with search",
+      "state": "running",
+      "counts": {
+        "done": 9,
+        "owner_answer": 1,
+        "waiting_on_dep": 1,
+        "working": 3
+      },
+      "folder": "/work/notes",
+      "coordinator_pane": "coord-notes-1",
+      "alert": {
+        "kind": "agents_down",
+        "cause": "claude coordinator is signed out",
+        "fix": "sign in to claude at this Mac"
+      }
+    },
+    {
+      "id": "proj-2b3c4d5e",
+      "name": "recipes",
+      "goal": "Recipe index",
+      "state": "stopped",
+      "counts": {
+        "queued": 2
+      },
+      "folder": "/work/recipes",
+      "alert": {
+        "kind": "ci_stalled",
+        "cause": "CI pending"
+      }
+    },
+    {
+      "id": "proj-3c4d5e6f",
+      "name": "proj-3c4d5e6f",
+      "goal": "Ship v1",
+      "state": "finished",
+      "counts": {
+        "done": 4
+      }
+    }
+  ],
+  "session": {
+    "voice_connected": true
+  },
+  "voice": {
+    "mode": "off",
+    "status": "closed",
+    "muted": false,
+    "stalled": false,
+    "speaking": false,
+    "client_connected": false
+  },
+  "brain": {
+    "provider": "gemini",
+    "model": "gemini-3.5-flash"
+  },
+  "herdr": "mock",
+  "version": "test",
+  "now": "2026-11-25T11:06:00Z",
+  "voice_provider": "off",
+  "voice_model": "",
+  "conversation_started_at": "2026-11-25T11:00:00Z"
+}
