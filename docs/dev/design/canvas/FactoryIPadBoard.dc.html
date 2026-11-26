@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — iPad, a project: task list and graph side by side</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}
+button,input{font:inherit}
+button{cursor:pointer}
+</style>
+</helmet>
+<div style="width: 1376px; height: 1032px; display: flex; overflow: hidden; background: {{c.bg}}; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <dc-import name="FactoryIPadSidebar" sel="notes" dark="{{ dark }}" style="display: block; width: 390px; height: 1032px; flex-shrink: 0" hint-size="390px,1032px"></dc-import>
+  <section aria-label="notes, a factory project" style="position: relative; width: 986px; height: 1032px; display: flex; flex-direction: column">
+    <div style="height: 24px; flex-shrink: 0"></div>
+    <header style="flex-shrink: 0; display: flex; align-items: flex-start; gap: 16px; padding: 10px 24px 14px; border-bottom: 1px solid {{c.line}}">
+      <div style="flex-grow: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0">
+        <span style="display: flex; align-items: center; gap: 10px"><h1 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 26px; font-weight: 700">notes</h1><span style="display: flex; align-items: center; gap: 5px; font-size: 12.5px; font-weight: 600; padding: 2px 9px; border-radius: 10px; background: {{c.surface2}}"><span style="width: 7px; height: 7px; border-radius: 4px; background: {{c.blue}}"></span>running</span></span>
+        <span style="font-size: 15px">A notes page with search</span>
+        <span style="font-size: 12.5px; color: {{c.ink2}}">3 working · <span style="color: {{c.accentText}}; font-weight: 600">1 waiting on you</span> · 9 of 14 done · <span style="font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace">~/code/notes</span></span>
+      </div>
+      <div role="group" aria-label="This project" style="display: flex; gap: 8px; align-items: center; flex-shrink: 0">
+        <button aria-label="Stop this project" style="min-height: 40px; padding: 0 16px; border-radius: 20px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 15px; font-weight: 600">Stop</button>
+        <button style="min-height: 40px; padding: 0 16px; border-radius: 20px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 15px; font-weight: 600">New goal</button>
+        <a href="FactoryWindow.dc.html" aria-label="Open the notes coordinator's window" style="min-height: 40px; padding: 0 12px; border-radius: 20px; border: 1px solid {{c.line}}; background: {{c.surface2}}; display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: {{c.ink}}; text-decoration: none;"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"></rect><path d="M7 9l3 3-3 3M12.500 15H17"></path></svg>Coordinator</a>
+        <button aria-label="Settings for notes" style="width: 40px; height: 40px; border-radius: 20px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; display: flex; align-items: center; justify-content: center"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"></path><circle cx="16" cy="6" r="2"></circle><circle cx="10" cy="12" r="2"></circle><circle cx="18" cy="18" r="2"></circle></svg></button>
+      </div>
+    </header>
+    <div style="flex-shrink: 0; padding: 12px 24px 0; display: flex; flex-direction: column; gap: 5px">
+      <label for="tellp" style="font-size: 12.5px; font-weight: 600; color: {{c.ink2}}">Tell the notes factory</label>
+      <div style="display: flex; align-items: center; gap: 8px; height: 44px; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface}}; padding: 0 6px 0 14px">
+        <input id="tellp" type="text" placeholder="An instruction, in your own words" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; font-size: 15px; outline: none; color: {{c.ink}}">
+        <button aria-label="Send to the notes factory" style="width: 32px; height: 32px; border-radius: 16px; border: 0; background: {{c.line}}; color: {{c.surface}}; display: flex; align-items: center; justify-content: center"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"></path></svg></button>
+      </div>
+      <span style="font-size: 12.5px; line-height: 1.4; color: {{c.ink2}}">Delivered when the coordinator is next free. To answer an ask, use its card. A question? Ask by voice, or ask Sheepdog in Conversation.</span>
+    </div>
+    <main style="flex-grow: 1; min-height: 0; display: grid; grid-template-columns: 360px minmax(0, 1fr); gap: 20px; padding: 14px 24px 24px">
+      <div style="display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow: hidden">
+        <dc-import name="FactoryAskCard" kind="delete" dark="{{ dark }}" w="{{ 360 }}" style="display: block; width: 360px; flex-shrink: 0" hint-size="360px,236px"></dc-import>
+        <div style="flex-shrink: 0; border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.line}}; display: flex; flex-direction: column">
+          <sc-for list="{{ rows }}" as="t" hint-placeholder-count="6">
+            <sc-if value="{{ t.isGroup }}" hint-placeholder-val="{{ false }}">
+              <span style="padding: 8px 14px 2px; border-top: {{ t.top }}; font-size: 12.5px; font-weight: 600; color: {{ t.color }}">{{ t.label }} <span style="font-weight: 400; color: {{c.ink2}}">{{ t.count }}</span></span>
+            </sc-if>
+            <sc-if value="{{ t.isTask }}" hint-placeholder-val="{{ true }}">
+              <a href="FactoryTask.dc.html" aria-current="{{ t.current }}" aria-label="{{ t.aria }}" style="padding: 6px 14px 8px; display: flex; flex-direction: column; gap: 4px; background: {{ t.bg }}; color: {{c.ink}}; text-decoration: none;">
+                <span style="font-size: 15px; font-weight: 600"><span style="font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 12.5px; font-weight: 500; color: {{ t.sub }}">{{ t.id }}</span> {{ t.title }}</span>
+                <span aria-hidden="true" style="display: flex; gap: 3px"><sc-for list="{{ t.steps }}" as="g" hint-placeholder-count="5"><span style="flex: 1 1 0; height: 5px; border-radius: 3px; background: {{ g.col }}"></span></sc-for></span>
+                <span style="font-size: 12.5px">{{ t.bar }}</span>
+                <sc-if value="{{ t.hasRun }}" hint-placeholder-val="{{ false }}"><span style="font-size: 12.5px; color: {{ t.sub }}">{{ t.run }}</span></sc-if>
+              </a>
+            </sc-if>
+          </sc-for>
+          <button aria-expanded="false" style="min-height: 44px; border: 0; border-top: 1px solid {{c.line}}; background: transparent; color: {{c.ink2}}; padding: 0 14px; display: flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 600; text-align: left"><svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg>done 9</button>
+        </div>
+      </div>
+      <section aria-label="task graph: 14 tasks in 4 layers" style="border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.line}}; display: flex; flex-direction: column; min-height: 0; overflow: hidden">
+        <span style="padding: 10px 14px 0; font-size: 12.5px; font-weight: 600; color: {{c.ink2}}">Graph</span>
+        <div style="position: relative; flex-grow: 1">
+          <svg width="560" height="700" aria-hidden="true" style="position: absolute; left: 0; top: 0">
+            <path d="M130 257 C140 257 140 59 150 59" fill="none" stroke="{{ c.chevron }}" stroke-width="1.5"></path>
+            <path d="M130 257 C140 257 140 125 150 125" fill="none" stroke="{{ c.chevron }}" stroke-width="1.5"></path>
+            <path d="M130 191 C140 191 140 191 150 191" fill="none" stroke="{{ c.chevron }}" stroke-width="1.5"></path>
+            <path d="M268 191 C278 191 278 59 288 59" fill="none" stroke="{{ c.chevron }}" stroke-width="1.5"></path>
+            <path d="M268 59 C278 59 278 59 288 59" fill="none" stroke="{{ c.chevron }}" stroke-width="1.5"></path>
+            <path d="M268 59 C278 59 278 125 288 125" fill="none" stroke="{{ c.ink }}" stroke-width="2"></path>
+            <path d="M268 125 C278 125 278 191 288 191" fill="none" stroke="{{ c.chevron }}" stroke-width="1.5"></path>
+            <path d="M406 125 C416 125 416 125 426 125" fill="none" stroke="{{ c.ink }}" stroke-width="2"></path>
+            <path d="M406 59 C416 59 416 59 426 59" fill="none" stroke="{{ c.chevron }}" stroke-width="1.5"></path>
+          </svg>
+          <sc-for list="{{ nodes }}" as="n" hint-placeholder-count="12">
+            <a href="FactoryTask.dc.html" aria-label="{{ n.aria }}" style="position: absolute; left: {{ n.x }}px; top: {{ n.y }}px; width: 118px; height: 46px; box-sizing: border-box; border-radius: 10px; background: {{c.surface}}; border: {{ n.border }}; padding: 4px 8px; display: flex; flex-direction: column; justify-content: center; gap: 1px; box-shadow: {{ n.ring }}; color: {{c.ink}}; text-decoration: none;">
+              <span style="display: flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700"><span style="width: 7px; height: 7px; border-radius: 4px; background: {{ n.dot }}"></span>{{ n.id }}</span>
+              <span style="font-size: 12px; color: {{c.ink2}}; white-space: nowrap">{{ n.word }}</span>
+            </a>
+          </sc-for>
+        </div>
+      </section>
+    </main>
+    <div style="position: absolute; left: 310px; bottom: 26px; width: 366px; height: 60px; display: flex"><dc-import name="Dock" label="Work Mac" status="Listening" mode="quiet" dark="{{ dark }}" style="display: block; width: 366px; height: 60px" hint-size="366px,60px"></dc-import></div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "$preview": {"width": 1376, "height": 1032}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = {"bg": "#FAF8F3", "surface": "#FFFFFF", "surface2": "#F1EEE7", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7", "accentText": "#8A5700", "blocked": "#D99417", "blue": "#1F5F9E", "green": "#1D6B46", "idle": "#5C6370", "slate": "#8E929A", "chevron": "#8E929A", "dash": "#8E8A80", "selBg": "#E5DFD2"};
+    const dark = {"bg": "#16181C", "surface": "#1F2126", "surface2": "#26292F", "ink": "#F5F2EA", "ink2": "#A3A7AF", "line": "#2E3138", "accentText": "#F5B83D", "blocked": "#F0A92A", "blue": "#6AA8EB", "green": "#5CC792", "idle": "#9AA1AD", "slate": "#8E929A", "chevron": "#8E929A", "dash": "#6B707A", "selBg": "#2C2F36"};
+    const d = !!this.props.dark;
+    const c = d ? dark : light;
+    const seg = { d: c.green, n: c.blue, t: c.line };
+    const steps = (code) => code.split('').map((k) => ({ col: seg[k] }));
+    const group = (label, count, color, first) => ({ isGroup: true, isTask: false, label, count, color, top: first ? "0" : "1px solid " + c.line });
+    const task = (id, title, code, bar, run, sel) => ({ isGroup: false, isTask: true, id, title, steps: steps(code), bar, run, hasRun: !!run, current: sel ? "page" : "false", bg: sel ? c.selBg : "transparent", sub: sel ? c.ink : c.ink2, aria: id + ", " + title + ". " + bar + (run ? ". " + run : "") });
+    const rows = [
+      group("waiting on you", "1", c.accentText, true),
+      task("T10", "feat: import", "dnttt", "implementing, waiting on your answer", ""),
+      group("working", "2", c.ink2, false),
+      task("T8", "feat: tags", "dnttt", "implementing, sent back from review round 1", "worker · codex · 31 min", true),
+      task("T7", "feat: search", "ddntt", "review round 2; needs 2 passing, at most 5", "reviewer · claude · 6 min"),
+      group("waiting on others", "1", c.ink2, false),
+      task("T11", "feat: sync", "ttttt", "planned, after T8", "")
+    ];
+    const S = {
+      done: [c.green, "1px solid " + c.line, "done"], working: [c.blue, "1px solid " + c.line, "working"],
+      you: [c.blocked, "2px solid " + c.blocked, "waiting on you"], others: [c.slate, "1px solid " + c.line, "waiting on others"],
+      queued: [c.slate, "1px dashed " + c.dash, "queued"], split: [c.idle, "1px dashed " + c.dash, "split"], dropped: [c.idle, "1px dashed " + c.dash, "dropped"]
+    };
+    const X = [12, 150, 288, 426];
+    const N = (id, title, col, row, st, after) => ({ id, title, x: X[col], y: 14 + row * 66, st, after: after || [] });
+    const raw = [
+      N("T1", "Notes page", 0, 0, "done"), N("T2", "Note editor", 0, 1, "done"), N("T3", "Search index", 0, 2, "done"), N("T6", "Storage", 0, 3, "split"), N("T9", "Export to PDF", 0, 4, "dropped"),
+      N("T12", "Storage: tables", 1, 0, "done", ["T6"]), N("T13", "Storage: migration", 1, 1, "done", ["T6"]), N("T4", "Search box", 1, 2, "done", ["T3"]),
+      N("T7", "Search", 2, 0, "working", ["T4", "T12"]), N("T8", "Tags", 2, 1, "working", ["T12"]), N("T10", "Import", 2, 2, "you", ["T13"]),
+      N("T11", "Sync", 3, 1, "others", ["T8"]), N("T14", "Search filters", 3, 0, "queued", ["T7"])
+    ];
+    const by = {}; raw.forEach((n) => { by[n.id] = n; });
+    const nodes = raw.map((n) => {
+      const s = S[n.st];
+      return { id: n.id, x: n.x, y: n.y + 22, dot: s[0], border: s[1], word: s[2], ring: n.id === "T8" ? "0 0 0 3px " + c.blue : "none", aria: n.id + ", " + n.title + ", " + s[2] + (n.after.length ? ", after " + n.after.join(" and ") : "") };
+    });
+    return { c, dark: d, rows, nodes };
+  }
+}
+</script>
+</body>
+</html>

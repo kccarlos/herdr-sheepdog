@@ -15,21 +15,39 @@ body{margin:0}
 button{font:inherit;cursor:pointer}
 </style>
 </helmet>
-<section aria-label="The herdr-sheepdog factory needs your answer" style="width: {{ w }}px; box-sizing: border-box; padding: 12px; border-radius: 14px; background: {{c.accentTint}}; border: 1px solid {{c.blocked}}; display: flex; flex-direction: column; gap: 10px; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
-  <span style="font-size: {{ fq }}px; line-height: 1.33; font-weight: 600">The herdr-sheepdog factory asks: tag 0.1.31 now? Milestone 2 is accepted and main is green.</span>
+<section aria-label="{{ k.aria }}" style="width: {{ w }}px; box-sizing: border-box; padding: 12px; border-radius: 14px; background: {{c.accentTint}}; border: 1px solid {{c.blocked}}; display: flex; flex-direction: column; gap: 8px; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <span style="font-size: {{ fm }}px; line-height: 1.35; font-weight: 600; color: {{c.accentText}}">{{ k.meta }}</span>
+  <span style="font-size: {{ fq }}px; line-height: 1.33; font-weight: 600">{{ k.q }}</span>
+  <sc-if value="{{ k.hasList }}" hint-placeholder-val="{{ false }}">
+    <ul style="list-style: none; margin: 0; padding: 8px 10px; border-radius: 10px; background: {{c.surface}}; display: flex; flex-direction: column; gap: 3px">
+      <sc-for list="{{ k.list }}" as="l" hint-placeholder-count="4"><li style="font-size: {{ fm }}px; line-height: 1.4">{{ l.t }}</li></sc-for>
+    </ul>
+  </sc-if>
   <div style="display: flex; flex-wrap: wrap; gap: 6px">
-    <button style="min-height: 44px; padding: 6px 14px; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: {{ fo }}px; font-weight: 600; text-align: left; flex: 1 1 100%; display: flex; align-items: center; gap: 8px">Tag 0.1.31<span style="font-size: 11px; font-weight: 600; padding: 2px 7px; border-radius: 9px; background: {{c.accentTint}}; color: {{c.accentText}}">Recommended</span></button>
-    <button style="min-height: 44px; padding: 6px 14px; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: {{ fo }}px; text-align: left; flex: 1 1 100%">Wait for one more QA pass</button>
-    <button style="min-height: 44px; padding: 6px 14px; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: {{ fo }}px; text-align: left; flex: 1 1 100%">Not now</button>
+    <sc-for list="{{ k.opts }}" as="o" hint-placeholder-count="3">
+      <button aria-label="{{ o.aria }}" style="min-height: 44px; padding: 6px 14px; border-radius: 22px; border: {{ o.border }}; background: {{c.surface}}; color: {{c.ink}}; font-size: {{ fo }}px; font-weight: {{ o.weight }}; text-align: left; flex: 1 1 100%; display: flex; align-items: center; gap: 8px; flex-wrap: wrap">{{ o.label }}<sc-if value="{{ o.rec }}" hint-placeholder-val="{{ false }}"><span style="font-size: {{ ft }}px; font-weight: 600; padding: 2px 7px; border-radius: 9px; background: {{c.accentTint}}; color: {{c.accentText}}">Recommended</span></sc-if></button>
+    </sc-for>
   </div>
+  <sc-if value="{{ k.hasFoot }}" hint-placeholder-val="{{ false }}"><span style="font-size: {{ fm }}px; line-height: 1.4; color: {{c.ink}}">{{ k.foot }}</span></sc-if>
 </section>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "w": {"editor": "int", "default": 358}, "ax": {"editor": "boolean", "default": false}, "$preview": {"width": 358, "height": 236}}'>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "w": {"editor": "int", "default": 358}, "ax": {"editor": "boolean", "default": false}, "kind": {"editor": "enum", "options": ["delete", "release", "readback", "override"], "default": "delete"}, "$preview": {"width": 358, "height": 236}}'>
 class Component extends DCLogic {
   renderVals() {
     const light = {"surface": "#FFFFFF", "ink": "#1F1F22", "line": "#E4E0D7", "accentText": "#8A5700", "accentTint": "#FDF1DC", "blocked": "#D99417"};
     const dark = {"surface": "#1F2126", "ink": "#F5F2EA", "line": "#2E3138", "accentText": "#F5B83D", "accentTint": "#2A2416", "blocked": "#F0A92A"};
-    return { c: this.props.dark ? dark : light, w: this.props.w ?? 358, fq: this.props.ax ? 22 : 15, fo: this.props.ax ? 22 : 15 };
+    const c = this.props.dark ? dark : light;
+    const opt = (label, rec) => ({ label, rec: !!rec, weight: rec ? 600 : 400, border: rec ? "2px solid " + c.ink : "1px solid " + c.line, aria: rec ? label + " (Recommended)" : label });
+    const kinds = {
+      delete: { meta: "notes · T10 · the coordinator asks", q: "Delete the old notes table in the migration?", opts: [opt("Keep it and copy the rows", true), opt("Delete it"), opt("Not now")], aria: "notes, T10, needs your answer" },
+      release: { meta: "notes · the coordinator asks", q: "Tag 0.2.0 now? All 14 tasks are merged and main is green.", opts: [opt("Tag 0.2.0", true), opt("Wait for one more QA pass"), opt("Not now")], aria: "notes needs your answer" },
+      readback: { meta: "notes · setting · the engine asks", q: "This project: worker models agy/gemini-4-neon/medium then claude/sonnet/medium (now claude/sonnet/medium). Save?", opts: [opt("Save", true), opt("Keep current")], aria: "notes, a setting, needs your answer" }
+    };
+    kinds.override = { meta: "notes · T7 · override", q: "Merge T7 now, without waiting for review and CI?", list: [{ t: "PR #41 · commit 3f9c2ab" }, { t: "CI running · review round 1 of 2" }, { t: "No unreported work in the worktree" }], opts: [opt("Yes, merge now"), opt("No, wait", true)], aria: "notes, T7, override, needs your answer", foot: "Only you can answer this. A conflict, or a commit newer than this card, is not merged." };
+    Object.keys(kinds).forEach((n) => { kinds[n].hasList = !!kinds[n].list; kinds[n].list = kinds[n].list || []; kinds[n].hasFoot = !!kinds[n].foot; kinds[n].foot = kinds[n].foot || ""; });
+    const k = kinds[this.props.kind ?? 'delete'] || kinds.delete;
+    const ax = !!this.props.ax;
+    return { c, k, w: this.props.w ?? 358, fq: ax ? 43 : 15, fo: ax ? 43 : 15, fm: ax ? 40 : 12.5, ft: ax ? 34 : 11 };
   }
 }
 </script>

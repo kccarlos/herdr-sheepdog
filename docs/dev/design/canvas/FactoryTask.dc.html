@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — a factory task on the phone</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}
+button{font:inherit;cursor:pointer}
+ol{list-style:none;margin:0;padding:0}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; display: flex; flex-direction: column; overflow: hidden; background: {{c.bg}}; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <div style="height: 54px; flex-shrink: 0"></div>
+  <header style="height: 44px; flex-shrink: 0; display: flex; align-items: center; padding: 0 6px">
+    <a href="FactoryProject.dc.html" style="height: 44px; display: flex; align-items: center; gap: 2px; padding: 0 8px 0 2px; color: {{c.accentText}}; font-size: 15px; text-decoration: none;"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg>notes</a>
+  </header>
+  <main style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 10px; padding: 0 16px 16px">
+    <div style="display: flex; flex-direction: column; gap: 4px; padding: 0 4px">
+      <span style="font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 13px; color: {{c.ink2}}">T8</span>
+      <h1 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 26px; font-weight: 700; letter-spacing: -0.3px">feat: tags</h1>
+      <span style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px"><span style="display: flex; align-items: center; gap: 5px; font-weight: 600; padding: 2px 9px; border-radius: 10px; background: {{c.surface2}}"><span style="width: 7px; height: 7px; border-radius: 4px; background: {{c.blue}}"></span>working</span><span style="color: {{c.ink2}}">after T6</span></span>
+      <span aria-label="Running now: a worker, codex, gpt-6.2-sol, started 31 minutes ago" style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: {{c.ink2}}; margin-top: 2px"><svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.500"></circle><path d="M5 20c1-4 4-6 7-6s6 2 7 6"></path></svg>worker · codex · gpt-6.2-sol · 31 min</span>
+    </div>
+
+    <section aria-labelledby="steps" style="border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.line}}; padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 8px">
+      <h2 id="steps" style="margin: 0; font-size: 13px; font-weight: 600; color: {{c.ink2}}">Steps</h2>
+      <ol style="display: flex; flex-direction: column; gap: 8px">
+        <sc-for list="{{ steps }}" as="s" hint-placeholder-count="5">
+          <li aria-label="{{ s.aria }}" style="display: flex; gap: 10px; align-items: flex-start">
+            <span aria-hidden="true" style="width: 18px; height: 18px; flex-shrink: 0; margin-top: 1px; box-sizing: border-box; border-radius: 9px; border: 2px {{ s.ringStyle }} {{ s.ring }}; background: {{ s.fill }}; color: {{c.surface}}; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 800">{{ s.glyph }}</span>
+            <span style="display: flex; flex-direction: column; gap: 1px"><span style="font-size: 15px; font-weight: {{ s.weight }}">{{ s.name }} <span style="font-size: 12.5px; font-weight: 400; color: {{c.ink2}}">{{ s.word }}</span></span><span style="font-size: 12.5px; line-height: 1.35; color: {{c.ink2}}">{{ s.text }}</span></span>
+          </li>
+        </sc-for>
+      </ol>
+    </section>
+
+    <section aria-labelledby="last" style="border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.line}}; padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 6px">
+      <h2 id="last" style="margin: 0; font-size: 13px; font-weight: 600; color: {{c.ink2}}">Last decision</h2>
+      <span style="font-size: 15px; font-weight: 600">Sent back by the coordinator</span>
+      <span style="font-size: 14px; line-height: 1.4">Why: “the tag index must be case-insensitive”</span>
+      <span style="font-size: 12.5px; color: {{c.ink2}}">Today, 11:05 · after review round 1</span>
+    </section>
+
+    <section aria-labelledby="brief" style="border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.line}}; padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 6px">
+      <h2 id="brief" style="margin: 0; font-size: 13px; font-weight: 600; color: {{c.ink2}}">Brief</h2>
+      <span style="font-size: 14px; line-height: 1.45">Tags on a note, and a tag filter on the notes page. You said: “tags should be quick to add from the keyboard”.</span>
+    </section>
+
+    <section aria-labelledby="tlog" style="border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.line}}; display: flex; flex-direction: column">
+      <h2 id="tlog" style="margin: 0; padding: 10px 14px 4px; font-size: 13px; font-weight: 600; color: {{c.ink2}}">Log for this task</h2>
+      <sc-for list="{{ log }}" as="l" hint-placeholder-count="5">
+        <div style="padding: 7px 14px; border-top: 1px solid {{c.line}}; display: flex; gap: 10px; align-items: flex-start">
+          <span style="font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 12px; color: {{c.ink2}}; flex-shrink: 0; margin-top: 1px">{{ l.t }}</span>
+          <span style="display: flex; flex-direction: column; gap: 2px; min-width: 0"><span style="font-size: 13.5px; line-height: 1.35"><span style="font-weight: 600">{{ l.by }}</span> {{ l.what }}</span><sc-if value="{{ l.hasWhy }}" hint-placeholder-val="{{ false }}"><span style="font-size: 12.5px; line-height: 1.35; color: {{c.ink2}}">why: {{ l.why }}</span></sc-if></span>
+        </div>
+      </sc-for>
+    </section>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "$preview": {"width": 390, "height": 844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = {"bg": "#FAF8F3", "surface": "#FFFFFF", "surface2": "#F1EEE7", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7", "accentText": "#8A5700", "blue": "#1F5F9E", "green": "#1D6B46", "slate": "#8E929A"};
+    const dark = {"bg": "#16181C", "surface": "#1F2126", "surface2": "#26292F", "ink": "#F5F2EA", "ink2": "#A3A7AF", "line": "#2E3138", "accentText": "#F5B83D", "blue": "#6AA8EB", "green": "#5CC792", "slate": "#8E929A"};
+    const d = !!this.props.dark;
+    const c = d ? dark : light;
+    const st = (name, kind, text) => {
+      const k = { done: { ring: c.green, fill: c.green, glyph: "✓", word: "done", ringStyle: "solid", weight: 500 }, now: { ring: c.blue, fill: c.blue, glyph: "", word: "now", ringStyle: "solid", weight: 700 }, todo: { ring: c.slate, fill: "transparent", glyph: "", word: "to come", ringStyle: "solid", weight: 500 } }[kind];
+      return Object.assign({ name, text, aria: name + ", " + k.word + (text ? ": " + text : "") }, k);
+    };
+    const steps = [
+      st("planned", "done", ""),
+      st("implementing", "now", "sent back from review round 1; 1 round done"),
+      st("review", "todo", "needs 2 passing, at most 5"),
+      st("CI", "todo", ""),
+      st("merged", "todo", "")
+    ];
+    const L = (t, by, what, why) => ({ t, by, what, why: why || "", hasWhy: !!why });
+    const log = [
+      L("11:36", "engine", "started a worker: codex, gpt-6.2-sol, high", "sent back; a slot is free"),
+      L("11:05", "coordinator", "sent T8 back", "the tag index must be case-insensitive"),
+      L("09:20", "coordinator", "planned T8 after T6", "tags need the new storage")
+    ];
+    return { c, steps, log };
+  }
+}
+</script>
+</body>
+</html>

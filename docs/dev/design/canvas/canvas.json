@@ -313,7 +313,7 @@
   "FactoryAgents.dc.html": {
    "h": 844,
    "radius": 40,
-   "title": "Factory — Agents list: factory terminals in the usual sections",
+   "title": "Factory — Agents: one permanent head per project, beside ordinary agents",
    "w": 390,
    "x": 0,
    "y": 23050
@@ -321,39 +321,23 @@
   "FactoryAgentsDark.dc.html": {
    "h": 844,
    "radius": 40,
-   "title": "Factory — Agents list, dark",
+   "title": "Factory — Agents with project heads, dark",
    "w": 390,
    "x": 470,
    "y": 23050
   },
-  "FactoryArch.dc.html": {
-   "h": 760,
-   "title": "Factory — architecture",
-   "w": 1240,
-   "x": 2700,
-   "y": 24120
-  },
-  "FactoryAsk.dc.html": {
-   "h": 844,
-   "radius": 40,
-   "title": "Factory — an ask on Agents",
-   "w": 390,
-   "x": 1880,
-   "y": 23050
-  },
   "FactoryAskCard.dc.html": {
    "h": 236,
-   "title": "Component — a factory ask in the approval card",
+   "title": "Component — a factory ask card (kinds: delete, release, read-back, override)",
    "w": 358,
    "x": 4700,
    "y": 23050
   },
-  "FactoryAskDark.dc.html": {
-   "h": 844,
-   "radius": 40,
-   "title": "Factory — an ask on Agents, dark",
-   "w": 390,
-   "x": 4230,
+  "FactoryAskCardStates.dc.html": {
+   "h": 430,
+   "title": "Factory — the ask card in its four kinds, including the read-back and the override",
+   "w": 1632,
+   "x": 9230,
    "y": 23050
   },
   "FactoryDesignLoop.dc.html": {
@@ -363,52 +347,48 @@
    "x": 5700,
    "y": 24120
   },
+  "FactoryHead.dc.html": {
+   "h": 140,
+   "title": "Component — a project's head",
+   "w": 358,
+   "x": 4700,
+   "y": 23406
+  },
+  "FactoryHeadStates.dc.html": {
+   "h": 1060,
+   "title": "Factory — a project head in every state: running, stopped, finished, stuck, a name tie, several computers, largest text",
+   "w": 1632,
+   "x": 6280,
+   "y": 23050
+  },
   "FactoryIPad.dc.html": {
    "h": 1032,
    "radius": 24,
-   "title": "Factory — iPad, All agents with factory terminals and an ask",
+   "title": "Factory — iPad, All agents with project heads",
    "w": 1376,
    "x": 0,
    "y": 25400
   },
-  "FactoryIPadDark.dc.html": {
+  "FactoryIPadBoard.dc.html": {
    "h": 1032,
-   "radius": 24,
-   "title": "Factory — iPad, All agents, dark",
-   "w": 1376,
-   "x": 1456,
-   "y": 25400
-  },
-  "FactoryIPadEntry.dc.html": {
-   "h": 1032,
-   "radius": 24,
-   "title": "Factory — iPad, a space with no factory",
-   "w": 1376,
-   "x": 1456,
-   "y": 29350
-  },
-  "FactoryIPadSidebar.dc.html": {
-   "h": 1032,
-   "title": "Component — iPad sidebar with factory terminals",
-   "w": 390,
-   "x": 2912,
-   "y": 25400
-  },
-  "FactoryIPadSpace.dc.html": {
-   "h": 1032,
-   "radius": 24,
-   "title": "Factory — iPad, the space page in its sheet",
+   "title": "Factory — iPad, a project: task list and graph side by side",
    "w": 1376,
    "x": 0,
    "y": 24120
   },
-  "FactoryIPadSpaceDark.dc.html": {
+  "FactoryIPadBoardDark.dc.html": {
    "h": 1032,
-   "radius": 24,
-   "title": "Factory — iPad, the space page in its sheet, dark",
+   "title": "Factory — iPad, a project: list and graph, dark",
    "w": 1376,
    "x": 0,
    "y": 29350
+  },
+  "FactoryIPadSidebar.dc.html": {
+   "h": 1032,
+   "title": "Component — iPad sidebar with factory project heads",
+   "w": 390,
+   "x": 2912,
+   "y": 25400
   },
   "FactoryLifecycle.dc.html": {
    "h": 760,
@@ -417,87 +397,93 @@
    "x": 4020,
    "y": 24120
   },
-  "FactoryPage.dc.html": {
-   "h": 844,
-   "is_interactive": true,
-   "radius": 40,
-   "title": "Factory — the space page with its factory section",
-   "w": 390,
-   "x": 2820,
-   "y": 23050
-  },
-  "FactoryPageAX.dc.html": {
-   "h": 1500,
-   "radius": 40,
-   "title": "Factory — the space page at the largest text size",
-   "w": 390,
-   "x": 2912,
-   "y": 28000
-  },
-  "FactoryPageDark.dc.html": {
+  "FactoryModels.dc.html": {
    "h": 844,
    "radius": 40,
-   "title": "Factory — the space page, dark",
+   "title": "Factory — models per role: the candidate editor",
    "w": 390,
-   "x": 3290,
-   "y": 23050
+   "x": 6162,
+   "y": 25400
   },
-  "FactoryStartEntry.dc.html": {
-   "h": 844,
+  "FactoryNewProject.dc.html": {
+   "h": 1100,
    "radius": 40,
-   "title": "Start — one row on a space with no factory",
+   "title": "Factory — New project: pick a folder sheepdog knows, goal, models",
    "w": 390,
    "x": 3382,
    "y": 25400
   },
-  "FactoryStartEntryDark.dc.html": {
-   "h": 844,
-   "radius": 40,
-   "title": "Start — the row, dark",
-   "w": 390,
+  "FactoryNewProjectChecks.dc.html": {
+   "h": 1100,
+   "title": "Factory — New project: models in the form, start checks with fixes, then start",
+   "w": 1760,
    "x": 3852,
    "y": 25400
   },
-  "FactoryStartShell.dc.html": {
+  "FactoryProject.dc.html": {
    "h": 844,
    "radius": 40,
-   "title": "Start — the terminal: doctor, notice, first prompt",
+   "title": "Factory — a project: head, text box, asks, tasks in attention groups",
    "w": 390,
-   "x": 4322,
-   "y": 25400
+   "x": 2820,
+   "y": 23050
   },
-  "FactoryStartShellDark.dc.html": {
-   "h": 844,
+  "FactoryProjectAX.dc.html": {
+   "h": 4150,
    "radius": 40,
-   "title": "Start — the terminal, dark",
+   "title": "Factory — a project at the largest text size",
    "w": 390,
-   "x": 4792,
-   "y": 25400
+   "x": 9400,
+   "y": 24120
   },
-  "FactoryStartStates.dc.html": {
+  "FactoryProjectActions.dc.html": {
    "h": 964,
-   "title": "States — starting: a failed check, shell off, folder outside",
-   "w": 1330,
+   "title": "Factory — project actions: told, stop, new goal, resume, reopen",
+   "w": 2270,
    "x": 0,
    "y": 28000
   },
+  "FactoryProjectDark.dc.html": {
+   "h": 844,
+   "radius": 40,
+   "title": "Factory — a project, dark",
+   "w": 390,
+   "x": 3290,
+   "y": 23050
+  },
+  "FactorySettings.dc.html": {
+   "h": 844,
+   "radius": 40,
+   "title": "Factory — Settings for one project, the read-back in the row",
+   "w": 390,
+   "x": 5692,
+   "y": 25400
+  },
+  "FactorySettingsStates.dc.html": {
+   "h": 964,
+   "title": "Factory — Settings and models: edited, refused, saved, and the models rules",
+   "w": 2620,
+   "x": 6632,
+   "y": 25400
+  },
   "FactoryStates.dc.html": {
    "h": 964,
-   "title": "States — the factory section in every state",
-   "w": 3530,
+   "title": "Factory — every empty and error state, each with a plain fix",
+   "w": 4770,
    "x": 0,
    "y": 26800
   },
-  "FactoryStatesDark.dc.html": {
-   "h": 964,
-   "title": "States — every state, dark",
-   "w": 3530,
-   "x": 3610,
-   "y": 26800
+  "FactoryTask.dc.html": {
+   "h": 844,
+   "radius": 40,
+   "title": "Factory — a task: steps, last decision and why, brief, task log",
+   "w": 390,
+   "x": 3760,
+   "y": 23050
   },
   "FactoryTerminal.dc.html": {
    "h": 980,
-   "title": "Factory — factory log and factory doctor",
+   "title": "Factory — factory log and factory doctor (terminal)",
    "w": 1100,
    "x": 1520,
    "y": 24120
@@ -505,33 +491,24 @@
   "FactoryVoice.dc.html": {
    "h": 844,
    "radius": 40,
-   "title": "Factory — Conversation: digest and one alert",
+   "title": "Factory — Conversation: an instruction and status questions",
    "w": 390,
    "x": 2350,
+   "y": 23050
+  },
+  "FactoryVoiceWhy.dc.html": {
+   "h": 844,
+   "title": "Factory — Conversation: a judgement question from the project's record, and what stays quiet",
+   "w": 990,
+   "x": 8160,
    "y": 23050
   },
   "FactoryWindow.dc.html": {
    "h": 844,
    "radius": 40,
-   "title": "Factory — coordinator window",
+   "title": "Factory — the coordinator's window: a read-only snapshot",
    "w": 390,
    "x": 940,
-   "y": 23050
-  },
-  "FactoryWindowDark.dc.html": {
-   "h": 844,
-   "radius": 40,
-   "title": "Factory — coordinator window, dark",
-   "w": 390,
-   "x": 1410,
-   "y": 23050
-  },
-  "FactoryWorker.dc.html": {
-   "h": 844,
-   "radius": 40,
-   "title": "Factory — a task row opens the worker's window",
-   "w": 390,
-   "x": 3760,
    "y": 23050
   },
   "FileState.dc.html": {
@@ -796,7 +773,7 @@
   "PlusMenu.dc.html": {
    "h": 844,
    "radius": 40,
-   "title": "+ menu",
+   "title": "+ menu — New agent, New factory project, New shell",
    "w": 390,
    "x": 3290,
    "y": 0
@@ -998,13 +975,6 @@
    "w": 390,
    "x": 470,
    "y": 2460
-  },
-  "FactoryOverrideCard.dc.html": {
-   "x": 5138,
-   "y": 23050,
-   "w": 358,
-   "h": 330,
-   "title": "Component — the owner's override card: merge these now"
   },
   "EngineOverview.dc.html": {
    "x": 0,
@@ -1431,7 +1401,7 @@
   "p3": {
    "kind": "title1",
    "maxW": 5480,
-   "text": "Part 3 — Factory",
+   "text": "Part 3 — Factory in the app and voice",
    "w": 240,
    "x": 0,
    "y": 22800
@@ -1446,7 +1416,7 @@
   },
   "p3note": {
    "fill": "orange",
-   "text": "Part 3: decisions\nEach line says what a board reuses and what is new. New means proposed, not built.\n\nAgents list\n• Reuses: the Needs you / Working / Done sections and their one sort, the agent card, the crossed bell, the dock. New: role, task id and model on a factory row (the app must first read labels); the words Factory, not announced where VoiceOver now says Muted space; A worker stuck at a prompt is restarted by the engine; there is no card for it. No Factory group.\n• The coordinator is silent, like the workers. If it is stuck twice in a row you are told once.\n\nWindow\n• Reuses the whole Agent window. New: one line with the model.\n\nAsk\n• Reuses the approval card as it is: every option outlined, a Recommended tag, never a fill. New: the card also shows under Needs you on Agents, with the badge, and at the top of the factory section. One card, drawn once. An override is the same card with its own kind; only you can answer it.\n\nConversation\n• Reuses ChatRow kinds only. A digest is the voice bubble with Details; an alert is an agent-update row.\n\nSpace page\n• Reuses the Spaces sheet and its space page on phone and iPad. On iPad it stays the form sheet; no new detail screen.\n• Two states. No factory: today's page plus one row, Start a factory here. With a factory: a Factory section at the top with the ask, the milestone, and tasks in dependency layers with the critical path in ink and the model on each row. A row with a live terminal opens its window; one without does nothing.\n• The engine keeps one record per project; a space has a factory when its folder has one. The section survives the start shell closing.\n• Close space is refused while the project's coordinator is alive. Stop the factory first: one new action, by voice or sheepdog factory stop. A factory you stopped stays stopped, with no alert, until you start it again from the same row.\n• Debug is not on the page yet. It is drawn once, expanded, for the later task.\n\nStarting\n• Reuses Run a command: the row runs sheepdog factory start in a new tab of the space and opens its window. No new screen.\n• In that terminal: doctor's lines at phone width with a fix under each failing one, the notice, then at most five prompts. Return accepts the recommended answer. An answer that would delegate a gate or a release only proposes it; it takes effect after one ask card answered by tap, by voice, or on the factory page.\n• Stops the start: no signed-in CLI, not a git repository, gh not signed in, no pull-request workflow in the repo, a required approving review on the base, a factory already running there.\n• By voice: Sheepdog reads back the project and the goal, and on a yes runs one fixed command with the recommended answers. It speaks one line if the check fails. Prompts in the terminal are typed, not spoken.\n• The row is greyed, with the reason, when the phone shell is off or the folder is outside your project folders.\n\nStates\n• Every state is the real section: no ask, planning, finished, stopped, stopped by you, could not load, the end of the page, and Debug open. Light and dark, plus one board at the largest text size.\n\nTerminal and diagrams\n• factory log (new) and factory doctor (exists; gains a Running now part), at phone width.\n• Architecture, one task's lifecycle, the design loop.\n\nNot drawn, on purpose: a task board, a chat with workers, per-worker narration, a factory group in the Agents list, a new iPad detail screen. The factory page on the web is Part 4; it is built before the phone.",
+   "text": "Part 3: decisions (redrawn 2026-11-25 from docs/dev/design/app-factory.md, D1–D9)\n\nAgents list\n• One permanent head per factory project (D3): name, goal, state, counts working / waiting on you / done, folder. Running projects sit in Working, stopped ones under Stopped with Resume, finished ones fold into Done (closed). Ordinary agents are unchanged. No worker or reviewer appears.\n• A blocked coordinator merges into its head (D4): the head moves to Needs you with the coordinator's own dialog. An open ask stays the existing question card, its first line names the project and task (\"notes · T10\").\n• Two projects with one name: the folder under the name tells them apart (D2).\n\nProject board (phone)\n• Head: state, goal, counts, folder; Stop / New goal (running), Resume / New goal (stopped), Reopen with a new goal (finished); Coordinator opens a read-only snapshot window, shown only while a coordinator runs.\n• Text box \"Tell the notes factory\" (D5, device say route): Told the notes factory., the same words as the voice (6.1). A line under it says where questions go. Held while stopped or while the coordinator is replaced; refused when finished.\n• Asks for you, then tasks in the web's attention groups and words, each with the step bar and one run line (role · CLI · time since start); the model is on the task view. No worker window in v1.\n• Stop asks first; new goal and reopen are sheets; a refused resume lists the failed check with Copy and Check again.\n\nTask view: steps, the last coordinator or owner decision with its why, brief, log for this task.\niPad: the same board with the list and the task graph side by side.\nSettings and models: on the phone, per project; every change opens a read-back ask (Save / Keep current) that also arrives as a question card.\nNew project (+ menu): folders sheepdog knows (never typed), goal, models, max running, start checks on the Mac with fixes as text, Copy and Check again; start turns on when no check fails.\nVoice: instructions confirm at once; status from the board; judgement from the project's record at the next pause; per-worker narration stays off (D9).\n\nCasing: the web's words, the app's casing for screen titles and section labels (Settings, Tasks, Asks for you); state and stage words stay lowercase.\nNew project lists four model roles, as the web form does; plan reviewer models is changed in Settings after the start. Models chosen in the form apply at start with no read-back (Done, not Change).\nStart check names, details and fixes are samples in the daemon's form (startcheck.go writes the real ones).\nNot drawn on purpose: coordinator idle or working; who stopped a project and when it finished; a needs-you card for a stuck worker.\n\nReview 1 (2026-11-25): FactoryArch, FactoryAgentsTie, FactoryAgentsDone, FactoryReadBack, FactoryOverrideCard (now an ask-card kind) and the dark copies FactoryAskDark, FactoryStatesDark (after review 2, with FactoryAsk), FactoryWindowDark, FactoryTaskDark, FactoryNewProjectDark, FactoryIPadDark were removed; the head and the ask card each have a states strip.",
    "w": 640,
    "x": 5560,
    "y": 23050
@@ -1508,47 +1478,47 @@
    "y": 8050
   },
   "engine1": {
-   "x": 0,
-   "y": -300,
-   "text": "Factory engine: the rule tables",
    "kind": "title1",
    "maxW": 9888,
-   "page": "engine"
+   "page": "engine",
+   "text": "Factory engine: the rule tables",
+   "x": 0,
+   "y": -300
   },
   "p4": {
-   "x": 0,
-   "y": 30442,
-   "text": "Part 4 — Factory web page (the first owner interface to build)",
    "kind": "title1",
-   "maxW": 9190
+   "maxW": 9190,
+   "text": "Part 4 — Factory web page (the first owner interface to build)",
+   "x": 0,
+   "y": 30442
   },
   "p4b": {
-   "x": 0,
-   "y": 34822,
-   "text": "Part 4b — Factory web: the whole life cycle (slice 14, PR 14.0), light",
    "kind": "title1",
-   "maxW": 16640
+   "maxW": 16640,
+   "text": "Part 4b — Factory web: the whole life cycle (slice 14, PR 14.0), light",
+   "x": 0,
+   "y": 34822
   },
   "p4bdark": {
-   "x": 0,
-   "y": 39771,
-   "text": "Part 4b — the same boards, dark",
    "kind": "title1",
-   "maxW": 16640
+   "maxW": 16640,
+   "text": "Part 4b — the same boards, dark",
+   "x": 0,
+   "y": 39771
   },
   "p4b360": {
-   "x": 0,
-   "y": 44720,
-   "text": "Part 4b — the same boards, 360 px wide",
    "kind": "title1",
-   "maxW": 16640
+   "maxW": 16640,
+   "text": "Part 4b — the same boards, 360 px wide",
+   "x": 0,
+   "y": 44720
   },
   "p4bnote": {
-   "x": 16760,
-   "y": 35062,
-   "w": 640,
    "fill": "orange",
-   "text": "Part 4b: decisions (slice 14, PR 14.0, round 2)\nDrawn from the page as built (web/factory), not from the older home board: no send box, no usage pools. New means proposed, not built.\n\n• Where things live. Main column: tasks with the list / graph switch, the goal, the project bar (state word, one sentence, only that state's actions), the task groups, log, settings. Under 760 px the order is: tasks and project bar, asks for you, the task groups, log, projects, settings, agents. Aside: projects (state word on each line, New project under the list), asks for you, agents.\n• New project opens a form in the main column, like the task view. Its models and max running rows are the settings rows with the defaults; nothing is stored before the start, so no Change and no read-back there.\n• Start checks show the check's own name, detail and fix. A fix that starts \"run:\" is a block with Copy, marked \"in a terminal\"; the block holds the command only, up to the first \" (\" or \", then \", and the rest is text under it.\n• Pairing: one box, opened beside the control that needed it. What was asked for is kept and sent after Pair. The missing-app help is a fold that is always there, because the page cannot see the menu bar.\n• Stop always asks first, in place. Focus lands on Keep it running. The page gives no count and no roles of running agents.\n• Settings: a row gets its Change button only while its field differs from the stored value; the read-back takes the row's place until answered. Save is recommended: bold outline and the word, never a fill (one orange button per screen: Start, or New project on the empty page).\n• Steps: words and icons, never colour alone. A fifth state, ended, for the last step of a dropped or closed task; parked is the now step with its text. The compact bar always has the current step written beside it.\n• Log marks: merged, held up, asked you, you. The toggle is \"show routine checks\".\n• Graph view takes the full width; the aside cards move under it. Nodes keep one size, so a wide layer scrolls inside the graph's own box. Focus or hover draws a node's own edges and neighbours strong and dims the rest.\n• Each light board has a dark copy and a 360 px copy below it.\n\nOpen questions are in docs/dev/design/canvas/slice14-wording.md and the design report."
+   "text": "Part 4b: decisions (slice 14, PR 14.0, round 2)\nDrawn from the page as built (web/factory), not from the older home board: no send box, no usage pools. New means proposed, not built.\n\n• Where things live. Main column: tasks with the list / graph switch, the goal, the project bar (state word, one sentence, only that state's actions), the task groups, log, settings. Under 760 px the order is: tasks and project bar, asks for you, the task groups, log, projects, settings, agents. Aside: projects (state word on each line, New project under the list), asks for you, agents.\n• New project opens a form in the main column, like the task view. Its models and max running rows are the settings rows with the defaults; nothing is stored before the start, so no Change and no read-back there.\n• Start checks show the check's own name, detail and fix. A fix that starts \"run:\" is a block with Copy, marked \"in a terminal\"; the block holds the command only, up to the first \" (\" or \", then \", and the rest is text under it.\n• Pairing: one box, opened beside the control that needed it. What was asked for is kept and sent after Pair. The missing-app help is a fold that is always there, because the page cannot see the menu bar.\n• Stop always asks first, in place. Focus lands on Keep it running. The page gives no count and no roles of running agents.\n• Settings: a row gets its Change button only while its field differs from the stored value; the read-back takes the row's place until answered. Save is recommended: bold outline and the word, never a fill (one orange button per screen: Start, or New project on the empty page).\n• Steps: words and icons, never colour alone. A fifth state, ended, for the last step of a dropped or closed task; parked is the now step with its text. The compact bar always has the current step written beside it.\n• Log marks: merged, held up, asked you, you. The toggle is \"show routine checks\".\n• Graph view takes the full width; the aside cards move under it. Nodes keep one size, so a wide layer scrolls inside the graph's own box. Focus or hover draws a node's own edges and neighbours strong and dims the rest.\n• Each light board has a dark copy and a 360 px copy below it.\n\nOpen questions are in docs/dev/design/canvas/slice14-wording.md and the design report.",
+   "w": 640,
+   "x": 16760,
+   "y": 35062
   }
  },
  "order": [
@@ -1655,32 +1625,13 @@
   "FactoryAgents.dc.html",
   "FactoryAgentsDark.dc.html",
   "FactoryWindow.dc.html",
-  "FactoryWindowDark.dc.html",
-  "FactoryAsk.dc.html",
   "FactoryVoice.dc.html",
-  "FactoryPage.dc.html",
-  "FactoryPageDark.dc.html",
-  "FactoryWorker.dc.html",
-  "FactoryAskDark.dc.html",
-  "FactoryIPadSpace.dc.html",
   "FactoryTerminal.dc.html",
-  "FactoryArch.dc.html",
   "FactoryLifecycle.dc.html",
   "FactoryDesignLoop.dc.html",
   "FactoryIPad.dc.html",
-  "FactoryIPadDark.dc.html",
   "FactoryIPadSidebar.dc.html",
-  "FactoryStartEntry.dc.html",
-  "FactoryStartEntryDark.dc.html",
-  "FactoryStartShell.dc.html",
-  "FactoryStartShellDark.dc.html",
   "FactoryStates.dc.html",
-  "FactoryStatesDark.dc.html",
-  "FactoryStartStates.dc.html",
-  "FactoryPageAX.dc.html",
-  "FactoryIPadSpaceDark.dc.html",
-  "FactoryIPadEntry.dc.html",
-  "FactoryOverrideCard.dc.html",
   "EngineOverview.dc.html",
   "EngineTaskRules.dc.html",
   "EngineReviewLadder.dc.html",
@@ -1725,7 +1676,23 @@
   "FactoryWebGraph360.dc.html",
   "FactoryWebOverview.dc.html",
   "FactoryWebOverviewDark.dc.html",
-  "FactoryWebOverview360.dc.html"
+  "FactoryWebOverview360.dc.html",
+  "FactoryProject.dc.html",
+  "FactoryProjectDark.dc.html",
+  "FactoryTask.dc.html",
+  "FactoryHead.dc.html",
+  "FactoryVoiceWhy.dc.html",
+  "FactoryIPadBoard.dc.html",
+  "FactoryNewProject.dc.html",
+  "FactoryNewProjectChecks.dc.html",
+  "FactorySettings.dc.html",
+  "FactoryModels.dc.html",
+  "FactoryProjectActions.dc.html",
+  "FactoryProjectAX.dc.html",
+  "FactoryIPadBoardDark.dc.html",
+  "FactoryHeadStates.dc.html",
+  "FactoryAskCardStates.dc.html",
+  "FactorySettingsStates.dc.html"
  ],
  "pages": [
   {

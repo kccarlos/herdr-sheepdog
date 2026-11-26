@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — models per role on the phone: the candidate editor</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}
+button,input{font:inherit}
+button{cursor:pointer}
+</style>
+</helmet>
+<div style="width: 390px; height: {{ h }}px; display: flex; flex-direction: column; overflow: hidden; background: {{c.bg}}; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <div style="height: 54px; flex-shrink: 0"></div>
+  <header style="height: 44px; flex-shrink: 0; display: grid; grid-template-columns: 88px minmax(0, 1fr) 88px; align-items: center; padding: 0 8px">
+    <a href="{{ back }}" style="height: 44px; display: flex; align-items: center; color: {{c.accentText}}; font-size: 16px; padding: 0 8px; text-decoration: none;">Cancel</a>
+    <h1 style="margin: 0; text-align: center; font-size: 17px; font-weight: 600">{{ title }}</h1>
+    <span></span>
+  </header>
+  <main style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 10px; padding: 4px 16px 16px">
+    <span style="font-size: 12.5px; line-height: 1.4; color: {{c.ink2}}; padding: 0 4px">{{ intro }}</span>
+    <sc-for list="{{ cands }}" as="k" hint-placeholder-count="2">
+      <section aria-label="{{ k.label }}" style="border-radius: 14px; background: {{c.surface}}; border: 1px solid {{ k.border }}; padding: 10px 14px 12px; display: flex; flex-direction: column; gap: 8px">
+        <span style="display: flex; align-items: center; gap: 8px"><span style="flex-grow: 1; font-size: 13px; font-weight: 600; color: {{c.ink2}}">{{ k.label }}</span>
+          <sc-if value="{{ k.up }}" hint-placeholder-val="{{ false }}"><button aria-label="{{ k.upAria }}" style="min-height: 36px; padding: 0 10px; border-radius: 18px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 13px">Move up</button></sc-if>
+          <button aria-label="{{ k.rmAria }}" style="min-height: 36px; padding: 0 10px; border-radius: 18px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.red}}; font-size: 13px">Remove</button>
+        </span>
+        <div role="radiogroup" aria-label="CLI, {{ k.label }}" style="height: 36px; padding: 3px; box-sizing: border-box; border-radius: 11px; background: {{c.track}}; display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px">
+          <sc-for list="{{ k.clis }}" as="o" hint-placeholder-count="3"><button role="radio" aria-checked="{{ o.on }}" style="border: 0; border-radius: 8px; background: {{ o.bg }}; color: {{c.ink}}; font-size: 13px; font-weight: {{ o.weight }}">{{ o.name }}</button></sc-for>
+        </div>
+        <label style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 12.5px; color: {{c.ink2}}">model</span><input type="text" value="{{ k.model }}" style="height: 40px; box-sizing: border-box; border-radius: 10px; border: 1px solid {{c.line}}; background: {{c.bg}}; color: {{c.ink}}; padding: 0 10px; font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 13.5px"></label>
+        <div role="radiogroup" aria-label="effort, {{ k.label }}" style="height: 36px; padding: 3px; box-sizing: border-box; border-radius: 11px; background: {{c.track}}; display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px">
+          <sc-for list="{{ k.efforts }}" as="o" hint-placeholder-count="3"><button role="radio" aria-checked="{{ o.on }}" style="border: 0; border-radius: 8px; background: {{ o.bg }}; color: {{c.ink}}; font-size: 13px; font-weight: {{ o.weight }}">{{ o.name }}</button></sc-for>
+        </div>
+        <sc-if value="{{ k.refused }}" hint-placeholder-val="{{ false }}">
+          <div role="alert" style="padding: 8px 10px; border-radius: 10px; background: {{c.redBg}}; display: flex; flex-direction: column; gap: 6px">
+            <span style="font-size: 13px; font-weight: 600; color: {{c.red}}">{{ refusal }}</span>
+            <sc-if value="{{ refCmd }}" hint-placeholder-val="{{ false }}">
+            <span style="font-size: 12.5px; font-weight: 600">Fix, in a terminal on Work Mac:</span>
+            <span style="display: flex; align-items: center; gap: 8px"><code style="flex-grow: 1; padding: 6px 8px; border-radius: 8px; background: {{c.surface}}; font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 12.5px">codex login</code><button aria-label="Copy the command codex login" style="min-height: 36px; padding: 0 12px; border-radius: 18px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 13px; font-weight: 600">Copy</button></span>
+            </sc-if>
+          </div>
+        </sc-if>
+      </section>
+    </sc-for>
+    <span style="font-size: 12.5px; line-height: 1.4; color: {{c.ink2}}; padding: 0 4px">{{ suggest }}</span>
+    <span style="display: flex; gap: 8px; flex-wrap: wrap">
+      <button style="min-height: 40px; padding: 0 14px; border-radius: 20px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 15px">Add a model</button>
+      <button aria-label="Fill in the default {{ lower }}" style="min-height: 40px; padding: 0 14px; border-radius: 20px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 15px">Back to the default</button>
+    </span>
+    <button aria-label="{{ goAria }}" style="min-height: 50px; border-radius: 14px; border: 0; background: {{c.accent}}; color: #1F1F22; font-size: 16px; font-weight: 600">{{ go }}</button>
+    <span style="font-size: 12.5px; line-height: 1.4; color: {{c.ink2}}; padding: 0 4px">{{ foot }}</span>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "refused": {"editor": "enum", "options": ["none", "signin", "retro", "same"], "default": "none"}, "role": {"editor": "enum", "options": ["worker", "reviewer", "retro"], "default": "worker"}, "context": {"editor": "enum", "options": ["settings", "new"], "default": "settings"}, "$preview": {"width": 390, "height": 844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = {"bg": "#FAF8F3", "surface": "#FFFFFF", "track": "#ECE8DF", "sel": "#FFFFFF", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7", "accent": "#D98718", "accentText": "#8A5700", "red": "#B42318", "redBg": "#FEF3F2", "redLine": "#F4C7C3"};
+    const dark = {"bg": "#16181C", "surface": "#1F2126", "track": "#26292F", "sel": "#3A3D44", "ink": "#F5F2EA", "ink2": "#A3A7AF", "line": "#2E3138", "accent": "#F39C1F", "accentText": "#F5B83D", "red": "#F26B5B", "redBg": "#2A1C1C", "redLine": "#5A2A2A"};
+    const d = !!this.props.dark;
+    const ref = this.props.refused ?? 'none', role = this.props.role ?? 'worker', isNew = (this.props.context ?? 'settings') === 'new';
+    const c = d ? dark : light;
+    const seg = (names, on) => names.map((n) => ({ name: n, on: n === on ? "true" : "false", bg: n === on ? c.sel : "transparent", weight: n === on ? 600 : 400 }));
+    const K = (label, cli, model, effort, up, refHere) => ({ label, clis: seg(["claude", "codex", "agy"], cli), efforts: seg(["low", "medium", "high"], effort), model, up, upAria: "Move " + cli + " " + model + " up", rmAria: "Remove " + cli + " " + model, refused: refHere, border: refHere ? c.redLine : c.line });
+    const sets = {
+      none: [K("first choice", "agy", "gemini-4-neon", "medium", false, false), K("second choice", "claude", "sonnet", "medium", true, false)],
+      signin: [K("first choice", "codex", "gpt-6.2-sol", "medium", false, true), K("second choice", "claude", "sonnet", "medium", true, false)],
+      retro: [K("first choice", "codex", "gpt-6.2-sol", "high", false, true)],
+      same: [K("first choice", "claude", "sonnet", "medium", false, true)]
+    };
+    const cands = sets[ref] || sets.none;
+    const refusal = { none: "", signin: "codex is not signed in", retro: "the engine cannot launch codex as retro yet", same: "the reviewer must differ from the worker: the worker models are claude/sonnet/medium" }[ref];
+    const title = role.charAt(0).toUpperCase() + role.slice(1) + " models";
+    const intro = "The CLI, model and effort each role uses. In order: the engine uses the first one it can start." + (role === 'retro' ? " A retro reviewer looks at a task whose reviews keep failing." : "");
+    return {
+      c, cands, refusal, lower: role + " models", h: this.props.h ?? 844, refCmd: ref === 'signin', title, intro,
+      back: isNew ? "FactoryNewProject.dc.html" : "FactorySettings.dc.html",
+      go: isNew ? "Done" : "Change", goAria: (isNew ? "Done with " : "Change ") + role + " models",
+      foot: isNew ? "Used when you start the project. Nothing is sent until then." : "Nothing changes yet: the new list is read back to you, and saved when you answer Save.",
+      suggest: ref === 'none' ? "Model names agy offers on this account: gemini-4-carbon · gemini-4-neon · gemini-4-hydrogen · gemini-3.8-flash. The field also takes a typed name." : "sheepdog cannot list the models claude offers. This name is checked when an agent starts."
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -294,6 +294,53 @@ strings; a test's expected string is the **Text** column
 | `ni.inproj` | card text | 2 open | inside a project the asks-for-you card counts and lists only that project (exists; now per project) |
 | `ni.none` | empty state | No open asks right now. | the asks card of a project with none (exists), even while the header's count shows another project's |
 
+## The app (canvas Part 3)
+
+Strings the iPhone and iPad app shows that `/factory` does not have. The
+boards are the Part 3 `Factory…` boards (`FactoryHead`, `FactoryProject`,
+`FactoryNewProject`, `FactoryModels`, `FactoryWindow`, `FactoryStates`).
+Every other string on those boards is a string of the tables above. The app
+uses the web's words with the app's casing for screen titles and section
+labels ("Settings", "Tasks", "Asks for you"); state and stage words stay
+lowercase.
+
+| Id | Kind | Text | Where and when |
+|---|---|---|---|
+| `app.head.kind` | mark | factory | after the project's name on its head in Agents |
+| `app.sec.stopped` | section label | Stopped | Agents, between Working and Done, only while a project is stopped |
+| `app.head.stuck` | heading | The notes coordinator is stuck on a prompt | on the head under Needs you; the coordinator's own dialog follows |
+| `app.head.stuck.no` | hint | To say what to do instead, use the box on the notes page. The coordinator gets it when it is next free. | under the dialog's "No" option |
+| `app.new` | menu item | New factory project | the + menu |
+| `app.tell` | label | Tell the notes factory | the text box on the project page |
+| `app.tell.ph` | placeholder | An instruction, in your own words | the text box; never the only label |
+| `app.tell.note` | hint | Delivered when the coordinator is next free. To answer an ask, use its card. | under the box, running |
+| `app.tell.ask` | hint | A question? Ask by voice, or ask Sheepdog in Conversation. | under the box, every state |
+| `app.tell.told` | status | Told the notes factory. | after Send; the voice's sentence (6.1) |
+| `app.tell.stopped` | status | notes is stopped. It gets this when you resume it. | the voice's sentence (6.1) |
+| `app.tell.coord` | status | The notes coordinator is not running. It gets this when it is back. | the voice's sentence (6.1) |
+| `app.tell.fin` | refusal | notes is finished. Give it a new goal. | the daemon's sentence (6.2) |
+| `app.tell.long` | refusal | Too long. Keep it under 1,000 characters. | with the counter `app.tell.count` (6.2) |
+| `app.tell.count` | counter | 1,012 / 1,000 | beside the box, near the cap |
+| `app.tell.gone` | status | This project is gone. | on Agents, after the project page closes (6.2) |
+| `app.pair.stop` | refusal | Not stopped: Work Mac no longer knows this phone. Pair this phone again in Settings ▸ Work Mac, then press Stop again. | a project action without a paired-device identity; the computer's own name |
+| `app.pair.say` | refusal | Not sent: Work Mac no longer knows this phone. Pair this phone again in Settings ▸ Work Mac, then send again. | the text box without a paired-device identity |
+| `app.coord.btn` | button | Coordinator | opens the read-only window; shown only while a coordinator runs |
+| `app.coord.off` | heading | The coordinator is not running: claude coordinator is signed out | the alert's cause as the daemon writes it; without an alert the heading ends at "not running" and no fix follows |
+| `app.coord.fix` | sentence | Fix: sign in to claude at this Mac (Work Mac). Running tasks go on. | the alert's fix |
+| `app.win.note` | note | View only. To tell the coordinator something, use the box on the notes page. An ask is answered on its card. | the coordinator's window |
+| `app.win.updated` | status | Updated 2 s ago | the window's footer |
+| `app.task.last` | heading | Last decision | the task view: the last coordinator or owner decision and its why |
+| `app.run` | row text | worker · codex · 31 min | one run line under a task: role, CLI, time since it started |
+| `app.np.folders` | label | folders sheepdog knows on Work Mac | the folder list in New project |
+| `app.np.known` | mark | already a project: open it to give it a new goal | a folder that is already a project; not pickable |
+| `app.np.none` | empty state | No folders to pick: herdr cannot be reached on Work Mac. Open herdr-app on Work Mac, then try again. | replaces `np.sugg.none`, which tells the reader to type a path |
+| `app.np.fix` | label | Fix, in a terminal on Work Mac: | before a command fix; the phone cannot run it |
+| `app.np.nofactory` | heading | The factory is not available on Work Mac | New project when the computer has no factory |
+| `app.np.nofactory.p` | sentence | It needs sheepdog on herdr-core. Work Mac's sheepdog runs on herdr-tui, or herdr-core does not answer. | with the fix "Open herdr-app, or start herdr-core in a terminal:" and `hc server start` |
+| `app.mo.done` | sentence | Used when you start the project. Nothing is sent until then. | the models editor opened from New project, with the button Done |
+| `app.load` | status | Loading notes from Work Mac… | first load of a project |
+| `app.cant` | error | Can't load notes. Trying again. | followed by "Work Mac did not answer in time. The rest of the app still works." |
+
 ## Marks: never colour alone
 
 | Mark | Icon | Word | Colour (token) |

@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Sheepdog — Conversation with a factory digest and an alert</title>
+<title>Sheepdog — Conversation: an instruction and status questions about a project</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -15,33 +15,51 @@ body{margin:0}
 button{font:inherit;cursor:pointer}
 </style>
 </helmet>
-<div style="position: relative; width: 390px; height: 844px; display: flex; flex-direction: column; overflow: hidden; background: #FAF8F3; color: #1F1F22; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
-  <dc-import name="TopBar" pane="conversation" waiting="0" dark="{{ false }}" hint-size="390px,102px"></dc-import>
-  <main style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; padding: 8px 16px 104px; border-top: 1px solid #E4E0D7">
+<div style="width: 390px; height: 844px; display: flex; gap: 40px; background: {{c.bg}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+<div style="position: relative; width: 390px; height: 844px; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; background: {{c.bg}}; color: {{c.ink}}">
+  <dc-import name="TopBar" pane="conversation" waiting="0" dark="{{ dark }}" hint-size="390px,102px"></dc-import>
+  <main style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; padding: 8px 16px 104px; border-top: 1px solid {{c.line}}">
     <sc-for list="{{ rows }}" as="r" hint-placeholder-count="6">
       <div style="margin-top: {{ r.gap }}px; width: 358px">
-        <dc-import name="ChatRow" kind="{{ r.kind }}" pos="single" text="{{ r.text }}" time="{{ r.time }}" gutter="" dark="{{ false }}" ax="{{ false }}" w="{{ 358 }}" style="display: block; width: 358px" hint-size="358px,48px"></dc-import>
+        <dc-import name="ChatRow" kind="{{ r.kind }}" pos="single" text="{{ r.text }}" time="{{ r.time }}" gutter="" dark="{{ dark }}" ax="{{ false }}" w="{{ 358 }}" style="display: block; width: 358px" hint-size="358px,48px"></dc-import>
       </div>
     </sc-for>
   </main>
   <div style="position: absolute; left: 12px; bottom: 26px; width: 366px; height: 60px; display: flex">
-    <dc-import name="Dock" label="Sheepdog" status="Listening" mode="live" dark="{{ false }}" style="display: block; width: 366px; height: 60px" hint-size="366px,60px"></dc-import>
+    <dc-import name="Dock" label="Sheepdog" status="Listening" mode="live" dark="{{ dark }}" style="display: block; width: 366px; height: 60px" hint-size="366px,60px"></dc-import>
   </div>
 </div>
+
+</div>
 </x-dc>
-<script type="text/x-dc" data-dc-script data-props='{"$preview": {"width": 390, "height": 844}}'>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "$preview": {"width": 390, "height": 844}}'>
 class Component extends DCLogic {
   renderVals() {
+    const light = {"bg": "#FAF8F3", "surface": "#FFFFFF", "surface2": "#F1EEE7", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7"};
+    const dark = {"bg": "#16181C", "surface": "#1F2126", "surface2": "#26292F", "ink": "#F5F2EA", "ink2": "#A3A7AF", "line": "#2E3138"};
+    const d = !!this.props.dark;
+    const c = d ? dark : light;
     const R = (kind, gap, text, time) => ({ kind, gap, text: text || '', time: time || '' });
     const rows = [
-      R('day', 0, 'Today'),
-      R('you', 14, 'How is the factory?'),
-      R('voiceDetails', 6, 'Since last night, herdr-sheepdog merged 9 tasks. Milestone 2 of 4 is done and one task is waiting on CI. Quota is unknown, because codexbar isn’t installed. Nothing needs you.'),
-      R('update', 18, 'herdr-sheepdog factory: main has been red for over an hour. Merges are on hold. The fix, SDF-57, is in review.', '11:40'),
-      R('you', 14, 'Open the coordinator.'),
-      R('voice', 6, 'Opening the herdr-sheepdog coordinator’s window.')
+      R('day', 0, 'Today', ''),
+      R('you', 14, 'Tell notes to skip the export task.', ''),
+      R('voice', 6, 'Told the notes factory.', ''),
+      R('you', 18, 'How is notes?', ''),
+      R('voiceDetails', 6, 'notes is running: 3 working, 1 waiting on you, 9 of 14 done. T10 waits on you: delete the old notes table in the migration?', ''),
+      R('you', 18, 'What happened to the export task?', ''),
+      R('voice', 6, 'The coordinator dropped T9, because you said to skip the export.', ''),
+      R('you', 18, 'Tell photos to use the new thumbnail size.', ''),
+      R('voice', 6, 'photos is stopped. It gets this when you resume it.', '')
     ];
-    return { rows };
+    const P = (a, b) => ({ a, b });
+    const pairs = [
+      P("An open ask, with its options and the recommendation", "A worker or reviewer starting, working, finishing, failing or stuck"),
+      P("The result of your override", "Review rounds and verdicts, retro and plan review"),
+      P("The coordinator stuck on a prompt", "CI passing, a PR opening, a merge"),
+      P("“Told the notes factory.” after an instruction", "The coordinator’s routine wakes, recaps and decisions"),
+      P("Anything you ask: status from the board, why from the project’s record", "A model handoff, a retry, a new coordinator session")
+    ];
+    return { c, dark: d, rows, pairs };
   }
 }
 </script>

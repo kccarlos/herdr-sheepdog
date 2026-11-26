@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — a project head in every state</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+</style>
+</helmet>
+<div style="width: 1632px; box-sizing: border-box; padding: 40px; display: grid; grid-template-columns: repeat(4, 358px); gap: 28px 40px; align-items: start; background: {{ bg }}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif">
+  <div style="display: flex; flex-direction: column; gap: 10px">
+    <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 18px; font-weight: 700; color: {{ ink }}">Running</h2>
+    <dc-import name="FactoryHead" project="notes" dark="{{ dark }}" w="{{ 358 }}" style="display: block; width: 358px" hint-size="358px,140px"></dc-import>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 10px">
+    <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 18px; font-weight: 700; color: {{ ink }}">Stopped: Resume</h2>
+    <dc-import name="FactoryHead" project="photos" dark="{{ dark }}" w="{{ 358 }}" style="display: block; width: 358px" hint-size="358px,140px"></dc-import>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 10px">
+    <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 18px; font-weight: 700; color: {{ ink }}">Finished: folded in Done</h2>
+    <dc-import name="FactoryHead" project="recipes" dark="{{ dark }}" w="{{ 358 }}" style="display: block; width: 358px" hint-size="358px,140px"></dc-import>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 10px">
+    <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 18px; font-weight: 700; color: {{ ink }}">Coordinator stuck: its dialog</h2>
+    <dc-import name="FactoryHead" project="notes" blocked="{{ true }}" dark="{{ dark }}" w="{{ 358 }}" style="display: block; width: 358px" hint-size="358px,140px"></dc-import>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 10px">
+    <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 18px; font-weight: 700; color: {{ ink }}">Two named notes: the folder tells</h2>
+    <dc-import name="FactoryHead" project="notes" dark="{{ dark }}" w="{{ 358 }}" style="display: block; width: 358px" hint-size="358px,140px"></dc-import>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 10px">
+    <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 18px; font-weight: 700; color: {{ ink }}">… and the other one</h2>
+    <dc-import name="FactoryHead" project="notes2" dark="{{ dark }}" w="{{ 358 }}" style="display: block; width: 358px" hint-size="358px,140px"></dc-import>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 10px">
+    <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 18px; font-weight: 700; color: {{ ink }}">Several computers: the label</h2>
+    <dc-import name="FactoryHead" project="notes" computer="Home Mac" dark="{{ dark }}" w="{{ 358 }}" style="display: block; width: 358px" hint-size="358px,140px"></dc-import>
+  </div>
+  <div style="display: flex; flex-direction: column; gap: 10px">
+    <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 18px; font-weight: 700; color: {{ ink }}">Largest text</h2>
+    <dc-import name="FactoryHead" project="notes" ax="{{ true }}" dark="{{ dark }}" w="{{ 358 }}" style="display: block; width: 358px" hint-size="358px,140px"></dc-import>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "$preview": {"width": 1632, "height": 900}}'>
+class Component extends DCLogic {
+  renderVals() { const d = !!this.props.dark; return { dark: d, bg: d ? "#0E0F12" : "#F3F0E8", ink: d ? "#F5F2EA" : "#1F1F22" }; }
+}
+</script>
+</body>
+</html>

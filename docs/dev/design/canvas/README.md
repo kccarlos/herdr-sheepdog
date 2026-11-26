@@ -44,3 +44,25 @@ is re-exported after every change.
   opens with two or more projects, and the "needs you" button in the
   header. Its strings are the last wording section of
   [slice14-wording.md](slice14-wording.md).
+- **Part 3** (the factory in the iPhone and iPad app, and in voice) was
+  redrawn in place on 2026-11-25 from the accepted integration design
+  `docs/dev/design/app-factory.md` (branch `docs/app-factory-design`), then
+  revised after design review 1. Boards: the project head and its states
+  (`FactoryHead`, `FactoryHeadStates`), the ask card and its four kinds
+  (`FactoryAskCard`, `FactoryAskCardStates`), Agents (`FactoryAgents…`), the project board (`FactoryProject…`,
+  `FactoryProjectActions`), the task view (`FactoryTask`), the read-only
+  coordinator window, the iPad list and graph (`FactoryIPad`,
+  `FactoryIPadBoard…`), Settings and models (`FactorySettings`,
+  `FactoryModels`, `FactorySettingsStates`), new project
+  (`FactoryNewProject…`), voice (`FactoryVoice`, `FactoryVoiceWhy`) and the
+  empty and error states (`FactoryStates…`). Removed: `FactoryPage` (with
+  its dark and AX copies), `FactoryWorker`, `FactoryIPadSpace` (with its
+  dark copy), `FactoryIPadEntry`, `FactoryStartEntry`, `FactoryStartShell`
+  (each with its dark copy), `FactoryStartStates`, `FactoryArch`, and
+  after review 1 `FactoryAgentsTie`, `FactoryAgentsDone`, `FactoryReadBack`,
+  `FactoryOverrideCard` (now a kind of `FactoryAskCard`) and the dark
+  copies `FactoryAskDark`, `FactoryWindowDark`, `FactoryTaskDark`,
+  `FactoryNewProjectDark`, `FactoryIPadDark`; after review 2 `FactoryAsk`
+  and `FactoryStatesDark`. Their PNGs were rendered from
+  the board sources in headless Chrome with the canvas runtime, not
+  exported from the canvas.
