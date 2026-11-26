@@ -194,7 +194,7 @@ type Project struct {
 	CoordWakeAt        time.Time         `json:"coord_wake_at,omitempty"`       // J9: oldest delivered wake awaiting a turn
 	CoordWakesInFlight []Wake            `json:"coord_wakes_in_flight,omitempty"`
 	CoordWakeActed     bool              `json:"coord_wake_acted,omitempty"`
-	CoordWakeRetried   bool              `json:"coord_wake_retried,omitempty"`
+	CoordWakeRetried   bool              `json:"coord_wake_retried,omitempty"` // summary of the in-flight batch
 	CoordWakeTurn      uint64            `json:"coord_wake_turn,omitempty"`    // J9: coordinator turn when CoordWakeAt was sent
 	CoordLastWakeAt    time.Time         `json:"coord_last_wake_at,omitempty"` // J13: last wake or heartbeat delivered
 	WaitKey            string            `json:"wait_key,omitempty"`           // episode key for J4/J6/J7 wait deduplication
@@ -208,11 +208,12 @@ type Project struct {
 // per task and key, delivered in one batch when the coordinator is idle.
 // Facts are the task's facts when it was queued, built in code.
 type Wake struct {
-	Key   string    `json:"key"`
-	Task  string    `json:"task,omitempty"`
-	Why   string    `json:"why"`
-	Facts string    `json:"facts"`
-	At    time.Time `json:"at"`
+	Key     string    `json:"key"`
+	Task    string    `json:"task,omitempty"`
+	Why     string    `json:"why"`
+	Facts   string    `json:"facts"`
+	At      time.Time `json:"at"`
+	Retried bool      `json:"retried,omitempty"`
 }
 
 // Outcome is one verifiable result of a task (design.md 3, 11.7; prompts.md 3.1):

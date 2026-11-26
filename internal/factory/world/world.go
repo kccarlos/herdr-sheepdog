@@ -541,43 +541,43 @@ func agyTrustDrawing(text string) bool {
 	return false
 }
 
-// retryCoordWake recognizes a CLI cancellation or an input surface where
-// the wake's submitted prompt is missing. A visible wake takes precedence
-// over prompt-shaped output and composer hints.
+// retryCoordWake reports an interruption or a newer submitted non-wake prompt.
 func retryCoordWake(cli, clean string) bool {
 	prompt := map[string]string{"claude": "❯", CodexCLI: "›", AgyCLI: ">"}[cli]
 	if prompt == "" {
 		return false
 	}
-	lines := strings.Split(clean, "\n")
-	anchor := uiAnchor(cli, lines)
-	sawInput := anchor >= 0
-	if sawInput {
+	lines := strings.Split(strings.TrimRight(clean, "\n \t"), "\n")
+	if anchor := uiAnchor(cli, lines); anchor >= 0 {
 		lines = lines[:anchor]
+	} else if strings.HasPrefix(lines[len(lines)-1], prompt) {
+		lines = lines[:len(lines)-1]
 	}
 	for i := len(lines) - 1; i >= 0; i-- {
-		line := strings.TrimSpace(lines[i])
+		line := lines[i]
 		switch cli {
 		case CodexCLI:
-			if strings.HasPrefix(line, "■ Conversation interrupted") {
+			if strings.HasPrefix(strings.TrimSpace(line), "■ Conversation interrupted") {
 				return true
 			}
-		case AgyCLI:
-			if line == "Request cancelled by user." {
+			if !codexPromptRe.MatchString(line) {
+				continue
+			}
+		case AgyCLI, "claude":
+			marker := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "⎿"))
+			if marker == "Interrupted · What should Antigravity CLI do instead?" && cli == AgyCLI ||
+				marker == "Interrupted · What should Claude do instead?" && cli == "claude" {
 				return true
 			}
-		case "claude":
-			line = strings.TrimSpace(strings.TrimPrefix(line, "⎿"))
-			if strings.HasPrefix(line, "Interrupted · What should Claude do") {
-				return true
+			if !strings.HasPrefix(line, prompt+" ") || cli == AgyCLI && i > 0 && !isRuleLine(lines[i-1]) {
+				continue
 			}
 		}
-		if text, ok := strings.CutPrefix(lines[i], prompt+" "+flow.CoordWakePromptPrefix); ok && text != "" && text[0] >= '0' && text[0] <= '9' {
-			return false
-		}
-		sawInput = sawInput || (cli != AgyCLI && strings.HasPrefix(lines[i], prompt))
+		text := strings.TrimSpace(strings.TrimPrefix(line, prompt))
+		count, ok := strings.CutPrefix(text, flow.CoordWakePromptPrefix)
+		return !ok || count == "" || count[0] < '0' || count[0] > '9'
 	}
-	return sawInput
+	return false
 }
 
 // ObserveRun reads rec's terminal and screen from herdr-core and emits the events for one pass (design.md 5, 7.3).

@@ -109,7 +109,7 @@ func (s *Supervisor) windowAgent(paneID string, allowDialog bool) (row state.Age
 // (looking is not talking). lines <= 0 is WindowDefaultLines; it is
 // capped at WindowMaxLines.
 func (s *Supervisor) Screen(ctx context.Context, paneID string, lines int) (Screen, error) {
-	row, _, ok := s.windowAgent(paneID, false)
+	row, _, ok := s.windowAgent(paneID, true)
 	if !ok {
 		return Screen{}, ErrNoSuchAgent
 	}
@@ -151,7 +151,7 @@ func (s *Supervisor) ScreenANSI(ctx context.Context, paneID string) (Screen, err
 	if !ok {
 		return s.Screen(ctx, paneID, 0)
 	}
-	row, _, ok := s.windowAgent(paneID, false)
+	row, _, ok := s.windowAgent(paneID, true)
 	if !ok {
 		return Screen{}, ErrNoSuchAgent
 	}

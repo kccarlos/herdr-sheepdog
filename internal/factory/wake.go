@@ -190,6 +190,7 @@ func (e *Engine) deliverWakesLocked(ctx context.Context, id string, s *flow.Stat
 				s.Project.CoordWakesInFlight = append(s.Project.CoordWakesInFlight, w)
 			}
 		}
+		s.Project.CoordWakeRetried = slices.ContainsFunc(s.Project.CoordWakesInFlight, func(w flow.Wake) bool { return w.Retried })
 		s.Project.CoordWakeTurn, s.Project.CoordWakeActed = s.Project.Run.Turn, false
 	}
 	s.Project.Wakes, s.Project.CoordLastWakeAt = s.Project.Wakes[n:], now

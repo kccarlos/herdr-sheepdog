@@ -375,37 +375,15 @@ type Pane struct {
 }
 
 func projectPanesOf(s flow.State) map[string]Pane {
-	p, panes := s.Project, map[string]Pane{}
-	name := ProjectName(p.ID, p.Folder)
-	add := func(id string, r *flow.RunRecord, coordinator bool) {
-		if !flow.RunLive(id, r) {
-			return
-		}
-		info := Pane{Name: name, CurrentCoordinator: coordinator}
-		if r != nil {
-			id = cmp.Or(id, r.Address)
-			info.CLI, info.State, info.StateSince = r.CLI, r.State, r.StatusSince
-		}
-		if _, exists := panes[id]; id != "" && (!exists || coordinator) {
-			panes[id] = info
-		}
+	p := s.Project
+	if !currentCoordinator(p) {
+		return nil
 	}
-	review := func(r *flow.ReviewRun) {
-		if r != nil {
-			add(r.RunID, r.Run, false)
-		}
+	info := Pane{Name: ProjectName(p.ID, p.Folder), CurrentCoordinator: true}
+	if r := p.Run; r != nil {
+		info.CLI, info.State, info.StateSince = r.CLI, r.State, r.StatusSince
 	}
-	for _, t := range s.Tasks {
-		for _, a := range t.Attempts {
-			add(a.RunID, a.Run, false)
-			review(a.Review)
-		}
-	}
-	for _, pr := range p.PlanReviews {
-		review(pr.Run)
-	}
-	add(p.RunID, p.Run, currentCoordinator(p))
-	return panes
+	return map[string]Pane{p.RunID: info}
 }
 
 // Pane looks up a run by terminal address using the project-head cache lock.
@@ -417,8 +395,7 @@ func (e *Engine) Pane(id string) (Pane, bool) {
 	var project string
 	found := false
 	for key, panes := range e.projectPanes {
-		if pane, ok := panes[id]; ok && (!found || pane.CurrentCoordinator && !best.CurrentCoordinator ||
-			pane.CurrentCoordinator == best.CurrentCoordinator && key < project) {
+		if pane, ok := panes[id]; ok && (!found || key < project) {
 			best, project, found = pane, key, true
 		}
 	}

@@ -403,6 +403,7 @@ an option of the open question go through the tap path above.
 The factory engine owns the lifecycle of its panes. One supervisor check
 refuses rename, interrupt and close on both the user's and the orchestrator's
 action routes, including when a blocked coordinator has an agent row.
+An error checking the terminal's herdr labels also refuses the action.
 A coordinator's window can still send terminal input, including Esc and
 Ctrl-C. Gated factory asks require their own answer proof.
 

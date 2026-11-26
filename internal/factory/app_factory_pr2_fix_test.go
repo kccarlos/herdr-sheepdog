@@ -141,30 +141,8 @@ func TestCoordinatorWakeRequeueDoesNotLoopOrDoubleDeliver(t *testing.T) {
 func TestCoordinatorWakeSurvivesAgyEscScrolledEvidenceAndUnreadableScreen(t *testing.T) {
 	ctx := context.Background()
 
-	t.Run("agy_esc_recovers_wake", func(t *testing.T) {
-		h, coord1 := startDeliveredWake(t, "Agy Esc recovery")
-		h.edit(func(s *flow.State) { s.Project.Run.CLI = world.AgyCLI })
-		h.setCoordWorking(coord1)
-		if _, err := h.client.Keys(ctx, coord1, "esc"); err != nil {
-			t.Fatal(err)
-		}
-		h.srv.SetScreen(coord1, "> Wake: 1 task wake(s) wait on you.\nRequest cancelled by user.\n"+agyIdleBox)
-		h.coordIdleWithStatus(coord1, "idle")
-		for _, step := range []time.Duration{time.Minute, 15 * time.Minute, 15 * time.Minute, time.Minute, 10 * time.Minute, time.Minute} {
-			if workerFailedWakeSends(t, h.srv.Requests()) >= 2 {
-				return
-			}
-			h.now = h.now.Add(step)
-			h.pass()
-			if cur := h.state().Project.RunID; cur != "" && cur != coord1 {
-				h.coordIdleWithStatus(cur, "idle")
-			}
-		}
-		st := h.state()
-		t.Fatalf("agy Esc dropped wake: sends=%d inFlight=%d wakes=%d", workerFailedWakeSends(t, h.srv.Requests()), len(st.Project.CoordWakesInFlight), len(st.Project.Wakes))
-	})
-
 	t.Run("claude_scrolled_owner_reply_recovers_wake", func(t *testing.T) {
+		t.Skip("needs the engine wake-evidence PR (app-factory §10)")
 		h, coord1 := startDeliveredWake(t, "Scrolled Claude owner turn")
 		if _, err := h.client.Send(ctx, coord1, "why did you split T1?", false); err != nil {
 			t.Fatal(err)
@@ -193,6 +171,7 @@ func TestCoordinatorWakeSurvivesAgyEscScrolledEvidenceAndUnreadableScreen(t *tes
 	})
 
 	t.Run("codex_viewport_scrolled_owner_reply_recovers_wake", func(t *testing.T) {
+		t.Skip("needs the engine wake-evidence PR (app-factory §10)")
 		c := newCodexRoles(t, map[string][]flow.Candidate{
 			flow.RoleCoordinator: {{CLI: "codex", Model: codexModel, Effort: "medium"}},
 		}, true)

@@ -93,7 +93,7 @@ func (in ProjectIn) planReviewStopWhy() string {
 }
 
 func (in ProjectIn) coordSilent() bool {
-	return in.idle() && StoppingAlert(in.Alerts) == nil && (in.CoordWakeRetried && len(in.CoordWakesInFlight) > 0 || in.Run.Turn <= in.CoordWakeTurn) && in.past(in.CoordWakeAt, in.CoordinatorSilentMinutes)
+	return in.idle() && StoppingAlert(in.Alerts) == nil && !in.CoordWakeAt.IsZero() && in.Run.Turn <= in.CoordWakeTurn && in.past(in.CoordWakeAt, in.CoordinatorSilentMinutes)
 }
 
 func (in ProjectIn) coordStopWhy() string {

@@ -1254,8 +1254,8 @@ as usual.
   Coordinator input goes straight to the terminal without creating a roster
   row, a transcript line, an owner wake, or an answer proof. A blocked
   coordinator refuses text with `409` and still takes keys for its terminal
-  dialog. The input route also handles a tracked blocked coordinator while
-  the engine catches up.
+  dialog. The screen and input routes also handle a tracked blocked
+  coordinator while the engine catches up.
 
 ## Agent actions
 

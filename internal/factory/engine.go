@@ -775,23 +775,26 @@ func reconcileCoordWakes(p *flow.Project, tick flow.RunEvent) bool {
 	if !ended && (r.State != flow.PhaseIdle || r.Turn <= p.CoordWakeTurn || tick.ScreenHash == "") {
 		return false
 	}
-	retry := !p.CoordWakeActed && r.Status != "error" && (tick.RetryCoordWake || ended && p.CoordWakeRetried)
-	if ended {
-		retry = retry || r.Result == flow.EndQuota || r.Turn <= p.CoordWakeTurn
-	}
-	if retry {
-		if !ended && p.CoordWakeRetried {
-			return false // J9 can replace the coordinator and preserve the batch.
-		}
+	recoverEnded := ended && (r.Result == flow.EndQuota || r.Turn <= p.CoordWakeTurn)
+	retry := !ended && tick.RetryCoordWake && !p.CoordWakeActed && r.Status != "error"
+	if recoverEnded || retry {
 		var missed []flow.Wake
 		for _, w := range p.CoordWakesInFlight {
+			if retry && w.Retried {
+				continue
+			}
 			if !slices.ContainsFunc(p.Wakes, func(queued flow.Wake) bool { return queued.Task == w.Task && queued.Key == w.Key }) {
+				w.Retried = w.Retried || retry
 				missed = append(missed, w)
 			}
 		}
-		p.Wakes = append(missed, p.Wakes...)
+		if retry {
+			p.Wakes = append(missed, p.Wakes...)
+		} else {
+			p.Wakes = append(p.Wakes, missed...)
+		}
 	}
-	p.CoordWakesInFlight, p.CoordWakeActed, p.CoordWakeRetried = nil, false, retry && !ended
+	p.CoordWakesInFlight, p.CoordWakeActed, p.CoordWakeRetried = nil, false, false
 	p.CoordWakeAt = time.Time{}
 	if !ended && !retry {
 		p.CoordSilentStops = 0
@@ -846,14 +849,9 @@ func (e *Engine) observeCoordLocked(ctx context.Context, id string, s *flow.Stat
 	if r := p.Run; r != nil && r.State == flow.PhaseEnded && (p.RunID != "" || p.RunTokenHash != "" || !p.CoordWakeAt.IsZero() || !p.CoordErrorAt.IsZero() || (!flow.IsCoordR29(r) && p.CoordDialogStucks != 0) || (r.Result != flow.EndStopped && p.CoordSilentStops != 0)) {
 		p.RunID, p.RunTokenHash, p.CoordSilentStops, dirty = "", "", map[bool]int{true: p.CoordSilentStops}[r.Result == flow.EndStopped], true
 		clearCoordTrack(p, !flow.IsCoordR29(r), false)
-	} else if r != nil && r.State != flow.PhaseEnded {
-		switch {
-		case p.CoordWakeRetried && len(p.CoordWakesInFlight) > 0 && r.State == flow.PhaseIdle && r.Turn > p.CoordWakeTurn && p.CoordWakeAt.IsZero():
-			p.CoordWakeAt, dirty = e.now(), true
-		case !p.CoordWakeAt.IsZero() && (len(p.CoordWakesInFlight) == 0 && r.Turn > p.CoordWakeTurn ||
-			r.Turn <= p.CoordWakeTurn && r.CLI != world.CodexCLI && r.Status == "working"):
-			p.CoordWakeAt, p.CoordSilentStops, dirty = time.Time{}, map[bool]int{false: p.CoordSilentStops}[r.Turn > p.CoordWakeTurn], true
-		}
+	} else if r != nil && r.State != flow.PhaseEnded && !p.CoordWakeAt.IsZero() &&
+		(len(p.CoordWakesInFlight) == 0 && r.Turn > p.CoordWakeTurn || r.Turn <= p.CoordWakeTurn && r.CLI != world.CodexCLI && r.Status == "working") {
+		p.CoordWakeAt, p.CoordSilentStops, dirty = time.Time{}, map[bool]int{false: p.CoordSilentStops}[r.Turn > p.CoordWakeTurn], true
 	}
 	if dirty {
 		e.saveLocked(id, *s)
@@ -948,7 +946,7 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 			return
 		}
 		stopRec(&s.Project.Run, flow.RoleCoordinator, s.Settings, now)
-		reconcileCoordWakes(&s.Project, flow.RunEvent{RetryCoordWake: r.ID == "J9"})
+		reconcileCoordWakes(&s.Project, flow.RunEvent{})
 		s.Project.RunID, s.Project.RunTokenHash = "", ""
 		clearCoordTrack(&s.Project, true, false)
 		if s.Project.CoordSilentStops = map[bool]int{true: s.Project.CoordSilentStops + 1}[r.ID == "J9"]; s.Project.CoordSilentStops >= 2 {

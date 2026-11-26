@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -91,7 +92,15 @@ type LogLine struct {
 // the engine never guesses (design.md 15).
 func LoadState(path string) (flow.State, error) {
 	s := flow.State{Settings: flow.DefaultSettings()} // a setting newer than the file keeps its default
-	return s, readJSON(path, &s)
+	err := readJSON(path, &s)
+	p := &s.Project
+	if p.CoordWakeRetried && !slices.ContainsFunc(p.CoordWakesInFlight, func(w flow.Wake) bool { return w.Retried }) {
+		// Older states stored a single retry bit for the whole batch.
+		for i := range p.CoordWakesInFlight {
+			p.CoordWakesInFlight[i].Retried = true
+		}
+	}
+	return s, err
 }
 
 func readJSON(path string, dst any) error {
