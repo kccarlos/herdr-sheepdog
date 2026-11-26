@@ -2,6 +2,7 @@ package inject
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"maps"
 	"reflect"
@@ -215,20 +216,30 @@ func (f *Factory) Answer(askID, option string, proof factory.AnswerProof) error 
 
 // Say logs the owner's words and wakes change subscribers.
 func (f *Factory) Say(project, text string) error {
-	project, text = strings.TrimSpace(project), strings.TrimSpace(text)
+	_, err := f.SayByID(context.Background(), strings.TrimSpace(project), text, "")
+	return err
+}
+
+// SayByID records the same accepted instruction as the engine's ID route.
+func (f *Factory) SayByID(ctx context.Context, project, text, heard string) (factory.ProjectHead, error) {
 	var change factory.Change
 	defer f.edit(&change)()
+	if err := ctx.Err(); err != nil {
+		return factory.ProjectHead{}, err
+	}
 	p := f.projects[project]
 	switch {
 	case p == nil:
-		return factory.ErrProjectNotFound
+		return factory.ProjectHead{}, factory.ErrProjectNotFound
 	case p.State == "finished":
-		return &factory.Refusal{Code: flow.RefuseClosed, Why: "the project is finished; start it with a different goal"}
-	case text == "":
-		return &factory.Refusal{Code: "why_missing", Why: "Say requires non-empty text."}
+		return p.Clone(), &factory.Refusal{Code: flow.RefuseClosed, Why: p.Name + " is finished. Give it a new goal."}
+	}
+	text, _, ref := factory.NormalizeSay(text, heard)
+	if ref != nil {
+		return p.Clone(), ref
 	}
 	change = factory.Change{Project: project, Kind: "say", Text: text}
-	return nil
+	return p.Clone(), nil
 }
 
 // Start starts a scripted project in folder with the supplied goal.

@@ -2,6 +2,8 @@ package supervisor
 
 import (
 	"cmp"
+	"context"
+	"errors"
 	"fmt"
 	"slices"
 	"strings"
@@ -17,6 +19,38 @@ import (
 )
 
 var errNoCoordinatorDialog = fmt.Errorf("%w: the factory coordinator has no pending dialog to answer", brain.ErrNotPermitted)
+
+func (h brainHost) sayToProject(ctx context.Context, id, text string) (string, error) {
+	f, ok := h.s.cfg.Factory.(interface {
+		SayByID(context.Context, string, string, string) (factory.ProjectHead, error)
+	})
+	if !ok {
+		return "", errors.New("factory is not available")
+	}
+	var heard string
+	h.s.mu.Lock()
+	if u := utteranceOf(ctx); u != nil {
+		if u.dropped {
+			h.s.mu.Unlock()
+			return "", context.Canceled
+		}
+		heard = u.text
+	}
+	h.s.mu.Unlock()
+	p, err := f.SayByID(ctx, id, text, heard)
+	if err != nil {
+		return "", err
+	}
+	h.s.setSubject(factoryPanePrefix + id)
+	switch {
+	case p.State == "stopped":
+		return p.Name + " is stopped. It gets this when you resume it.", nil
+	case p.CoordinatorPane == "":
+		return "The " + p.Name + " coordinator is not running. It gets this when it is back.", nil
+	default:
+		return "Told the " + p.Name + " factory.", nil
+	}
+}
 
 type brainRoster struct {
 	listed, finished []state.Agent
