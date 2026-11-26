@@ -255,7 +255,13 @@ private struct AgentWindowContent: View, Equatable {
     private var content: some View {
         VStack(spacing: 0) {
             if let notice = state.notice, !(state.phase == .ended && !window.hasScreen) {
-                NoticeBar(notice: notice, text: state.noticeText ?? notice.text, fill: noticeFill) { act(on: notice) }
+                let endedCoordinator = state.phase == .ended ? coordinator : nil
+                NoticeBar(
+                    notice: notice,
+                    text: endedCoordinator?.notRunningState.heading ?? state.noticeText ?? notice.text,
+                    actionTitle: endedCoordinator?.backButtonLabel,
+                    fill: noticeFill
+                ) { act(on: notice) }
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
             terminal
@@ -293,6 +299,12 @@ private struct AgentWindowContent: View, Equatable {
         .animation(Theme.ease, value: state.notice)
         .onAppear {
             window.surface.apply(theme: theme)
+            if coordinator != nil {
+                let ownerID = computer ?? model.currentComputerID
+                window.onEnded = { [weak model] in
+                    Task { await model?.fleet.model(ownerID)?.refresh() }
+                }
+            }
             window.attach(model: model)
             window.onActivity = pane?.onInteract
         }
@@ -485,10 +497,11 @@ private struct AgentWindowContent: View, Equatable {
             } else if state.phase == .ended, !window.hasScreen {
                 // Closed before anything was drawn: say so in the middle,
                 // not over an empty terminal.
+                let off = coordinator?.notRunningState
                 ContentUnavailableView {
-                    Label(state.noticeText ?? "This agent closed.", systemImage: "terminal")
+                    Label(off?.heading ?? state.noticeText ?? "This agent closed.", systemImage: "terminal")
                 } description: {
-                    Text("Its pane closed, or sheepdog no longer tracks it.")
+                    Text(off?.body ?? "Its pane closed, or sheepdog no longer tracks it.")
                 } actions: {
                     Button(coordinator?.backButtonLabel ?? (pane == nil ? "Back to agents" : "Close")) { leave() }
                         .accessibilityIdentifier("agentScreen.ended.back")
@@ -664,6 +677,7 @@ private struct StateChip: View {
 struct NoticeBar: View {
     let notice: AgentWindowState.Notice
     let text: String
+    var actionTitle: String? = nil
     let fill: Color
     let action: () -> Void
 
@@ -706,7 +720,7 @@ struct NoticeBar: View {
     }
 
     @ViewBuilder private var button: some View {
-        if let title = notice.action {
+        if let title = actionTitle ?? notice.action {
             Button(title, action: action)
                 .font(.footnote.weight(.semibold))
                 .fixedSize()
@@ -763,6 +777,10 @@ struct TerminalHost: UIViewRepresentable {
     }
 
     func updateUIView(_ view: UIView, context: Context) {}
+
+    static func dismantleUIView(_ view: UIView, coordinator: ()) {
+        view.removeFromSuperview()
+    }
 }
 
 extension Color {
@@ -842,6 +860,7 @@ final class AgentWindowController {
     @ObservationIgnored private(set) var hub: TermHub?
     /// A tap, a key or a prompt in this window (iPad: focuses its pane).
     @ObservationIgnored var onActivity: (() -> Void)?
+    @ObservationIgnored var onEnded: (() -> Void)?
     @ObservationIgnored private var channel: Int?
     @ObservationIgnored private var snapshotTask: Task<Void, Never>?
     @ObservationIgnored private var pushes: ScreenStreamRouter.Subscription?
@@ -909,6 +928,7 @@ final class AgentWindowController {
     }
 
     func detach() {
+        onEnded = nil
         run(mutate { $0.disappeared() })
         pushes?.end()
         pushes = nil
@@ -1061,9 +1081,11 @@ final class AgentWindowController {
     // MARK: Commands
 
     private func mutate(_ change: (inout AgentWindowState) -> [AgentWindowState.Command]) -> [AgentWindowState.Command] {
+        let wasEnded = state.phase == .ended
         var next = state
         let commands = change(&next)
         if next != state { state = next }
+        if !wasEnded, state.phase == .ended { onEnded?() }
         return commands
     }
 

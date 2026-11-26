@@ -45,12 +45,16 @@ public struct FactoryCoordinatorWindow: Equatable {
         case .finished:
             return OffState(heading: "\(projectName) is finished", body: "To go on, reopen \(projectName) with a new goal on its page.")
         default:
-            return OffState(
-                heading: "The \(projectName) coordinator is not running",
-                body: "This window comes back when a coordinator runs again. To tell it something meanwhile, use the box on the \(projectName) page; it gets it when it is back.",
-                alertCause: alert?.cause, alertFix: alert?.fix.map { "Fix: \($0)" }
-            )
+            return notRunningState
         }
+    }
+
+    public var notRunningState: OffState {
+        OffState(
+            heading: "The \(projectName) coordinator is not running",
+            body: "This window comes back when a coordinator runs again. To tell it something meanwhile, use the box on the \(projectName) page; it gets it when it is back.",
+            alertCause: alert?.cause, alertFix: alert?.fix.map { "Fix: \($0)" }
+        )
     }
 
     public static func inputErrorMessage(_ error: Error, projectName: String, computerName: String) -> String {

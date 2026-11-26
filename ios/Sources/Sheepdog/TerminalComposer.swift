@@ -48,6 +48,7 @@ struct TerminalComposer<Leading: View>: View {
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                             .onTapGesture { if enabled { focused.wrappedValue = true } }
+                            .allowsHitTesting(!focused.wrappedValue)
                             .accessibilityHidden(true)
                     }
                 }
