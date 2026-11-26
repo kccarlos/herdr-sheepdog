@@ -1,6 +1,7 @@
 package state
 
 import (
+	"cmp"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -95,7 +96,7 @@ func Open(path string, opts Options) (*Store, error) {
 			a.PaneID = id
 		}
 		a.Cwd = hc.LocalCwd(a.PaneID, a.Cwd)
-		if alias, ok := s.opts.Aliases[id]; ok && alias != "" && a.Alias != alias {
+		if alias, ok := s.opts.Aliases[id]; a.ProjectName == "" && ok && alias != "" && a.Alias != alias {
 			a.Alias, a.AliasAuto = s.uniqueFor(id, alias), false
 		}
 	}
@@ -118,6 +119,11 @@ func (s *Store) Path() string { return s.path }
 // whether anything changed. A new pane gets its alias here; state_since is
 // only touched when the state actually changes.
 func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
+	return s.ApplyWithProjectName(t, "")
+}
+
+// ApplyWithProjectName applies the transition and sets the coordinator's display name.
+func (s *Store) ApplyWithProjectName(t herdr.Transition, projectName string) (Agent, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -180,6 +186,11 @@ func (s *Store) Apply(t herdr.Transition) (Agent, bool, error) {
 	if len(t.Labels) > 0 && !maps.Equal(a.Labels, t.Labels) {
 		a.Labels, changed = maps.Clone(t.Labels), true
 	}
+	if a.ProjectName != projectName {
+		a.ProjectName = projectName
+		a.Alias, a.AliasAuto = s.defaultAlias(a)
+		changed = true
+	}
 	if identity {
 		changed = true
 		if a.Alias == "" || a.AliasAuto {
@@ -234,6 +245,9 @@ func pidSessionForKind(source, kind string) bool {
 // defaultAlias returns the config alias for the pane (pinned) or a derived
 // one (auto).
 func (s *Store) defaultAlias(a *Agent) (alias string, auto bool) {
+	if a.ProjectName != "" {
+		return s.uniqueFor(a.PaneID, cmp.Or(Slug(a.ProjectName), "factory")), false
+	}
 	if alias, ok := s.opts.Aliases[a.PaneID]; ok && alias != "" {
 		return s.uniqueFor(a.PaneID, alias), false
 	}

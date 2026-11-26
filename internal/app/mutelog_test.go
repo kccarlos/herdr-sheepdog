@@ -81,3 +81,37 @@ func TestMutedLoggerWithoutAResolver(t *testing.T) {
 		t.Errorf("marked before the resolver was set: %v", m)
 	}
 }
+
+// Pins app-factory.md §4: quiet factory transitions carry muted: true even on
+// unmuted spaces, a blocked coordinator is not factory-quiet, and
+// factory.changed is never a notification event.
+func TestMutedLoggerMarksFactoryQuietTransitionsAndNotFactoryChanged(t *testing.T) {
+	mk := func(role string, to herdr.State) herdr.Transition {
+		return herdr.Transition{PaneID: "hc:1", From: herdr.StateWorking, To: to, At: time.Unix(1, 0).UTC(), Agent: "codex", Labels: map[string]string{"sheepdog.project": "proj-1", "sheepdog.role": role}}
+	}
+	for _, tc := range []struct {
+		name, typ string
+		payload   any
+		spaceMute bool
+		wantMuted bool
+	}{
+		{"worker done", "herdr.transition", mk("worker", herdr.StateDone), false, true},
+		{"reviewer blocked", "herdr.transition", mk("reviewer", herdr.StateBlocked), false, true},
+		{"coordinator done", "herdr.transition", mk("coordinator", herdr.StateDone), false, true},
+		{"coordinator blocked", "herdr.transition", mk("coordinator", herdr.StateBlocked), false, false},
+		{"factory.changed never muted", "factory.changed", map[string]any{"project": "proj-1"}, true, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			inner := &lineLog{}
+			l, m := &mutedLogger{Logger: inner}, func(string) bool { return tc.spaceMute }
+			l.muted.Store(&m)
+			l.Log("src", tc.typ, "hc:1", tc.payload)
+			b, _ := json.Marshal(inner.lines[0].Payload)
+			var got map[string]any
+			_ = json.Unmarshal(b, &got)
+			if (got["muted"] == true) != tc.wantMuted {
+				t.Errorf("muted = %v, want %v (%s)", got["muted"], tc.wantMuted, b)
+			}
+		})
+	}
+}

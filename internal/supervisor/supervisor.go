@@ -465,11 +465,10 @@ type Supervisor struct {
 	// journal is the work journal's own bookkeeping (journal.go).
 	journal journalState
 
-	factoryOpMu     sync.Mutex // lock order: factoryOpMu -> s.mu -> factoryMu
-	factoryMu       sync.Mutex
-	factoryAsks     []state.PendingAction
-	factoryAskNames map[string]string
-	factoryCh       <-chan factory.Change
+	factoryOpMu sync.Mutex // lock order: factoryOpMu -> s.mu -> factoryMu
+	factoryMu   sync.Mutex
+	factoryAsks []state.PendingAction
+	factoryCh   <-chan factory.Change
 }
 
 // interruptGrace is how long after a user cancel a pane's working -> done

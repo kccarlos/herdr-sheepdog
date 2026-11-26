@@ -25,7 +25,8 @@ var notificationEvents = map[string]bool{"pending.created": true, "herdr.transit
 // Log implements logging.Logger.
 func (l *mutedLogger) Log(source, typ, paneID string, payload any) {
 	if notificationEvents[typ] && paneID != "" {
-		if f := l.muted.Load(); f != nil && (*f)(paneID) {
+		t, _ := payload.(herdr.Transition)
+		if f := l.muted.Load(); herdr.IsFactoryQuiet(t.Labels, t.To) || (f != nil && (*f)(paneID)) {
 			payload = withMuted(payload)
 		}
 	}

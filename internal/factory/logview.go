@@ -69,7 +69,7 @@ type TaskStatus struct {
 // `/factory`, and the stale check always agree from one source.
 func StatusViewOf(s flow.State, logs []LogLine) []TaskStatus {
 	lastRow := lastTaskRows(logs)
-	g := graphViewOf(s, lastRow)
+	g := graphViewOf(s, lastRow, nil)
 	out := make([]TaskStatus, 0, len(g.Tasks)+len(s.Project.Alerts))
 	for _, tv := range g.Tasks {
 		why := "no logged row"

@@ -16,6 +16,8 @@ type Agent struct {
 	// AliasAuto marks a derived alias; it is re-derived when the workspace
 	// label, name or kind change, while config/SetAlias aliases are pinned.
 	AliasAuto bool `json:"alias_auto,omitempty"`
+	// ProjectName gives a factory coordinator its project's display name.
+	ProjectName string `json:"project_name,omitempty"`
 	// Kind is the agent kind label (codex, claude, …).
 	Kind           string `json:"kind"`
 	Workspace      string `json:"workspace"`
@@ -268,6 +270,7 @@ type PendingAction struct {
 	PayloadText   string      `json:"payload_text"`
 	CreatedAt     time.Time   `json:"created_at"`
 	ExpiresAt     time.Time   `json:"expires_at"`
+	Factory       *FactoryAsk `json:"factory,omitempty"`
 
 	// Question is the short phrase completing "<alias> is asking …" for an
 	// answer_prompt action.
@@ -282,6 +285,13 @@ type PendingAction struct {
 	NoKeys   []string `json:"no_keys,omitempty"`
 	Held     bool     `json:"held,omitempty"`
 	Promoted bool     `json:"promoted,omitempty"`
+}
+
+type FactoryAsk struct {
+	Project     string `json:"project"`
+	Task        string `json:"task,omitempty"`
+	Kind        string `json:"kind"`
+	ProjectName string `json:"-"`
 }
 
 // Option is one selectable choice of an answer_prompt action.

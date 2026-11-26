@@ -62,7 +62,7 @@ func (s *Supervisor) HandleTransition(ctx context.Context, t herdr.Transition) {
 			break
 		}
 	}
-	row, _, err := s.store.Apply(t)
+	row, _, err := s.store.ApplyWithProjectName(t, s.coordinatorName(labels))
 	if err != nil {
 		s.log.Log(logSource, "supervisor.state_error", t.PaneID, map[string]any{"error": err.Error()})
 	}
@@ -511,11 +511,13 @@ func (s *Supervisor) forgetPrompt(paneID string) {
 // aliasOf returns the alias of a pane, or "another agent" when unknown
 // (never a pane id: decision D9).
 func (s *Supervisor) aliasOf(paneID string) string {
-	if a, ok := s.store.Get(paneID); ok && a.Alias != "" {
-		return a.Alias
+	if a, ok := s.store.Get(paneID); ok {
+		if a.Alias != "" {
+			return a.Alias
+		}
 	}
 	if proj, ok := strings.CutPrefix(paneID, factoryPanePrefix); ok && proj != "" {
-		return proj + " factory"
+		return s.factoryProjectName(proj)
 	}
 	return "another agent"
 }
