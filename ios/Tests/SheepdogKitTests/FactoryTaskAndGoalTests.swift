@@ -158,4 +158,285 @@ final class FactoryTaskAndGoalTests: XCTestCase {
         do { try await StubProtocol.client().startFactory(folder: "/work/notes", goal: "Add dark mode"); XCTFail("expected 403") }
         catch { XCTAssertEqual(error as? DaemonError, .rejected(status: 403, message: "proof_required")) }
     }
+
+    /// Fix-round (Opus B1 & Carbon 1/2): `resumeFactory` + `FactoryAgentsList.resumeErrorMessage`
+    /// on a real HTTP 400 start-check reply must return `ac.refused` ("…press Resume again."),
+    /// never Foundation's `localizedDescription` fallback; `FactoryStartChecksError.localizedDescription`
+    /// must not leak NSError domain/code; and `statusWord` covers `ok`/`warn`/`fail`/`skip`.
+    func testResumeStartCheckFailureUsesPlainRefusalInsteadOfLocalizedDescription() async throws {
+        StubProtocol.seen = []
+        defer { StubProtocol.seen = []; StubProtocol.handler = nil }
+
+        let daemonChecksJSON = #"""
+        {"error":"not starting; fix these first (sheepdog factory doctor /work/notes shows every check):\n✗ start claude: claude is not signed in — fix: run: claude auth login",
+         "results":[
+           {"name":"git version","status":"ok","detail":"git 2.47"},
+           {"name":"start claude","status":"fail","detail":"claude is not signed in","fix":"run: claude auth login"},
+           {"name":"review rule","status":"warn","detail":"branch protection optional"},
+           {"name":"retro cli","status":"skip","detail":"not configured"}
+         ]}
+        """#
+        StubProtocol.handler = { _ in (400, Data(daemonChecksJSON.utf8)) }
+
+        do {
+            try await StubProtocol.client().resumeFactory(folder: "/work/notes", goal: "A notes page with search")
+            XCTFail("expected FactoryStartChecksError on 400 results")
+        } catch {
+            let checksErr = try XCTUnwrap(error as? FactoryStartChecksError)
+            XCTAssertEqual(checksErr.results.map(\.statusWord), ["pass", "fail", "warning", "skipped"])
+
+            let msg = FactoryAgentsList.resumeErrorMessage(error, computerName: "Work Mac")
+            XCTAssertEqual(msg, "Not started: a start check failed. Fix it, then press Resume again.")
+            XCTAssertFalse(msg.contains("operation couldn"), "must not leak Foundation NSError text: \(msg)")
+            XCTAssertFalse(msg.contains("FactoryStartChecksError"), "must not leak Swift type name: \(msg)")
+            XCTAssertFalse(error.localizedDescription.contains("FactoryStartChecksError"), error.localizedDescription)
+            XCTAssertFalse(error.localizedDescription.contains("operation couldn"), error.localizedDescription)
+        }
+
+        XCTAssertEqual(
+            FactoryAgentsList.resumeErrorMessage(
+                DaemonError.rejected(status: 400, message: "Not started: a setting is not allowed. Change it in settings below."),
+                computerName: "Work Mac"
+            ),
+            "Not started: a setting is not allowed. Change it in settings below."
+        )
+        XCTAssertEqual(
+            FactoryAgentsList.resumeErrorMessage(
+                DaemonError.rejected(status: 404, message: "factory project not found"),
+                computerName: "Work Mac"
+            ),
+            "This project is gone."
+        )
+    }
 }
+
+#if os(iOS)
+import SwiftUI
+import UIKit
+@testable import Sheepdog
+
+/// Fix-round view unit tests for PR 10: running-project `New goal` reloads `factoryGraph`
+/// even without SSE `factory.changed`, `FactoryGoalSheet` keeps submit/Cancel inside its
+/// `ScrollView` at Accessibility Dynamic Type, and `FactoryTaskView` marks the task title
+/// as an accessibility header.
+@MainActor
+final class FactoryPR10ViewFixTests: XCTestCase {
+    private var suiteName: String!
+    private var defaults: UserDefaults!
+    private var cacheDir: URL!
+
+    override func setUp() async throws {
+        try await super.setUp()
+        suiteName = "sheepdog.tests.pr10-fix-\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        cacheDir = FileManager.default.temporaryDirectory.appendingPathComponent(suiteName, isDirectory: true)
+        PR10FixStub.reset()
+    }
+
+    override func tearDown() async throws {
+        PR10FixStub.reset()
+        defaults.removePersistentDomain(forName: suiteName)
+        try? FileManager.default.removeItem(at: cacheDir)
+        try await super.tearDown()
+    }
+
+    private func makeSessionAndComputer(initialStateJSON: String) throws -> (SessionViewModel, ComputerModel) {
+        let initialState = try DaemonClient.decoder.decode(DaemonState.self, from: Data(initialStateJSON.utf8))
+        let store = ComputerStore(defaults: defaults, secrets: InMemorySecretStore())
+        let settings = SettingsStore(defaults: defaults, computers: store)
+        settings.address = "127.0.0.1:7799"
+        settings.hasBeenConfigured = true
+        let session = SessionViewModel(settings: settings, cache: ConversationCache(directory: cacheDir))
+
+        let endpoint = DaemonEndpoint(host: "127.0.0.1", port: 7777)
+        let connection = ComputerConnection(computerID: "work-mac", address: endpoint.display) { _ in
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = [PR10FixStub.self]
+            return DaemonClient(endpoint: endpoint, session: URLSession(configuration: config))
+        }
+        let workMac = ComputerModel(
+            id: "work-mac",
+            name: "Work Mac",
+            addresses: [endpoint.display],
+            certExpires: nil,
+            connection: connection,
+            scheduler: ManualLinkClock(),
+            demand: LinkDemand(isCurrent: false)
+        )
+        workMac.accept(initialState)
+        session.fleet.set([workMac])
+        return (session, workMac)
+    }
+
+    func testRunningProjectGoalChangeReloadsGraphWithoutFactoryChangedEvent() async throws {
+        let stateV1 = #"""
+        {"agents":[],"questions":[],"factory":[{"id":"proj-1","name":"notes","goal":"A notes page with search","state":"running","counts":{"working":1},"folder":"~/code/notes","coordinator_pane":"coord-1"}],
+         "voice":{"mode":"off","status":"closed","muted":false,"stalled":false,"client_connected":false}}
+        """#
+        let stateV2 = #"""
+        {"agents":[],"questions":[],"factory":[{"id":"proj-1","name":"notes","goal":"Add keyboard shortcuts","state":"running","counts":{"working":1},"folder":"~/code/notes","coordinator_pane":"coord-1"}],
+         "voice":{"mode":"off","status":"closed","muted":false,"stalled":false,"client_connected":false}}
+        """#
+        PR10FixStub.graphJSON = #"{"protocol":1,"project":"proj-1","folder":"~/code/notes","tasks":[{"ref":"T1","title":"feat: search","stage":"working","after":[],"dependents":[],"layer":0,"rounds":0,"steps":[{"name":"implementing","state":"now"}]}]}"#
+
+        let (session, workMac) = try makeSessionAndComputer(initialStateJSON: stateV1)
+        let initialHead = try XCTUnwrap(workMac.factoryHeads.first)
+        let root = NavigationStack {
+            FactoryProjectView(initialHead: initialHead, computerID: "work-mac")
+        }.environmentObject(session)
+
+        let host = UIHostingController(rootView: root)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.layoutIfNeeded()
+        defer {
+            workMac.stop()
+            session.fleet.set([])
+            window.isHidden = true
+            window.rootViewController = nil
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+
+        let initialLoaded = await waitBriefly { PR10FixStub.graphRequests >= 1 }
+        XCTAssertTrue(initialLoaded)
+        XCTAssertEqual(PR10FixStub.graphRequests, 1)
+
+        // Simulate `await computer.refresh()` after submitting New goal on an already-running
+        // project when `/events` is closed (Low Data Mode) or delayed (`factoryChanges` stays 0).
+        PR10FixStub.graphJSON = #"{"protocol":1,"project":"proj-1","folder":"~/code/notes","tasks":[{"ref":"T2","title":"feat: shortcuts","stage":"queued","after":[],"dependents":[],"layer":0,"rounds":0,"steps":[]}]}"#
+        workMac.accept(try DaemonClient.decoder.decode(DaemonState.self, from: Data(stateV2.utf8)))
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+
+        let reloaded = await waitBriefly { PR10FixStub.graphRequests >= 2 }
+        XCTAssertTrue(reloaded, "changing head.goal on an already-running project must reload factoryGraph even without a factory.changed SSE event")
+    }
+
+    func testGoalSheetButtonsScrollInsideScrollViewAtAccessibilityDynamicType() throws {
+        let finishedState = #"""
+        {"agents":[],"questions":[],"factory":[{"id":"proj-1","name":"notes","goal":"A notes page with search","state":"finished","counts":{"done":2},"folder":"~/code/notes"}],
+         "voice":{"mode":"off","status":"closed","muted":false,"stalled":false,"client_connected":false}}
+        """#
+        let (session, workMac) = try makeSessionAndComputer(initialStateJSON: finishedState)
+        let finishedHead = try XCTUnwrap(workMac.factoryHeads.first)
+        defer {
+            workMac.stop()
+            session.fleet.set([])
+        }
+
+        let axView = FactoryGoalSheet(head: finishedHead, computer: workMac, onGone: {})
+            .environment(\.dynamicTypeSize, .accessibility5)
+        let axHost = UIHostingController(rootView: axView)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 480))
+        window.rootViewController = axHost
+        window.makeKeyAndVisible()
+        axHost.view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        let axScroll = try XCTUnwrap(findSubview(ofType: UIScrollView.self, in: axHost.view))
+        XCTAssertLessThan(
+            axScroll.adjustedContentInset.bottom,
+            60,
+            "At Accessibility Dynamic Type sizes, FactoryGoalSheet must keep submit and Cancel inside the ScrollView rather than reserving a large sticky bottom safeAreaInset"
+        )
+    }
+
+    func testTaskViewMarksTaskTitleWithHeaderAccessibilityTrait() throws {
+        let taskJSON = #"{"ref":"T8","title":"feat: tags","stage":"working","after":["T6"],"dependents":[],"layer":1,"rounds":0,"steps":[{"name":"planned","state":"done"}]}"#
+        let task = try DaemonClient.decoder.decode(FactoryTask.self, from: Data(taskJSON.utf8))
+        let host = UIHostingController(rootView: NavigationStack {
+            FactoryTaskView(task: task, projectName: "notes", projectState: .running)
+        })
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+        }
+
+        XCTAssertTrue(hasHeaderTrait(label: "Steps", in: host.view), "positive control: Steps heading carries .header trait")
+        XCTAssertTrue(hasHeaderTrait(label: "feat: tags", in: host.view), "FactoryTaskView task title (h1 on FactoryTask board) must carry .header trait")
+    }
+
+    private func findSubview<T: UIView>(ofType type: T.Type, in view: UIView) -> T? {
+        if let matched = view as? T { return matched }
+        for subview in view.subviews {
+            if let found = findSubview(ofType: type, in: subview) { return found }
+        }
+        return nil
+    }
+
+    private func hasHeaderTrait(label: String, in root: Any) -> Bool {
+        guard let obj = root as? NSObject else { return false }
+        if obj.accessibilityLabel == label, obj.accessibilityTraits.contains(.header) { return true }
+        if let elements = obj.accessibilityElements {
+            for element in elements where hasHeaderTrait(label: label, in: element) { return true }
+        }
+        if let view = obj as? UIView {
+            for subview in view.subviews where hasHeaderTrait(label: label, in: subview) { return true }
+        }
+        return false
+    }
+
+    private func waitBriefly(timeout: TimeInterval = 0.8, _ condition: () -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            if Date() > deadline { return false }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return true
+    }
+}
+
+private final class PR10FixStub: URLProtocol {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var state = (graphJSON: "{}", graphRequests: 0)
+
+    static var graphJSON: String {
+        get { lock.withLock { state.graphJSON } }
+        set { lock.withLock { state.graphJSON = newValue } }
+    }
+
+    static var graphRequests: Int {
+        lock.withLock { state.graphRequests }
+    }
+
+    static func reset() {
+        lock.withLock { state = (graphJSON: "{}", graphRequests: 0) }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let url = request.url ?? URL(string: "http://127.0.0.1:7777")!
+        if url.path.hasSuffix("/graph") {
+            let body = Self.lock.withLock { () -> String in
+                Self.state.graphRequests += 1
+                return Self.state.graphJSON
+            }
+            guard let response = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"]) else { return }
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(body.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
+        guard let response = HTTPURLResponse(url: url, statusCode: 404, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"]) else { return }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"error":"not found"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+#endif

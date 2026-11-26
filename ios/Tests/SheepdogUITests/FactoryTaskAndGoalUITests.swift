@@ -85,12 +85,31 @@ final class FactoryTaskAndGoalUITests: XCTestCase {
         tapWhenTappable(app.buttons["factoryProject.goal.cancel"].firstMatch, "Cancel")
         XCTAssertEqual(stub.requests("POST /api/factory/projects/start"), 0)
 
+        // Opus B1 & Carbon 1/2: Resume on a 400 start-check reply shows `ac.refused`
+        // ("…press Resume again.") plus each check, detail, and parsed command fix with Copy.
+        stub.startHandler = { _ in
+            (400, #"{"error":"not starting; fix these first","results":[{"name":"git version","status":"ok","detail":"git 2.47"},{"name":"start claude","status":"fail","detail":"claude is not signed in","fix":"run: claude auth login (opens a browser), then try again"}]}"#)
+        }
+        tapWhenTappable(app.buttons["factoryProject.resume"].firstMatch, "Resume with failing checks")
+        let resumeRefusal = app.staticTexts["Not started: a start check failed. Fix it, then press Resume again."].firstMatch
+        XCTAssertTrue(resumeRefusal.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["git version"].exists)
+        XCTAssertTrue(app.staticTexts["start claude"].exists)
+        XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'claude is not signed in'")).firstMatch.exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Fix: run:'")).firstMatch.exists, "command fix must strip raw 'run:' prefix")
+        XCTAssertTrue(app.buttons["Copy the command claude auth login"].exists, "command fix must offer Copy")
+
+        stub.startHandler = { [weak stub] _ in
+            stub?.factoryState = #"[{"id":"proj-1","name":"notes","goal":"Add keyboard shortcuts","state":"running","counts":{"working":1,"done":1},"folder":"~/code/notes","coordinator_pane":"coord-notes-1"}]"#
+            return (200, #"{"ok":true,"device_id":"dev-1"}"#)
+        }
         tapWhenTappable(newGoalBtn, "New goal again")
         typeWhenFocused(app.descendants(matching: .any)["factoryProject.goal.field"].firstMatch, "Add keyboard shortcuts")
         tapWhenTappable(submit, "Start with this goal")
 
         XCTAssertTrue(app.staticTexts["Add keyboard shortcuts"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.buttons["factoryProject.stop"].waitForExistence(timeout: 10))
+        XCTAssertFalse(resumeRefusal.exists, "moving to running clears stale Resume start-check refusal")
         XCTAssertTrue(stub.startBodies().contains { $0.contains("~/code/notes") && $0.contains("Add keyboard shortcuts") })
     }
 
@@ -131,6 +150,8 @@ final class FactoryTaskAndGoalUITests: XCTestCase {
         XCTAssertTrue(err.waitForExistence(timeout: 10))
         XCTAssertEqual(err.label, "Not started: a start check failed. Fix it, then press Reopen again.")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'claude is not signed in'")).firstMatch.exists)
+        XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Fix: run:'")).firstMatch.exists, "goal sheet must not print raw 'Fix: run:'")
+        XCTAssertTrue(app.buttons["Copy the command claude auth login"].exists, "goal sheet command fix must offer Copy")
 
         stub.startHandler = { [weak stub] _ in
             stub?.factoryState = #"[{"id":"proj-1","name":"notes","goal":"Add dark mode","state":"running","counts":{"working":1,"done":2},"folder":"~/code/notes","coordinator_pane":"coord-notes-1"}]"#
