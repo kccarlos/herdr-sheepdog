@@ -876,14 +876,97 @@ These are mechanics: how a thing is done once a row has asked for it. They decid
 
 **Wakes.** The coordinator is woken by rules, each wake once per key, batched and delivered when it is idle (J12): a task waits on it (N3–N8, N12–N14, N18, N25, N30, N34, N35, N37, N38, N41, N43), a PR was merged outside the accept bar (N2), a worker asked, a retro finished, a plan review asked for changes, a milestone finished, a pool or the base changed, the owner spoke. A heartbeat covers silence (J13). Each wake starts with a facts block built in code: the tasks waiting on it and why, pools, slots, every setting that differs from its default, and the retro table (section 11.2).
 
-J12 keeps the delivered batch in flight until the engine observes its outcome.
+**Proposed for PR 2b.** J12 keeps one batch in flight. In
+`flow/project.go`, add `len(in.CoordWakesInFlight) == 0` to J12 and J13
+so neither a second batch nor a heartbeat can replace the delivery
+baseline. In `ProjectFinished`, require
+`AllTasksEnded(tasks) && !p.NewGoal && (p.Finished || (len(p.Wakes) == 0 && len(p.CoordWakesInFlight) == 0))`.
+J4 retains its priority and its already-finished branch.
 
-| Run observation | In-flight wakes |
-|---|---|
-| Working, blocked, idle on the delivery turn, or idle with an unreadable screen | Keep the batch in flight. J9 still watches for a wake that gets no turn. |
-| Idle on a later turn with a visible interruption or a newer submitted owner prompt, without a coordinator record or turn error | Requeue each wake with an unused retry once. A newer completed wake takes precedence over older interruption markers. |
-| Other later idle turns with a readable screen | Retire the batch. J8 handles turn errors. |
-| Ended with a batch still in flight | Return the batch to the queue after a quota exit or an exit before a later turn, preserving each wake's retry bit. A later turn otherwise retires the batch. |
+| Observation after J12 delivers | Batch action | Project rule and visible result |
+|---|---|---|
+| Working, blocked, or idle on the delivery turn | Keep the batch and its retry bits. | J9 still requires idle, no stopping alert, an armed watch past `coordinator_silent_minutes`, and `Turn <= CoordWakeTurn`. Keep the existing early watch clear on non-Codex `working` status before the turn advances. Codex uses the later turn. |
+| Real tick in a later idle turn with matching wake evidence and status other than `error` | Retire the confirmed batch. | Close J9's watch and reset the silent-stop streak. J12 can send the next held batch. |
+| Real tick in a later idle turn with the evidence screen blank or unreadable | Wait until `LastTurnEnd + idle_grace_seconds` if `LastTurnEnd` is set. At or after the deadline, or with a zero timestamp, reconcile as unconfirmed on that tick. | Close the watch and reset the streak on the later idle turn, including during grace. J12 and J13 wait for the batch to clear. |
+| Real tick in a later idle turn with an interrupted wake, only a stale echo, a later owner turn without a completed wake, missing evidence on a readable screen, or a reported turn error | Apply the same bounded retry in all cases. Handle an error immediately, including on a blank screen. | Reset the streak and close the old watch. J8 can tell the coordinator to go on or stop it ahead of J12. The requeued wakes are already held for the current run or its replacement. An exhausted batch releases the normal finish guard. |
+| Run reaches `PhaseEnded` with a batch still in flight | Prepend the remaining batch to held wakes and preserve each retry bit, even if `Turn` already advanced. | Exit/loss (R33) yields no screen. The same rule covers quota (coordinator R5/R19; R31 floor handoff applies to workers and designers), stops including J8/J9, and `Engine.Stop` (R34). Existing quota cooldowns and J5/J6/J7 govern replacement. An owner stop leaves `Started` false and holds the wakes for restart. |
+| All tasks ended with wakes held or in flight | Drain the wakes and any reconciliation retry before J4 can ask for the final journal or stop the coordinator. | An accepted Say during the final journal turn drains before stop. The existing final-journal action key prevents a second request. |
+
+Only a real `EvTick` can reconcile a live run. The empty events from
+`Engine.Stop`, `observeCoordLocked` and `AskStopCoordinator` recover
+ended runs only, including during a herdr-core outage. The run table can
+advance `Turn` before R20 reaches idle, including across a dialog or
+during idle grace. An exit at that point still preserves `Retried`.
+In `alerts.go`, clear `agents_down@j9` only once both wake lists are
+empty and `CoordWakeAt` is zero, in addition to the existing turn check.
+A later idle turn breaks the J9 streak even when its retry is exhausted.
+Retain J9's existing standalone handling of a heartbeat or J8 nudge.
+
+**Delivery evidence.** Put the sequence at the start of the existing
+header, for example `Wake: #42 1 task wake(s) wait on you.` Use
+`s.Seq+1`, store it as `CoordWakeSeq` (the same integer type as
+`State.Seq`) with the J12 delivery, and clear it when the batch leaves
+flight. The marker stays in the first columns even when the count or
+message wraps, and the header keeps the coordinator prompt's `Wake:`
+prefix. Each committed delivery, including a retry, gets a new sequence
+across daemon restarts. A successful J12 send records its own watch time
+and turn so any earlier standalone watch cannot set the new baseline.
+A zero sequence represents a pre-upgrade batch
+and follows unconfirmed recovery at a later idle tick. Keep the
+`LoadState` migration of the legacy batch retry bit. Remove
+`CoordWakeActed` and its commit hook. Existing coordinator writes are
+run-scoped and can come from an unrelated owner turn.
+
+In `world.ObserveRun`, reuse the primary 200-line read where it already
+exists. In Codex inferred mode keep the viewport read for
+`codexScreenStatus`, classification and the activity and
+`SentScreenHash` baseline. Read 200 lines separately for coordinator
+wake evidence when a batch is pending and the run is idle or has an
+idle observation that can take it there. Blank or failed evidence
+reads use the grace row without changing the viewport hash. Inferred
+Codex needs a usable viewport to observe the transition to idle in the
+first place. The extra read uses the existing scrollback from
+`--no-alt-screen`.
+
+Reuse the CLI prompt recognizers and `uiAnchor` to find the newest
+submitted numbered wake above the composer. When the anchor is absent,
+exclude a trailing input placeholder as the current observer does. Read that turn up to the
+next submitted prompt or the UI boundary. An agy submitted prompt must
+follow a rule line. Look for output after the wake's echoed
+`Settings that differ from their default:` line. Confirm Claude replies or tool
+blocks that start with column-zero `⏺` or `●`. Codex uses column-zero `• `
+(the echoed list bullets are indented). In agy, accept a `● ` tool line,
+a `▸ Thought ` line, or a blank line followed by plain reply text, as
+seen in the completed owner turn in `agy-esc-active.screen.txt`. Skip
+spinner and queued composer text, including `(alt+m to send immediately)`.
+The Claude and agy `Interrupted · What should … do instead?` markers and
+Codex's `■ Conversation interrupted` invalidate that slice even after
+partial output. A later owner prompt bounds the slice, so an Esc in
+that later turn leaves a completed wake confirmed.
+
+Replace `RetryCoordWake` on the tick with the observed sequence,
+confirmation and a reason. Blank or failed reads of the evidence screen
+report it as unavailable. The engine confirms only when the observed
+nonzero sequence matches `CoordWakeSeq` and the slice confirms. Missing
+or stale evidence on a readable screen takes the same retry path as Esc.
+
+**Reconciliation.** Keep enqueue deduplication within the held queue so
+a newer episode of a key such as `new_goal` can arrive during delivery.
+When returning wakes, keep any existing queued entry with the same
+`(Task, Key)`, including its facts, timestamp and retry bit. Omit the
+superseded copy from retry and exhaustion logs. For an unconfirmed idle
+turn, prepend the remaining wakes with an unused retry and set their
+`Retried` bits. Release the spent wakes and log their keys and reason.
+Use one J12 log entry for requeue and exhaustion, with affected keys in
+`Asked`, a non-empty `Decision` naming which keys were retried or
+exhausted, and the observation in `Why`. Publish
+the queue, log and cleared in-flight state together via
+`commitLogLocked` on a copy, using a fresh queue slice. On commit
+failure keep the active batch for store recovery. Exit recovery clears
+the batch with the existing stop or state write. The one-retry bound is
+for idle reconciliation. Run loss, quota and send/commit failures
+retain at-least-once recovery, so offscreen replies and uncertain sends
+can produce duplicates.
 
 **Rotation.** A long coordinator session was 41.5% of day one's Claude cost. J11 gives it a fresh session at an idle moment, with a written handoff.
 

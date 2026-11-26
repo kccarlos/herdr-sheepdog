@@ -23,7 +23,7 @@ func seedPlanCoord(t *testing.T, goal string, rounds int, models map[string][]fl
 	w.srv.Add(hc.Terminal{
 		Address: "coord1", Name: coordName(w.id), State: "live",
 		Labels: testCoordLabels(w.id, "run-coord1"),
-		Status: &hc.Status{App: "claude-code", State: "idle"}, Reported: true, StatusMS: &pastMS,
+		Status: &hc.Status{App: "claude-code", State: "idle"}, Reported: true, StatusMS: &pastMS, Turn: 1,
 	})
 	w.edit(func(s *flow.State) {
 		s.Settings.PlanReviewRounds = rounds

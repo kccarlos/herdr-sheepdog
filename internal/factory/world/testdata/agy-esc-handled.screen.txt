@@ -1,0 +1,107 @@
+
+      ▄▀▀▄        Antigravity CLI 1.5.18
+     ▀▀▀▀▀▀       [redacted email] (Google AI Ultra)
+    ▀▀▀▀▀▀▀▀      Gemini 4 Neon (Medium)
+   ▄▀▀    ▀▀▄     /private/tmp/claude-501/-Users-alice-Documents-herdr-sheepdog/48e83beb-5334-450d-b7a2-3c077afd350e/scratchpad/live829/r3/test_repo
+  ▄▀▀      ▀▀▄
+
+────────────────────────────────────────────────────────────
+> You coordinate one project, the git repo at /private/tmp/claude-501/-Users-alice-Documents-herdr-sheepdog/48e83beb-5334-450d-b7a2-3c077afd350e/scratchpad/live829/r3/test_repo: you plan the work and
+  judge what code cannot.
+  You never write or edit code, commit, push or merge: the engine does that.
+  The owner may talk to you here: answer in their language, and when they ask a question or say wait, answer and do nothing else until they say go.
+
+  Goal:
+  Live check 829. Plan EXACTLY one task, ID T1, no dependencies, gate "owner". Create nochecks/live829.txt containing the single line "live829 ok", commit and report ready. Touch ONLY
+  nochecks/live829.txt. Never merge without the owner gate.
+
+  Planning:
+  A goal with several parts becomes milestones of a few tasks each, in one plan: write it as JSON to a file outside the repo and run
+  `/private/tmp/claude-501/-Users-alice-Documents-herdr-sheepdog/48e83beb-5334-450d-b7a2-3c077afd350e/scratchpad/live829/r3/sheepdog factory plan apply <file>`; quote the owner's words in each task's
+  brief, never paraphrase them.
+  Every task fills every field of this example:
+  {"tasks": [{"id": "T1", "title": "feat: add a greeting helper", "brief": "What to build and why, in two or three sentences.", "for_whom": "CLI callers", "if_skipped": "no greeting helper exists",
+  "smallest": "one exported Greet function and test", "not_doing": "formatting options or localization", "outcomes": [{"text": "Greet returns a greeting for a name", "proved_by": "test: TestGreet"}],
+  "after": [], "estimate_lines": 80}]}
+  `title` is a Conventional Commit subject (`type(scope)?: subject`); each outcome's `proved_by` is `cmd: <shell command>`, `test: <name or path>` or `manual: <artifact to make>`; a task you cannot
+  fill in, or cannot say how to prove, is not ready.
+  Take the smallest version that does the core job; a backlog idea is not a need (one "optional" item became 852 lines with no users and was deleted).
+  One task is one complete change of about 150 to 300 lines (`estimate_lines`, added plus removed); the engine refuses one over the size limit (400 by default) and stops one that grows past twice its
+  estimate at a size recap.
+  Tasks that touch the same files run one after another (`after`); two that share an interface get a small contract task first.
+  Read the repo's AGENTS.md and put what a worker needs into its brief.
+  Before you apply, ask of every task what could be deleted or made smaller; if refused, fix every listed problem and apply again, and when a plan review reports findings before tasks start, close
+  each by dropping (`/private/tmp/claude-501/-Users-alice-Documents-herdr-sheepdog/48e83beb-5334-450d-b7a2-3c077afd350e/scratchpad/live829/r3/sheepdog factory task drop <task> --why "<why>"`), amending
+  (`/private/tmp/claude-501/-Users-alice-Documents-herdr-sheepdog/48e83beb-5334-450d-b7a2-3c077afd350e/scratchpad/live829/r3/sheepdog factory plan amend <file>`), or
+  `/private/tmp/claude-501/-Users-alice-Documents-herdr-sheepdog/48e83beb-5334-450d-b7a2-3c077afd350e/scratchpad/live829/r3/sheepdog factory plan reject <task> --why "<why>"`.
+
+  Running:
+  A message that starts with "Wake:" lists tasks that wait on you, with their facts: read them, look yourself (the worktree's git log) before you decide, because a report is not the system, and reply
+  with what you decided and why.
+  A recap: choose among the choices its wake lists with `/private/tmp/claude-501/-Users-alice-Documents-herdr-sheepdog/48e83beb-5334-450d-b7a2-3c077afd350e/scratchpad/live829/r3/sheepdog factory recap
+  decide <task> <choice> --why "<why>"`; two failed fixes on one idea mean the idea is the problem, so write the shared premise down before choosing `new`.
+  A recap that says split: `/private/tmp/claude-501/-Users-alice-Documents-herdr-sheepdog/48e83beb-5334-450d-b7a2-3c077afd350e/scratchpad/live829/r3/sheepdog factory recap decide <task> split --why
+  "<why>" --child '<task JSON as in the plan>'`, one `--child` per part; a size recap also allows `continue` once, which gives the task a little more room.
+  A worker's "nothing to change" is yours to answer: `close` the task when it is true, or `send-back` with your answer when it asks for a choice; ask the owner only for what only they can decide.
+  To answer a worker's decision ask from a wake, run `/private/tmp/claude-501/-Users-alice-Documents-herdr-sheepdog/48e83beb-5334-450d-b7a2-3c077afd350e/scratchpad/live829/r3/sheepdog factory answer
+  <ask> "<option>" --why "<why>"`.
+  When only the owner can decide (a release, gate, paid key, delete, install, reset or rule change), run
+  `/private/tmp/claude-501/-Users-alice-Documents-herdr-sheepdog/48e83beb-5334-450d-b7a2-3c077afd350e/scratchpad/live829/r3/sheepdog factory ask --kind <kind> [--task <task>] "<question>" --option
+  "<choice A>" --option "<choice B>" --recommend "<choice>"`.
+  When the owner says "merge these now", run `/private/tmp/claude-501/-Users-alice-Documents-herdr-sheepdog/48e83beb-5334-450d-b7a2-3c077afd350e/scratchpad/live829/r3/sheepdog factory ask --kind
+  override --task A --task B`; the engine fills the card and only the owner answers it.
+  To act on a task (each needs a why): `/private/tmp/claude-501/-Users-alice-Documents-herdr-sheepdog/48e83beb-5334-450d-b7a2-3c077afd350e/scratchpad/live829/r3/sheepdog factory task
+  park|unpark|drop|close|send-back|retry|say <task> --why "<why>"`; `close` only after the worker reported nothing to change.
+  To change tasks' title, brief, outcomes or estimate_lines, or add tasks, write `{"why": "...", "tasks": [...]}` to a file and run
+  `/private/tmp/claude-501/-Users-alice-Documents-herdr-sheepdog/48e83beb-5334-450d-b7a2-3c077afd350e/scratchpad/live829/r3/sheepdog factory plan amend <file>`.
+  Never spend money, publish, tag a release or delete data on the owner's behalf.
+
+▸ Thought for 10s, 283 tokens
+  Task formulation requires a single task ID T1 with owner gate and zero dependencies. The deliverable is a specific text file containing a precise single-line string. Proceeding to define the exa...
+
+● Bash(ls -la /private/tmp/claude-501/-Users-alice-Documents-herdr-sheepdog/48e83beb-5334-450d-b7a2-3c077afd350e/scratchpad/live829/r3/test_repo && (cat /private/tmp/claude-501/-U...) (ctrl+o to expand)
+
+▸ Thought for 8s, 183 tokens
+  Reviewing repository documentation and contents to establish contextual baseline. Initially considering persisting operational state externally, but prioritizing repository-local structure verif...
+
+● Bash(ls -la /private/tmp/claude-501/-Users-alice-Documents-herdr-sheepdog/48e83beb-5334-450d-b7a2-3c077afd350e/scratchpad/live829/r3/test_repo/nochecks && cat /private/tmp/claud...) (ctrl+o to expand)
+
+▸ Thought for 18s, 1.2k tokens
+  Executing file generation and plan application sequentially within a single shell invocation prevents race conditions. Field values strictly mirror directive strings, maintaining precise schema...
+
+● Bash(mkdir -p /Users/alice/.gemini/antigravity-cli/brain/dcbe2789-c4e6-40cf-850e-1378a64bb5d9/scratch && cat <<'EOF' > /Users/alice/.gemini/antigravity-cli/brain/dcbe2789-c4e6-40cf...) (ctrl+o to expand)
+
+  Planned and applied T1 (chore(nochecks): add live829.txt for live check 829) via ~/.gemini/antigravity-cli/brain/dcbe2789-c4e6-40cf-850e-1378a64bb5d9/scratch/plan.json:
+
+  • ID: T1
+  • Dependencies (after): []
+  • Gate: "owner"
+  • Scope: Create only nochecks/live829.txt containing the single line "live829 ok", commit, and report ready without merging past the owner gate.
+
+────────────────────────────────────────────────────────────
+> what are you working on? reply in one line
+
+  Coordinating live check 829 in test_repo with planned task T1 (create nochecks/live829.txt containing live829 ok, gated on "owner").
+
+────────────────────────────────────────────────────────────
+> Wake: 1 task wake(s) wait on you.
+  - T1: N4: the PR was closed without merging (never reopened; run `/private/tmp/claude-501/-Users-alice-Documents-herdr-sheepdog/48e83beb-5334-450d-b7a2-3c077afd350e/scratchpad/live829/r3/sheepdog
+  factory task retry T1 --why "<why>"` to start a new attempt). title "chore(nochecks): add live829.txt for live check 829"; H 614e64e4d14e23620154839b6ac3c3cdb0029a13; PR #172, checks absent; last
+  verdict pass (round 2, 0 major(s)). (wake pr_closed at 2026-11-26T01:09:45-08:00)
+  Settings that differ from their default: disk_full_percent 95, max_running 1, pool_floor_percent 0, models coordinator,plan_reviewer,retro,reviewer,worker.
+
+────────────────────────────────────────────────────────────
+> What are you doing next? Answer in one line.Wake: 1 task wake(s) wait on you.
+  - T1: N4: the PR was closed without merging (never reopened; run `/private/tmp/claude-501/-Users-alice-Documents-herdr-sheepdog/48e83beb-5334-450d-b7a2-3c077afd350e/scratchpad/live829/r3/sheepdog
+  factory task retry T1 --why "<why>"` to start a new attempt). title "chore(nochecks): add live829.txt for live check 829"; H 614e64e4d14e23620154839b6ac3c3cdb0029a13; PR #172, checks absent; last
+  verdict pass (round 2, 0 major(s)). (wake pr_closed at 2026-11-26T01:09:45-08:00)
+  Settings that differ from their default: disk_full_percent 95, max_running 1, pool_floor_percent 0, models coordinator,plan_reviewer,retro,reviewer,worker.
+
+▸ Thought for 7s, 535 tokens
+
+  Waiting for your go-ahead before acting on T1's pr_closed wake (PR #172 closed without merging)—let me know whether to retry T1 or drop it.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+>
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+? for shortcuts                                                                                                                                                            auto · Gemini 4 Neon · medium

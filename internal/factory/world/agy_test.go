@@ -126,81 +126,234 @@ func TestAgyRound3ArgvDangerouslySkipPermissionsAndNoGeminiAPIKey(t *testing.T) 
 	}
 }
 
-// TestAgyObserveRunRetryCoordWakeRealEscCapture pins live check 829-live-r2
-// (check d / check e) against real Antigravity CLI 1.5.18 screen captures:
-// after Esc interrupts an active wake, agy prints
-// "  ⎿  Interrupted · What should Antigravity CLI do instead?" above its input
-// box, so ObserveRun must set EvTick.RetryCoordWake=true both on that exact
-// screen and when a queued owner question is submitted and answered after Esc,
-// without triggering on active/completed wakes or older superseded interrupts.
-func TestAgyObserveRunRetryCoordWakeRealEscCapture(t *testing.T) {
-	readFixture := func(name string) string {
+func hardWrapRunes(line string, width int) string {
+	r := []rune(line)
+	if len(r) <= width || width <= 0 {
+		return line
+	}
+	var b strings.Builder
+	for i := 0; i < len(r); i += width {
+		if i > 0 {
+			b.WriteByte('\n')
+		}
+		b.WriteString(string(r[i:min(i+width, len(r))]))
+	}
+	return b.String()
+}
+
+// TestObserveRunCoordWakeEvidenceRealCaptures pins world-level ObserveRun
+// coordinator wake evidence (EvTick.WakeSeq, WakeConfirmed, WakeReason) against
+// real Antigravity CLI 1.5.18 and Claude Code screen captures:
+//   - testdata/agy-esc-handled-833.screen.txt (live PR #833 capture, numbered #25/#27)
+//   - testdata/agy-esc-handled.screen.txt (live 829-live-r3 capture)
+//   - testdata/agy-esc-active.screen.txt & agy-esc-interrupted.screen.txt (live 829-live-r2)
+//   - ../../../testdata/herdr/claude-bash-prompt-44col.screen.txt (44-col Claude interrupt)
+func TestObserveRunCoordWakeEvidenceRealCaptures(t *testing.T) {
+	readFixture := func(path string) string {
 		t.Helper()
-		raw, err := os.ReadFile(filepath.Join("testdata", name))
+		raw, err := os.ReadFile(path)
 		if err != nil {
 			t.Fatal(err)
 		}
 		return string(raw)
 	}
-	activeScreen := readFixture("agy-esc-active.screen.txt")
-	interruptedScreen := readFixture("agy-esc-interrupted.screen.txt")
+	activeScreen := readFixture(filepath.Join("testdata", "agy-esc-active.screen.txt"))
+	interruptedScreen := readFixture(filepath.Join("testdata", "agy-esc-interrupted.screen.txt"))
+	handled829 := readFixture(filepath.Join("testdata", "agy-esc-handled.screen.txt"))
+	handled833 := readFixture(filepath.Join("testdata", "agy-esc-handled-833.screen.txt"))
+	claude44 := readFixture(filepath.Join("..", "..", "..", "testdata", "herdr", "claude-bash-prompt-44col.screen.txt"))
 
-	boxStart := strings.Index(interruptedScreen, "\n────────────────────────────────────────────────────────────────────────────────")
+	// Bind numbered wake headers onto the pre-PR2b 829 captures while preserving all captured lines.
+	active25 := strings.Replace(activeScreen, "> Wake: 1 task wake(s) wait on you.", "> Wake: #25 1 task wake(s) wait on you.", 1)
+	interrupted25 := strings.Replace(interruptedScreen, "> Wake: 1 task wake(s) wait on you.", "> Wake: #25 1 task wake(s) wait on you.", 1)
+	handled829Bound := strings.Replace(handled829, "> Wake: 1 task wake(s) wait on you.", "> Wake: #41 1 task wake(s) wait on you.", 1)
+	handled829Bound = strings.Replace(handled829Bound, "Answer in one line.Wake: 1 task wake(s) wait on you.", "Answer in one line.Wake: #42 1 task wake(s) wait on you.", 1)
+
+	// Derive initial-wake-behind-composer-draft directly from real agy-esc-handled-833.screen.txt
+	// by removing the earlier #25 block so #27 behind the composer draft is the sole wake.
+	wake25Mark := "\n" + agyRule + "\n> Wake: #25 "
+	wake27Mark := "\n" + agyRule + "\n> What are you doing next? Answer in one line.Wake: #27 "
+	w25Idx := strings.Index(handled833, wake25Mark)
+	w27Idx := strings.Index(handled833, wake27Mark)
+	if w25Idx < 0 || w27Idx < 0 || w27Idx <= w25Idx {
+		t.Fatalf("agy-esc-handled-833.screen.txt missing expected #25/#27 markers: w25=%d w27=%d", w25Idx, w27Idx)
+	}
+	initialComposerDraft := handled833[:w25Idx] + handled833[w27Idx:]
+
+	// Guard case derived from real agy-esc-interrupted.screen.txt: a later owner prompt casually
+	// mentioning "Wake: #99" without "Settings that differ" must not false-match as wake #99.
+	boxStart := strings.Index(interrupted25, "\n────────────────────────────────────────────────────────────────────────────────")
 	if boxStart < 0 {
 		t.Fatal("agy-esc-interrupted.screen.txt missing bottom input box rule")
 	}
-	emptyBox := strings.Replace(interruptedScreen[boxStart+1:], "> What are you doing next? Answer in one line.", ">", 1)
-	interruptedEmptyComposer := interruptedScreen[:boxStart] + "\n" + emptyBox
-	submittedAfterEsc := interruptedScreen[:boxStart] + "\n\n" +
-		"────────────────────────────────────────────────────────────\n" +
-		"> What are you doing next? Answer in one line.\n\n" +
-		"  Waiting for your go-ahead before retrying T1 after PR #171 was closed.\n" +
+	emptyBox := strings.Replace(interrupted25[boxStart+1:], "> What are you doing next? Answer in one line.", ">", 1)
+	ownerMentionsWakeNoSettings := interrupted25[:boxStart] + "\n\n" +
+		agyRule + "\n" +
+		"> why did Wake: #99 fail?\n\n" +
+		"  It was interrupted before finishing.\n" +
 		emptyBox
-	completedWake := strings.Replace(
-		interruptedEmptyComposer,
-		"  ⎿  Interrupted · What should Antigravity CLI do instead?",
-		"  Retried T1 after reviewing the closed PR.",
+
+	// Claude 44-col narrow-pane interrupt: embed lines 1-4 of real testdata/herdr/claude-bash-prompt-44col.screen.txt
+	// verbatim after a numbered Claude wake prompt.
+	claude44TurnEnd := strings.Index(claude44, "\n❯ Use the Bash tool")
+	if claude44TurnEnd < 0 {
+		t.Fatal("claude-bash-prompt-44col.screen.txt missing second prompt boundary")
+	}
+	claude44Interrupted := "❯ Wake: #42 1 task wake(s) wait on you.\n" +
+		"  - T1: worker_failed.\n" +
+		"  Settings that differ from their default: none.\n\n" +
+		claude44[:claude44TurnEnd] + "\n" +
+		"────────────────────────────────────────────\n❯ \n────────────────────────────────────────────\n"
+
+	// Narrow-pane agy interrupt after partial tool output: derived from real agy-esc-interrupted.screen.txt
+	// by taking its real `● Bash(...)` line and real `  ⎿  Interrupted · What should Antigravity CLI do instead?`
+	// line and wrapping to 44 columns (PTY hard-wrap matching iPhone portrait width) and 50 columns (word-wrap).
+	const realAgyInterrupt = "  ⎿  Interrupted · What should Antigravity CLI do instead?"
+	var realAgyToolLine string
+	for _, ln := range strings.Split(interruptedScreen, "\n") {
+		if strings.HasPrefix(ln, "● Bash(") {
+			realAgyToolLine = ln
+			break
+		}
+	}
+	if realAgyToolLine == "" || !strings.Contains(interrupted25, realAgyInterrupt) {
+		t.Fatal("agy-esc-interrupted.screen.txt missing real tool or interrupt line")
+	}
+	agy44Wrapped := strings.Replace(
+		interrupted25,
+		realAgyInterrupt,
+		hardWrapRunes(realAgyToolLine, 44)+"\n"+hardWrapRunes(realAgyInterrupt, 44),
 		1,
 	)
-	supersededInterrupt := interruptedScreen[:boxStart] + "\n\n" +
-		"────────────────────────────────────────────────────────────\n" +
-		"> Wake: 1 task wake(s) wait on you.\n" +
-		"  - T1: N4: the PR was closed without merging.\n\n" +
-		"  Retried T1 after reviewing the closed PR.\n" +
-		emptyBox
+	agy50Wrapped := strings.Replace(
+		interrupted25,
+		realAgyInterrupt,
+		realAgyToolLine+"\n  ⎿  Interrupted · What should Antigravity CLI do\n     instead?",
+		1,
+	)
 
 	ctx := context.Background()
 	srv := hctest.New(t)
 	client := hc.NewClient(srv.Path)
 
 	for _, tc := range []struct {
-		name      string
-		role      string
-		screen    string
-		wantRetry bool
+		name          string
+		cli           string
+		role          string
+		screen        string
+		wantSeq       int64
+		wantConfirmed bool
+		wantReason    string
 	}{
-		{"real esc interrupted screen (queued owner prompt in composer)", flow.RoleCoordinator, interruptedScreen, true},
-		{"real esc interrupted screen (empty composer)", flow.RoleCoordinator, interruptedEmptyComposer, true},
-		{"owner question queued behind wake and submitted after esc", flow.RoleCoordinator, submittedAfterEsc, true},
-		{"real active wake screen with queued owner question", flow.RoleCoordinator, activeScreen, false},
-		{"completed wake without interruption", flow.RoleCoordinator, completedWake, false},
-		{"older interruption superseded by newer completed wake", flow.RoleCoordinator, supersededInterrupt, false},
-		{"worker role ignores coordinator wake retry", flow.RoleWorker, interruptedScreen, false},
+		{
+			name:          "agy_833_live_handled_populated_composer",
+			cli:           AgyCLI,
+			role:          flow.RoleCoordinator,
+			screen:        handled833,
+			wantSeq:       27,
+			wantConfirmed: true,
+			wantReason:    "",
+		},
+		{
+			name:          "agy_829_r3_handled_populated_composer",
+			cli:           AgyCLI,
+			role:          flow.RoleCoordinator,
+			screen:        handled829Bound,
+			wantSeq:       42,
+			wantConfirmed: true,
+			wantReason:    "",
+		},
+		{
+			name:          "agy_initial_wake_behind_composer_draft",
+			cli:           AgyCLI,
+			role:          flow.RoleCoordinator,
+			screen:        initialComposerDraft,
+			wantSeq:       27,
+			wantConfirmed: true,
+			wantReason:    "",
+		},
+		{
+			name:          "agy_esc_active_queued_owner_prompt_not_confirmed",
+			cli:           AgyCLI,
+			role:          flow.RoleCoordinator,
+			screen:        active25,
+			wantSeq:       25,
+			wantConfirmed: false,
+			wantReason:    "missing reply after wake echo",
+		},
+		{
+			name:          "agy_esc_interrupted_queued_composer",
+			cli:           AgyCLI,
+			role:          flow.RoleCoordinator,
+			screen:        interrupted25,
+			wantSeq:       25,
+			wantConfirmed: false,
+			wantReason:    "wake reply interrupted",
+		},
+		{
+			name:          "agy_owner_prompt_mentioning_wake_without_settings_ignored",
+			cli:           AgyCLI,
+			role:          flow.RoleCoordinator,
+			screen:        ownerMentionsWakeNoSettings,
+			wantSeq:       25,
+			wantConfirmed: false,
+			wantReason:    "wake reply interrupted",
+		},
+		{
+			name:          "claude_44col_real_interrupted_capture",
+			cli:           "claude",
+			role:          flow.RoleCoordinator,
+			screen:        claude44Interrupted,
+			wantSeq:       42,
+			wantConfirmed: false,
+			wantReason:    "wake reply interrupted",
+		},
+		{
+			name:          "agy_44col_hard_wrapped_interrupted_after_tool_output",
+			cli:           AgyCLI,
+			role:          flow.RoleCoordinator,
+			screen:        agy44Wrapped,
+			wantSeq:       25,
+			wantConfirmed: false,
+			wantReason:    "wake reply interrupted",
+		},
+		{
+			name:          "agy_50col_word_wrapped_interrupted_after_tool_output",
+			cli:           AgyCLI,
+			role:          flow.RoleCoordinator,
+			screen:        agy50Wrapped,
+			wantSeq:       25,
+			wantConfirmed: false,
+			wantReason:    "wake reply interrupted",
+		},
+		{
+			name:          "worker_role_ignores_coordinator_wake_evidence",
+			cli:           AgyCLI,
+			role:          flow.RoleWorker,
+			screen:        handled833,
+			wantSeq:       0,
+			wantConfirmed: false,
+			wantReason:    "",
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			addr := "t-" + strings.ReplaceAll(tc.name, " ", "-")
+			app := "antigravity"
+			if tc.cli == "claude" {
+				app = "claude-code"
+			}
+			addr := "t-" + tc.name
 			srv.Add(hc.Terminal{
 				Address:   addr,
 				State:     "live",
 				CreatedMS: 1000,
-				Labels:    map[string]string{"sheepdog.run": "r-" + addr, "sheepdog.cli": AgyCLI},
-				Status:    &hc.Status{App: "antigravity", State: "idle"},
+				Labels:    map[string]string{"sheepdog.run": "r-" + addr, "sheepdog.cli": tc.cli},
+				Status:    &hc.Status{App: app, State: "idle"},
 			})
 			srv.SetScreen(addr, tc.screen)
 			evs, err := ObserveRun(ctx, client, flow.RunRecord{
-				ID: "r-" + addr, Address: addr, CreatedMS: 1000, Role: tc.role, CLI: AgyCLI,
+				ID: "r-" + addr, Address: addr, CreatedMS: 1000, Role: tc.role, CLI: tc.cli,
 				State: flow.PhaseWorking, StartedAt: time.Now(),
-			})
+			}, RunObservation{PendingWake: tc.role == flow.RoleCoordinator})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -208,8 +361,10 @@ func TestAgyObserveRunRetryCoordWakeRealEscCapture(t *testing.T) {
 			if idx < 0 {
 				t.Fatalf("missing EvTick in %+v", evs)
 			}
-			if evs[idx].RetryCoordWake != tc.wantRetry {
-				t.Fatalf("ObserveRun EvTick.RetryCoordWake = %v, want %v (screenClass=%q)", evs[idx].RetryCoordWake, tc.wantRetry, evs[idx].Screen)
+			got := evs[idx]
+			if got.WakeSeq != tc.wantSeq || got.WakeConfirmed != tc.wantConfirmed || got.WakeReason != tc.wantReason {
+				t.Fatalf("ObserveRun EvTick wake evidence = (seq=%d, confirmed=%v, reason=%q), want (seq=%d, confirmed=%v, reason=%q)",
+					got.WakeSeq, got.WakeConfirmed, got.WakeReason, tc.wantSeq, tc.wantConfirmed, tc.wantReason)
 			}
 		})
 	}

@@ -656,7 +656,7 @@ func TestCodexCoordinatorLaunchWakeAndSecondTurn(t *testing.T) {
 	if len(*c.runs) != 1 {
 		t.Fatalf("restart relaunched the coordinator: %d runs", len(*c.runs))
 	}
-	c.srv.SetScreen(co, codexIdleScreen("Wake: 1 item(s) need you.", 17))
+	c.srv.SetScreen(co, completedWakeScreen(world.CodexCLI, lastSendTo(t, c.srv.Requests(), co), "Done. Retried T1."))
 	c.turnEnds()
 	sends = sendsTo(t, c.srv.Requests(), co)
 	if len(sends) != 2 || !strings.Contains(sends[1], "main_red") {

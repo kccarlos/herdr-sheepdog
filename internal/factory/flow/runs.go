@@ -26,6 +26,9 @@ const EvSession = "session"
 // CoordWakePromptPrefix identifies the submitted prompt for a J12 batch.
 const CoordWakePromptPrefix = "Wake: "
 
+// WakeEvidenceUnavailable marks a blank or failed transcript read.
+const WakeEvidenceUnavailable = "wake evidence screen unavailable"
+
 // RunRecord is a run's persisted state in state.json (design.md sections 3 and 5).
 type RunRecord struct {
 	ID, Address, Role, CLI, Model, SessionID, State, Result, Screen, ScreenHash, Status, BlockedKind, Question, Reason string
@@ -71,7 +74,9 @@ type RunEvent struct {
 	StatusAt                                                                         time.Time
 	SessionID                                                                        string
 	LimitLine, Tail                                                                  string
-	Inferred, Urgent, HandoffUsed, RetryCoordWake                                    bool
+	Inferred, Urgent, HandoffUsed, WakeConfirmed                                     bool
+	WakeSeq                                                                          int64
+	WakeReason                                                                       string
 }
 
 // RunIn is what a run row sees: the run record, event, settings and clock.
