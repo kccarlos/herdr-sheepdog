@@ -2,6 +2,8 @@ package world
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -119,6 +121,95 @@ func TestAgyRound3ArgvDangerouslySkipPermissionsAndNoGeminiAPIKey(t *testing.T) 
 				if strings.Contains(a, "GEMINI_API_KEY") || strings.Contains(a, "paid-key-must-not-leak") {
 					t.Errorf("argv[%d] leaked GEMINI_API_KEY: %q", i, a)
 				}
+			}
+		})
+	}
+}
+
+// TestAgyObserveRunRetryCoordWakeRealEscCapture pins live check 829-live-r2
+// (check d / check e) against real Antigravity CLI 1.5.18 screen captures:
+// after Esc interrupts an active wake, agy prints
+// "  ⎿  Interrupted · What should Antigravity CLI do instead?" above its input
+// box, so ObserveRun must set EvTick.RetryCoordWake=true both on that exact
+// screen and when a queued owner question is submitted and answered after Esc,
+// without triggering on active/completed wakes or older superseded interrupts.
+func TestAgyObserveRunRetryCoordWakeRealEscCapture(t *testing.T) {
+	readFixture := func(name string) string {
+		t.Helper()
+		raw, err := os.ReadFile(filepath.Join("testdata", name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return string(raw)
+	}
+	activeScreen := readFixture("agy-esc-active.screen.txt")
+	interruptedScreen := readFixture("agy-esc-interrupted.screen.txt")
+
+	boxStart := strings.Index(interruptedScreen, "\n────────────────────────────────────────────────────────────────────────────────")
+	if boxStart < 0 {
+		t.Fatal("agy-esc-interrupted.screen.txt missing bottom input box rule")
+	}
+	emptyBox := strings.Replace(interruptedScreen[boxStart+1:], "> What are you doing next? Answer in one line.", ">", 1)
+	interruptedEmptyComposer := interruptedScreen[:boxStart] + "\n" + emptyBox
+	submittedAfterEsc := interruptedScreen[:boxStart] + "\n\n" +
+		"────────────────────────────────────────────────────────────\n" +
+		"> What are you doing next? Answer in one line.\n\n" +
+		"  Waiting for your go-ahead before retrying T1 after PR #171 was closed.\n" +
+		emptyBox
+	completedWake := strings.Replace(
+		interruptedEmptyComposer,
+		"  ⎿  Interrupted · What should Antigravity CLI do instead?",
+		"  Retried T1 after reviewing the closed PR.",
+		1,
+	)
+	supersededInterrupt := interruptedScreen[:boxStart] + "\n\n" +
+		"────────────────────────────────────────────────────────────\n" +
+		"> Wake: 1 task wake(s) wait on you.\n" +
+		"  - T1: N4: the PR was closed without merging.\n\n" +
+		"  Retried T1 after reviewing the closed PR.\n" +
+		emptyBox
+
+	ctx := context.Background()
+	srv := hctest.New(t)
+	client := hc.NewClient(srv.Path)
+
+	for _, tc := range []struct {
+		name      string
+		role      string
+		screen    string
+		wantRetry bool
+	}{
+		{"real esc interrupted screen (queued owner prompt in composer)", flow.RoleCoordinator, interruptedScreen, true},
+		{"real esc interrupted screen (empty composer)", flow.RoleCoordinator, interruptedEmptyComposer, true},
+		{"owner question queued behind wake and submitted after esc", flow.RoleCoordinator, submittedAfterEsc, true},
+		{"real active wake screen with queued owner question", flow.RoleCoordinator, activeScreen, false},
+		{"completed wake without interruption", flow.RoleCoordinator, completedWake, false},
+		{"older interruption superseded by newer completed wake", flow.RoleCoordinator, supersededInterrupt, false},
+		{"worker role ignores coordinator wake retry", flow.RoleWorker, interruptedScreen, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			addr := "t-" + strings.ReplaceAll(tc.name, " ", "-")
+			srv.Add(hc.Terminal{
+				Address:   addr,
+				State:     "live",
+				CreatedMS: 1000,
+				Labels:    map[string]string{"sheepdog.run": "r-" + addr, "sheepdog.cli": AgyCLI},
+				Status:    &hc.Status{App: "antigravity", State: "idle"},
+			})
+			srv.SetScreen(addr, tc.screen)
+			evs, err := ObserveRun(ctx, client, flow.RunRecord{
+				ID: "r-" + addr, Address: addr, CreatedMS: 1000, Role: tc.role, CLI: AgyCLI,
+				State: flow.PhaseWorking, StartedAt: time.Now(),
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			idx := slices.IndexFunc(evs, func(e flow.RunEvent) bool { return e.Kind == flow.EvTick })
+			if idx < 0 {
+				t.Fatalf("missing EvTick in %+v", evs)
+			}
+			if evs[idx].RetryCoordWake != tc.wantRetry {
+				t.Fatalf("ObserveRun EvTick.RetryCoordWake = %v, want %v (screenClass=%q)", evs[idx].RetryCoordWake, tc.wantRetry, evs[idx].Screen)
 			}
 		})
 	}
