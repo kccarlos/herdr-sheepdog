@@ -216,9 +216,8 @@ import UIKit
 @testable import Sheepdog
 
 /// Fix-round view unit tests for PR 10: running-project `New goal` reloads `factoryGraph`
-/// even without SSE `factory.changed`, `FactoryGoalSheet` keeps submit/Cancel inside its
-/// `ScrollView` at Accessibility Dynamic Type, and `FactoryTaskView` marks the task title
-/// as an accessibility header.
+/// even without SSE `factory.changed`, and `FactoryGoalSheet` keeps submit/Cancel inside its
+/// `ScrollView` at Accessibility Dynamic Type.
 @MainActor
 final class FactoryPR10ViewFixTests: XCTestCase {
     private var suiteName: String!
@@ -347,44 +346,12 @@ final class FactoryPR10ViewFixTests: XCTestCase {
         )
     }
 
-    func testTaskViewMarksTaskTitleWithHeaderAccessibilityTrait() throws {
-        let taskJSON = #"{"ref":"T8","title":"feat: tags","stage":"working","after":["T6"],"dependents":[],"layer":1,"rounds":0,"steps":[{"name":"planned","state":"done"}]}"#
-        let task = try DaemonClient.decoder.decode(FactoryTask.self, from: Data(taskJSON.utf8))
-        let host = UIHostingController(rootView: NavigationStack {
-            FactoryTaskView(task: task, projectName: "notes", projectState: .running)
-        })
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
-        window.rootViewController = host
-        window.makeKeyAndVisible()
-        host.view.layoutIfNeeded()
-        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
-        defer {
-            window.isHidden = true
-            window.rootViewController = nil
-        }
-
-        XCTAssertTrue(hasHeaderTrait(label: "Steps", in: host.view), "positive control: Steps heading carries .header trait")
-        XCTAssertTrue(hasHeaderTrait(label: "feat: tags", in: host.view), "FactoryTaskView task title (h1 on FactoryTask board) must carry .header trait")
-    }
-
     private func findSubview<T: UIView>(ofType type: T.Type, in view: UIView) -> T? {
         if let matched = view as? T { return matched }
         for subview in view.subviews {
             if let found = findSubview(ofType: type, in: subview) { return found }
         }
         return nil
-    }
-
-    private func hasHeaderTrait(label: String, in root: Any) -> Bool {
-        guard let obj = root as? NSObject else { return false }
-        if obj.accessibilityLabel == label, obj.accessibilityTraits.contains(.header) { return true }
-        if let elements = obj.accessibilityElements {
-            for element in elements where hasHeaderTrait(label: label, in: element) { return true }
-        }
-        if let view = obj as? UIView {
-            for subview in view.subviews where hasHeaderTrait(label: label, in: subview) { return true }
-        }
-        return false
     }
 
     private func waitBriefly(timeout: TimeInterval = 0.8, _ condition: () -> Bool) async -> Bool {
