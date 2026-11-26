@@ -59,7 +59,7 @@
   },
   {
    "id": "PlusMenu",
-   "title": "+ menu",
+   "title": "+ menu — New agent, New factory project, New shell",
    "file": "PlusMenu.dc.html",
    "png": "png/PlusMenu.png",
    "w": 390,
@@ -795,23 +795,47 @@
   },
   {
    "id": "FactoryAskCard",
-   "title": "Component — a factory ask in the approval card",
+   "title": "Component — a factory ask card (kinds: delete, release, read-back, override)",
    "file": "FactoryAskCard.dc.html",
    "png": "png/FactoryAskCard.png",
    "w": 358,
    "h": 236
   },
   {
+   "id": "FactoryHeadStates",
+   "title": "Factory — a project head in every state: running, stopped, finished, stuck, a name tie, several computers, largest text",
+   "file": "FactoryHeadStates.dc.html",
+   "png": "png/FactoryHeadStates.png",
+   "w": 1632,
+   "h": 1060
+  },
+  {
+   "id": "FactoryAskCardStates",
+   "title": "Factory — the ask card in its four kinds, including the read-back and the override",
+   "file": "FactoryAskCardStates.dc.html",
+   "png": "png/FactoryAskCardStates.png",
+   "w": 1632,
+   "h": 430
+  },
+  {
+   "id": "FactorySettingsStates",
+   "title": "Factory — Settings and models: edited, refused, saved, and the models rules",
+   "file": "FactorySettingsStates.dc.html",
+   "png": "png/FactorySettingsStates.png",
+   "w": 2620,
+   "h": 964
+  },
+  {
    "id": "FactoryAgents",
-   "title": "Factory — Agents list: factory terminals in the usual sections",
+   "title": "Factory — Agents: one permanent head per project, beside ordinary agents",
    "file": "FactoryAgents.dc.html",
-   "png": null,
+   "png": "png/FactoryAgents.png",
    "w": 390,
    "h": 844
   },
   {
    "id": "FactoryAgentsDark",
-   "title": "Factory — Agents list, dark",
+   "title": "Factory — Agents with project heads, dark",
    "file": "FactoryAgentsDark.dc.html",
    "png": "png/FactoryAgentsDark.png",
    "w": 390,
@@ -819,91 +843,36 @@
   },
   {
    "id": "FactoryWindow",
-   "title": "Factory — coordinator window",
+   "title": "Factory — the coordinator's window: live, with the key bar and a box to type in (D10)",
    "file": "FactoryWindow.dc.html",
-   "png": null,
+   "png": "png/FactoryWindow.png",
    "w": 390,
    "h": 844
   },
   {
-   "id": "FactoryWindowDark",
-   "title": "Factory — coordinator window, dark",
-   "file": "FactoryWindowDark.dc.html",
-   "png": "png/FactoryWindowDark.png",
-   "w": 390,
-   "h": 844
-  },
-  {
-   "id": "FactoryAsk",
-   "title": "Factory — an ask on Agents",
-   "file": "FactoryAsk.dc.html",
-   "png": "png/FactoryAsk.png",
-   "w": 390,
-   "h": 844
+   "id": "FactoryWindowStates",
+   "title": "Factory — the coordinator's window: not running, stopped (finished alike), dark, and largest text",
+   "file": "FactoryWindowStates.dc.html",
+   "png": "png/FactoryWindowStates.png",
+   "w": 1760,
+   "h": 1558,
+   "png_dark": "png/FactoryWindowStates-dark.png"
   },
   {
    "id": "FactoryVoice",
-   "title": "Factory — Conversation: digest and one alert",
+   "title": "Factory — Conversation: an instruction and status questions",
    "file": "FactoryVoice.dc.html",
    "png": "png/FactoryVoice.png",
    "w": 390,
    "h": 844
   },
   {
-   "id": "FactoryPage",
-   "title": "Factory — the space page with its factory section",
-   "file": "FactoryPage.dc.html",
-   "png": null,
-   "w": 390,
-   "h": 844
-  },
-  {
-   "id": "FactoryPageDark",
-   "title": "Factory — the space page, dark",
-   "file": "FactoryPageDark.dc.html",
-   "png": "png/FactoryPageDark.png",
-   "w": 390,
-   "h": 844
-  },
-  {
-   "id": "FactoryWorker",
-   "title": "Factory — a task row opens the worker's window",
-   "file": "FactoryWorker.dc.html",
-   "png": null,
-   "w": 390,
-   "h": 844
-  },
-  {
-   "id": "FactoryAskDark",
-   "title": "Factory — an ask on Agents, dark",
-   "file": "FactoryAskDark.dc.html",
-   "png": "png/FactoryAskDark.png",
-   "w": 390,
-   "h": 844
-  },
-  {
-   "id": "FactoryIPadSpace",
-   "title": "Factory — iPad, the space page in its sheet",
-   "file": "FactoryIPadSpace.dc.html",
-   "png": "png/FactoryIPadSpace.png",
-   "w": 1376,
-   "h": 1032
-  },
-  {
    "id": "FactoryTerminal",
-   "title": "Factory — factory log and factory doctor",
+   "title": "Factory — factory log and factory doctor (terminal)",
    "file": "FactoryTerminal.dc.html",
-   "png": null,
+   "png": "png/FactoryTerminal.png",
    "w": 1100,
    "h": 980
-  },
-  {
-   "id": "FactoryArch",
-   "title": "Factory — architecture",
-   "file": "FactoryArch.dc.html",
-   "png": null,
-   "w": 1240,
-   "h": 760
   },
   {
    "id": "FactoryLifecycle",
@@ -923,115 +892,131 @@
   },
   {
    "id": "FactoryIPad",
-   "title": "Factory — iPad, All agents with factory terminals and an ask",
+   "title": "Factory — iPad, All agents with project heads",
    "file": "FactoryIPad.dc.html",
-   "png": null,
-   "w": 1376,
-   "h": 1032
-  },
-  {
-   "id": "FactoryIPadDark",
-   "title": "Factory — iPad, All agents, dark",
-   "file": "FactoryIPadDark.dc.html",
-   "png": "png/FactoryIPadDark.png",
+   "png": "png/FactoryIPad.png",
    "w": 1376,
    "h": 1032
   },
   {
    "id": "FactoryIPadSidebar",
-   "title": "Component — iPad sidebar with factory terminals",
+   "title": "Component — iPad sidebar with factory project heads",
    "file": "FactoryIPadSidebar.dc.html",
-   "png": null,
+   "png": "png/FactoryIPadSidebar.png",
    "w": 390,
    "h": 1032
-  },
-  {
-   "id": "FactoryStartEntry",
-   "title": "Start — one row on a space with no factory",
-   "file": "FactoryStartEntry.dc.html",
-   "png": "png/FactoryStartEntry.png",
-   "w": 390,
-   "h": 844
-  },
-  {
-   "id": "FactoryStartEntryDark",
-   "title": "Start — the row, dark",
-   "file": "FactoryStartEntryDark.dc.html",
-   "png": "png/FactoryStartEntryDark.png",
-   "w": 390,
-   "h": 844
-  },
-  {
-   "id": "FactoryStartShell",
-   "title": "Start — the terminal: doctor, notice, first prompt",
-   "file": "FactoryStartShell.dc.html",
-   "png": null,
-   "w": 390,
-   "h": 844
-  },
-  {
-   "id": "FactoryStartShellDark",
-   "title": "Start — the terminal, dark",
-   "file": "FactoryStartShellDark.dc.html",
-   "png": "png/FactoryStartShellDark.png",
-   "w": 390,
-   "h": 844
   },
   {
    "id": "FactoryStates",
-   "title": "States — the factory section in every state",
+   "title": "Factory — every empty and error state, each with a plain fix",
    "file": "FactoryStates.dc.html",
    "png": "png/FactoryStates.png",
-   "w": 3530,
+   "w": 4770,
    "h": 964
   },
   {
-   "id": "FactoryStatesDark",
-   "title": "States — every state, dark",
-   "file": "FactoryStatesDark.dc.html",
-   "png": "png/FactoryStatesDark.png",
-   "w": 3530,
-   "h": 964
-  },
-  {
-   "id": "FactoryStartStates",
-   "title": "States — starting: a failed check, shell off, folder outside",
-   "file": "FactoryStartStates.dc.html",
-   "png": "png/FactoryStartStates.png",
-   "w": 1330,
-   "h": 964
-  },
-  {
-   "id": "FactoryPageAX",
-   "title": "Factory — the space page at the largest text size",
-   "file": "FactoryPageAX.dc.html",
-   "png": "png/FactoryPageAX.png",
+   "id": "FactoryProject",
+   "title": "Factory — a project: head, text box, asks, tasks in attention groups",
+   "file": "FactoryProject.dc.html",
+   "png": "png/FactoryProject.png",
    "w": 390,
-   "h": 1500
+   "h": 844
   },
   {
-   "id": "FactoryIPadSpaceDark",
-   "title": "Factory — iPad, the space page in its sheet, dark",
-   "file": "FactoryIPadSpaceDark.dc.html",
-   "png": "png/FactoryIPadSpaceDark.png",
-   "w": 1376,
-   "h": 1032
+   "id": "FactoryProjectDark",
+   "title": "Factory — a project, dark",
+   "file": "FactoryProjectDark.dc.html",
+   "png": "png/FactoryProjectDark.png",
+   "w": 390,
+   "h": 844
   },
   {
-   "id": "FactoryIPadEntry",
-   "title": "Factory — iPad, a space with no factory",
-   "file": "FactoryIPadEntry.dc.html",
-   "png": "png/FactoryIPadEntry.png",
-   "w": 1376,
-   "h": 1032
+   "id": "FactoryTask",
+   "title": "Factory — a task: steps, last decision and why, brief, task log",
+   "file": "FactoryTask.dc.html",
+   "png": "png/FactoryTask.png",
+   "w": 390,
+   "h": 844
   },
   {
-   "id": "FactoryOverrideCard",
-   "title": "Component — the owner's override card: merge these now",
-   "file": "FactoryOverrideCard.dc.html",
-   "png": null,
+   "id": "FactoryVoiceWhy",
+   "title": "Factory — Conversation: a judgement question from the project's record, and what stays quiet",
+   "file": "FactoryVoiceWhy.dc.html",
+   "png": "png/FactoryVoiceWhy.png",
+   "w": 990,
+   "h": 844
+  },
+  {
+   "id": "FactoryHead",
+   "title": "Component — a project's head",
+   "file": "FactoryHead.dc.html",
+   "png": "png/FactoryHead.png",
    "w": 358,
-   "h": 330
+   "h": 140
+  },
+  {
+   "id": "FactoryIPadBoard",
+   "title": "Factory — iPad, a project: task list and graph side by side",
+   "file": "FactoryIPadBoard.dc.html",
+   "png": "png/FactoryIPadBoard.png",
+   "w": 1376,
+   "h": 1032
+  },
+  {
+   "id": "FactoryNewProject",
+   "title": "Factory — New project: pick a folder sheepdog knows, goal, models",
+   "file": "FactoryNewProject.dc.html",
+   "png": "png/FactoryNewProject.png",
+   "w": 390,
+   "h": 1100
+  },
+  {
+   "id": "FactoryNewProjectChecks",
+   "title": "Factory — New project: models in the form, start checks with fixes, then start",
+   "file": "FactoryNewProjectChecks.dc.html",
+   "png": "png/FactoryNewProjectChecks.png",
+   "w": 1760,
+   "h": 1100
+  },
+  {
+   "id": "FactorySettings",
+   "title": "Factory — Settings for one project, the read-back in the row",
+   "file": "FactorySettings.dc.html",
+   "png": "png/FactorySettings.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "FactoryModels",
+   "title": "Factory — models per role: the candidate editor",
+   "file": "FactoryModels.dc.html",
+   "png": "png/FactoryModels.png",
+   "w": 390,
+   "h": 844
+  },
+  {
+   "id": "FactoryProjectActions",
+   "title": "Factory — project actions: told, stop, new goal, resume, reopen",
+   "file": "FactoryProjectActions.dc.html",
+   "png": "png/FactoryProjectActions.png",
+   "w": 2270,
+   "h": 964
+  },
+  {
+   "id": "FactoryProjectAX",
+   "title": "Factory — a project at the largest text size",
+   "file": "FactoryProjectAX.dc.html",
+   "png": "png/FactoryProjectAX.png",
+   "w": 390,
+   "h": 4150
+  },
+  {
+   "id": "FactoryIPadBoardDark",
+   "title": "Factory — iPad, a project: list and graph, dark",
+   "file": "FactoryIPadBoardDark.dc.html",
+   "png": "png/FactoryIPadBoardDark.png",
+   "w": 1376,
+   "h": 1032
   },
   {
    "id": "EngineOverview",

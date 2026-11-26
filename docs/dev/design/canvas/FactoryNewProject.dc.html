@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — New project on the phone</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+.np > *{flex-shrink:0}
+button,input,textarea{font:inherit}
+button{cursor:pointer}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: {{ h }}px; overflow: hidden; background: {{c.scrimBg}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased; color: {{c.ink}}">
+  <section role="dialog" aria-labelledby="nptitle" style="position: absolute; left: 0; right: 0; top: 54px; bottom: 0; border-radius: 14px 14px 0 0; background: {{c.bg}}; display: flex; flex-direction: column; overflow: hidden">
+    <div aria-hidden="true" style="align-self: center; width: 36px; height: 5px; border-radius: 3px; background: {{c.line}}; margin-top: 6px"></div>
+    <header style="height: 48px; flex-shrink: 0; display: grid; grid-template-columns: 88px minmax(0, 1fr) 88px; align-items: center; padding: 0 8px">
+      <button style="height: 44px; border: 0; background: transparent; color: {{c.accentText}}; font-size: 16px; text-align: left; padding: 0 8px">Cancel</button>
+      <h1 id="nptitle" style="margin: 0; text-align: center; font-size: 17px; font-weight: 600">New project</h1>
+      <span></span>
+    </header>
+    <main class="np" style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 4px 16px 20px; display: flex; flex-direction: column; gap: 10px">
+      <sc-if value="{{ s.first }}" hint-placeholder-val="{{ false }}">
+        <div style="padding: 12px 14px; border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.line}}; display: flex; flex-direction: column; gap: 4px">
+          <span style="font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 20px; font-weight: 700">No project yet</span>
+          <span style="font-size: 14px; line-height: 1.45; color: {{c.ink2}}">A project is one folder with a git repository and one goal. The coordinator plans the tasks, workers build them, reviewers check them, and you are asked only for decisions.</span>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ s.nofactory }}" hint-placeholder-val="{{ false }}">
+        <div role="alert" style="padding: 14px; border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.line}}; display: flex; flex-direction: column; gap: 8px; align-items: flex-start">
+          <span style="font-size: 17px; font-weight: 600">The factory is not available on Work Mac</span>
+          <span style="font-size: 14px; line-height: 1.45; color: {{c.ink2}}">It needs sheepdog on herdr-core. Work Mac’s sheepdog runs on herdr-tui, or herdr-core does not answer.</span>
+          <span style="font-size: 13px; font-weight: 600">Fix, on Work Mac:</span>
+          <span style="font-size: 14px; line-height: 1.45">Open herdr-app, or start herdr-core in a terminal:</span>
+          <span style="display: flex; align-items: center; gap: 8px; align-self: stretch"><code style="flex-grow: 1; padding: 7px 10px; border-radius: 8px; background: {{c.surface2}}; font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 13px">hc server start</code><button aria-label="Copy the command hc server start" style="min-height: 36px; padding: 0 12px; border-radius: 18px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 13px; font-weight: 600">Copy</button></span>
+          <button style="min-height: 44px; padding: 0 18px; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface2}}; color: {{c.ink}}; font-size: 15px; font-weight: 600">Check again</button>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ s.form }}" hint-placeholder-val="{{ true }}">
+        <span style="font-size: 13px; font-weight: 600; color: {{c.ink2}}; padding: 0 4px">Folder</span>
+        <sc-if value="{{ s.nofolders }}" hint-placeholder-val="{{ false }}">
+          <div role="status" style="padding: 12px 14px; border-radius: 14px; background: {{c.surface}}; border: 1px dashed {{c.dash}}; display: flex; flex-direction: column; gap: 8px; align-items: flex-start">
+            <span style="font-size: 14px; line-height: 1.45">No folders to pick: herdr cannot be reached on Work Mac. Open herdr-app on Work Mac, then try again.</span>
+            <button style="min-height: 40px; padding: 0 16px; border-radius: 20px; border: 1px solid {{c.line}}; background: {{c.surface2}}; color: {{c.ink}}; font-size: 15px; font-weight: 600">Try again</button>
+          </div>
+        </sc-if>
+        <sc-if value="{{ s.folders }}" hint-placeholder-val="{{ true }}">
+          <div role="radiogroup" aria-label="folders sheepdog knows on Work Mac" style="border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.line}}; display: flex; flex-direction: column">
+            <span style="padding: 8px 14px 2px; font-size: 12.5px; color: {{c.ink2}}">folders sheepdog knows on Work Mac</span>
+            <sc-for list="{{ folders }}" as="o" hint-placeholder-count="4">
+              <button role="radio" aria-checked="{{ o.checked }}" aria-disabled="{{ o.disabled }}" aria-label="{{ o.aria }}" style="min-height: 52px; border: 0; border-top: 1px solid {{c.line}}; background: transparent; color: {{ o.color }}; padding: 6px 14px; display: flex; align-items: center; gap: 10px; text-align: left">
+                <span style="flex-grow: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0"><span style="font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 13.5px">{{ o.path }}</span><span style="font-size: 12.5px; color: {{ o.markColor }}">{{ o.mark }}</span></span>
+                <sc-if value="{{ o.on }}" hint-placeholder-val="{{ false }}"><svg width="18" height="18" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="{{c.accentText}}" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"></path></svg></sc-if>
+              </button>
+            </sc-for>
+          </div>
+        </sc-if>
+        <sc-if value="{{ s.picked }}" hint-placeholder-val="{{ false }}">
+          <div style="min-height: 52px; border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.line}}; padding: 6px 8px 6px 14px; display: flex; align-items: center; gap: 10px">
+            <span style="flex-grow: 1; display: flex; flex-direction: column; gap: 2px"><span style="font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 13.5px">~/code/notes</span><span style="font-size: 12.5px; color: {{c.ink2}}">git repository</span></span>
+            <button aria-label="Change the folder" style="min-height: 40px; border: 0; background: transparent; color: {{c.accentText}}; font-size: 15px; padding: 0 8px">Change</button>
+          </div>
+        </sc-if>
+
+        <label for="goal" style="font-size: 13px; font-weight: 600; color: {{c.ink2}}; padding: 0 4px; margin-top: 2px">Goal</label>
+        <textarea id="goal" rows="{{ s.goalRows }}" aria-describedby="goalhint" style="border-radius: 12px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; padding: 10px 12px; font-size: 15px; line-height: 1.4; resize: none">A notes page with search</textarea>
+        <sc-if value="{{ s.models }}" hint-placeholder-val="{{ true }}"><span id="goalhint" style="font-size: 12.5px; line-height: 1.4; color: {{c.ink2}}; padding: 0 4px">What you want built, in your own words. The coordinator turns it into tasks.</span></sc-if>
+
+        <sc-if value="{{ s.models }}" hint-placeholder-val="{{ true }}">
+          <span style="font-size: 13px; font-weight: 600; color: {{c.ink2}}; padding: 0 4px; margin-top: 2px">Models</span>
+          <div style="border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.line}}; display: flex; flex-direction: column">
+            <sc-for list="{{ models }}" as="m" hint-placeholder-count="4">
+              <div style="min-height: 50px; padding: 4px 8px 4px 14px; display: flex; align-items: center; gap: 8px; border-top: {{ m.top }}">
+                <span style="flex-grow: 1; display: flex; flex-direction: column; gap: 1px"><span style="font-size: 15px">{{ m.role }}</span><span style="font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 12px; color: {{c.ink2}}">{{ m.value }}</span></span>
+                <a href="FactoryNewProjectChecks.dc.html" aria-label="Edit {{ m.role }}" style="min-height: 40px; display: flex; align-items: center; color: {{c.accentText}}; text-decoration: none; font-size: 15px; padding: 0 8px">Edit</a>
+              </div>
+            </sc-for>
+            <div style="min-height: 50px; padding: 4px 8px 4px 14px; display: flex; align-items: center; gap: 8px; border-top: 1px solid {{c.line}}">
+              <span style="flex-grow: 1; display: flex; flex-direction: column; gap: 1px"><label for="maxrun" style="font-size: 15px">max running</label><span style="font-size: 12px; color: {{c.ink2}}">default 3 · allowed 1–20</span></span>
+              <span style="display: flex; align-items: center; border-radius: 10px; background: {{c.surface2}}"><button aria-label="One fewer" style="width: 40px; height: 36px; border: 0; background: transparent; color: {{c.ink}}; font-size: 18px">−</button><input id="maxrun" type="text" value="3" style="width: 28px; border: 0; background: transparent; text-align: center; font-size: 15px; color: {{c.ink}}"><button aria-label="One more" style="width: 40px; height: 36px; border: 0; background: transparent; color: {{c.ink}}; font-size: 18px">+</button></span>
+            </div>
+          </div>
+        </sc-if>
+
+        <sc-if value="{{ s.checks }}" hint-placeholder-val="{{ false }}">
+          <div style="min-height: 50px; border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.line}}; padding: 4px 8px 4px 14px; display: flex; align-items: center; gap: 8px">
+            <span style="flex-grow: 1; display: flex; flex-direction: column; gap: 1px"><span style="font-size: 15px">Models</span><span style="font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 12px; color: {{c.ink2}}">{{ s.modelSum }}</span></span>
+            <a href="FactoryNewProjectChecks.dc.html" aria-label="Edit the models" style="min-height: 40px; display: flex; align-items: center; color: {{c.accentText}}; text-decoration: none; font-size: 15px; padding: 0 8px">Edit</a>
+          </div>
+          <section aria-labelledby="ckh" style="border-radius: 14px; background: {{c.surface}}; border: 1px solid {{ s.ckBorder }}; display: flex; flex-direction: column; overflow: hidden">
+            <h2 id="ckh" style="margin: 0; padding: 10px 14px 4px; font-size: 13px; font-weight: 600; color: {{c.ink2}}">Start checks · on Work Mac</h2>
+            <sc-for list="{{ checks }}" as="k" hint-placeholder-count="5">
+              <div style="padding: 8px 14px; border-top: 1px solid {{c.line}}; display: flex; flex-direction: column; gap: 5px">
+                <span style="display: flex; align-items: baseline; gap: 8px; font-size: 13.5px"><span style="font-weight: 700; color: {{ k.color }}; flex-shrink: 0">{{ k.icon }} {{ k.mark }}</span><span style="font-weight: 600">{{ k.name }}</span></span>
+                <sc-if value="{{ k.hasDetail }}" hint-placeholder-val="{{ false }}"><span style="font-size: 12.5px; line-height: 1.4; color: {{c.ink2}}">{{ k.detail }}</span></sc-if>
+                <sc-if value="{{ k.hasFix }}" hint-placeholder-val="{{ false }}"><span style="font-size: 12.5px; line-height: 1.4"><span style="font-weight: 600">Fix:</span> {{ k.fix }}</span></sc-if>
+                <sc-if value="{{ k.hasCmd }}" hint-placeholder-val="{{ false }}">
+                  <span style="font-size: 12.5px; font-weight: 600">Fix, in a terminal on Work Mac:</span>
+                  <span style="display: flex; align-items: center; gap: 8px"><code style="flex-grow: 1; padding: 6px 8px; border-radius: 8px; background: {{c.surface2}}; font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 12.5px">{{ k.cmd }}</code><button aria-label="Copy the command {{ k.cmd }}" style="min-height: 36px; padding: 0 12px; border-radius: 18px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 13px; font-weight: 600">{{ k.copy }}</button></span>
+                </sc-if>
+              </div>
+            </sc-for>
+            <span role="status" style="padding: 9px 14px; border-top: 1px solid {{c.line}}; font-size: 13.5px; font-weight: 600; color: {{ s.sumColor }}">{{ s.sum }}</span>
+            <sc-if value="{{ s.failed }}" hint-placeholder-val="{{ false }}"><span style="padding: 0 14px 10px; font-size: 12.5px; line-height: 1.4; color: {{c.ink2}}">Is a failed check for a CLI you do not use? Change the models, then check again.</span></sc-if>
+          </section>
+        </sc-if>
+
+        <button style="min-height: 46px; border-radius: 14px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 15px; font-weight: 600">{{ s.checkLabel }}</button>
+        <button aria-disabled="{{ s.startOffAria }}" aria-describedby="starthint" style="min-height: 50px; border-radius: 14px; border: 0; background: {{ s.startBg }}; color: {{ s.startFg }}; font-size: 16px; font-weight: 600">Start the project and its agents</button>
+        <span id="starthint" style="font-size: 12.5px; line-height: 1.4; color: {{c.ink2}}; padding: 0 4px">{{ s.startHint }}</span>
+      </sc-if>
+    </main>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "state": {"editor": "enum", "options": ["form", "first", "checks", "pass", "nofolders", "nofactory"], "default": "form"}, "h": {"editor": "int", "default": 1100}, "$preview": {"width": 390, "height": 1100}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = {"scrimBg": "#8C8B87", "bg": "#FAF8F3", "surface": "#FFFFFF", "surface2": "#F1EEE7", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7", "accent": "#D98718", "accentText": "#8A5700", "blocked": "#D99417", "green": "#1D6B46", "red": "#B42318", "redLine": "#F4C7C3", "dash": "#8E8A80", "muted": "#6B6E75"};
+    const dark = {"scrimBg": "#0B0C0E", "bg": "#16181C", "surface": "#1F2126", "surface2": "#26292F", "ink": "#F5F2EA", "ink2": "#A3A7AF", "line": "#2E3138", "accent": "#F39C1F", "accentText": "#F5B83D", "blocked": "#F0A92A", "green": "#5CC792", "red": "#F26B5B", "redLine": "#5A2A2A", "dash": "#6B707A", "muted": "#A3A7AF"};
+    const d = !!this.props.dark;
+    const c = d ? dark : light;
+    const st = this.props.state ?? 'form';
+    const ran = st === 'checks' || st === 'pass';
+    const failed = st === 'checks';
+    const s = {
+      first: st === 'first', nofactory: st === 'nofactory', form: st !== 'nofactory',
+      nofolders: st === 'nofolders', folders: st === 'form' || st === 'first', picked: ran,
+      models: !ran, checks: ran, failed,
+      ckBorder: failed ? c.redLine : c.line,
+      sum: failed ? "1 check failed. Fix it, then check again." : "All 4 checks pass.",
+      sumColor: failed ? c.red : c.green,
+      checkLabel: ran ? "Check again" : "Check this folder",
+      startOffAria: st === 'pass' ? "false" : "true",
+      startBg: st === 'pass' ? c.accent : c.surface2, startFg: st === 'pass' ? "#1F1F22" : c.muted,
+      goalRows: ran ? 1 : 2, modelSum: "codex worker: changed · the rest are the defaults", startHint: st === 'pass' ? "Starting runs agents on your model accounts. They use your quota." : "Start turns on when no check fails."
+    };
+    const F = (path, mark, on, notgit, off) => ({ path, mark, on, checked: on ? "true" : "false", disabled: off ? "true" : "false", color: off ? c.muted : c.ink, markColor: notgit ? c.red : c.ink2, aria: path + ", " + mark });
+    const folders = [
+      F("~/code/notes", "git repository", true),
+      F("~/code/webapp", "git repository"),
+      F("~/code/photos", "already a project: open it to give it a new goal", false, false, true),
+      F("~/Documents/drafts", "not a git repository", false, true)
+    ];
+    const M = (role, value, first) => ({ role, value, top: first ? "0" : "1px solid " + c.line });
+    const models = [M("coordinator models", "claude · opus · high", true), M("worker models", "claude · sonnet · medium"), M("reviewer models", "codex · gpt-6.2-sol · medium"), M("retro models", "claude · opus · high")];
+    const K = (mark, name, detail, fix, cmd) => {
+      const look = { pass: ["✓", c.green], warning: ["▲", c.accentText], fail: ["✕", c.red] }[mark];
+      return { icon: look[0], color: look[1], mark, name, detail: detail || "", hasDetail: !!detail, fix: fix || "", hasFix: !!fix, cmd: cmd || "", hasCmd: !!cmd, copy: "Copy" };
+    };
+    const checks = failed ? [
+      K("pass", "start git", "main"),
+      K("fail", "start codex", "codex is not signed in", "", "codex login"),
+      K("pass", "github remote", "origin"),
+      K("pass", "pr workflow", ".github/workflows/ci.yml"),
+      K("pass", "review rule", "main does not require an approving review")
+    ] : [
+      K("pass", "start git", "main"),
+      K("pass", "start claude", ""),
+      K("pass", "start codex", ""),
+      K("pass", "pr workflow", ".github/workflows/ci.yml")
+    ];
+    return { c, s, folders, models, checks, h: this.props.h ?? 1100 };
+  }
+}
+</script>
+</body>
+</html>

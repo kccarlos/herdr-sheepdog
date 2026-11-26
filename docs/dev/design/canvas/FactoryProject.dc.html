@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — a factory project's board on the phone</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}
+button,input,textarea{font:inherit}
+button{cursor:pointer}
+</style>
+</helmet>
+<div style="position: relative; width: 390px; height: {{ h }}px; display: flex; flex-direction: column; overflow: hidden; background: {{c.bg}}; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <div style="height: 54px; flex-shrink: 0"></div>
+  <header style="height: 44px; flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; padding: 0 6px">
+    <a href="FactoryAgents.dc.html" style="height: 44px; display: flex; align-items: center; gap: 2px; padding: 0 8px 0 2px; color: {{c.accentText}}; font-size: {{ f.body }}px; text-decoration: none;"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"></path></svg>Agents</a>
+    <button aria-label="More for notes: settings, the coordinator's window" style="width: 44px; height: 44px; border: 0; background: transparent; color: {{c.ink}}; display: flex; align-items: center; justify-content: center"><svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true" fill="currentColor"><circle cx="5.5" cy="12" r="1.7"></circle><circle cx="12" cy="12" r="1.7"></circle><circle cx="18.5" cy="12" r="1.7"></circle></svg></button>
+  </header>
+
+  <main style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 10px; padding: 0 16px 16px">
+    <div style="display: flex; flex-direction: column; gap: 3px; padding: 0 4px">
+      <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap">
+        <h1 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: {{ f.h1 }}px; font-weight: 700; letter-spacing: -0.3px">notes</h1>
+        <span style="display: flex; align-items: center; gap: 5px; font-size: {{ f.small }}px; font-weight: 600; padding: 2px 9px; border-radius: 10px; background: {{c.surface2}}"><span style="width: 7px; height: 7px; border-radius: 4px; background: {{ s.dot }}"></span>{{ s.word }}</span>
+      </div>
+      <span style="font-size: {{ f.body }}px; line-height: 1.35">A notes page with search</span>
+      <span style="font-size: {{ f.small }}px; line-height: 1.4; color: {{c.ink2}}">{{ s.counts }}</span>
+      <span style="font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: {{ f.mono }}px; color: {{c.ink2}}">~/code/notes · Work Mac</span>
+    </div>
+
+    <sc-if value="{{ s.loadfail }}" hint-placeholder-val="{{ false }}">
+      <div role="alert" style="flex-shrink: 0; border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.line}}; padding: 14px; display: flex; flex-direction: column; gap: 8px; align-items: flex-start">
+        <span style="font-size: {{ f.row }}px; font-weight: 600">Can’t load notes. Trying again.</span>
+        <span style="font-size: {{ f.small }}px; line-height: 1.4; color: {{c.ink2}}">Work Mac did not answer in time. The rest of the app still works.</span>
+        <button style="min-height: 44px; padding: 0 18px; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface2}}; color: {{c.ink}}; font-size: {{ f.btn }}px; font-weight: 600">Try again</button>
+      </div>
+    </sc-if>
+    <sc-if value="{{ s.loading }}" hint-placeholder-val="{{ false }}">
+      <div role="status" aria-label="Loading notes" style="flex-shrink: 0; display: flex; flex-direction: column; gap: 10px">
+        <span style="height: 40px; width: 180px; border-radius: 20px; background: {{c.surface2}}"></span>
+        <span style="height: 44px; border-radius: 22px; background: {{c.surface2}}"></span>
+        <span style="height: 120px; border-radius: 14px; background: {{c.surface2}}"></span>
+        <span style="height: 220px; border-radius: 14px; background: {{c.surface2}}"></span>
+        <span style="font-size: {{ f.small }}px; color: {{c.ink2}}; padding: 0 4px">Loading notes from Work Mac…</span>
+      </div>
+    </sc-if>
+    <sc-if value="{{ s.board }}" hint-placeholder-val="{{ true }}">
+      <div role="group" aria-label="This project" style="flex-shrink: 0; display: flex; flex-direction: {{ barDir }}; align-items: {{ barAlign }}; gap: 8px; flex-wrap: wrap">
+        <sc-for list="{{ s.actions }}" as="a" hint-placeholder-count="2">
+          <button aria-label="{{ a.aria }}" style="min-height: 40px; padding: 0 16px; border-radius: 20px; border: 1px solid {{ a.border }}; background: {{c.surface}}; color: {{ a.color }}; font-size: {{ f.btn }}px; font-weight: 600">{{ a.label }}</button>
+        </sc-for>
+        <span style="flex-grow: 1"></span>
+        <sc-if value="{{ s.coordBtn }}" hint-placeholder-val="{{ true }}"><a href="FactoryWindow.dc.html" aria-label="Open the notes coordinator's window" style="min-height: 40px; padding: 0 12px 0 10px; border-radius: 20px; border: 1px solid {{c.line}}; background: {{c.surface2}}; display: flex; align-items: center; gap: 6px; font-size: {{ f.small }}px; font-weight: 600; color: {{c.ink}}; text-decoration: none;"><svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="3"></rect><path d="M7 9l3 3-3 3M12.500 15H17"></path></svg>Coordinator</a></sc-if>
+      </div>
+      <sc-if value="{{ s.barNote }}" hint-placeholder-val="{{ false }}">
+        <span style="font-size: {{ f.small }}px; line-height: 1.4; color: {{c.ink2}}; padding: 0 4px">{{ s.barNoteText }}</span>
+      </sc-if>
+
+      <sc-if value="{{ s.pair }}" hint-placeholder-val="{{ false }}">
+        <div role="alert" style="flex-shrink: 0; padding: 10px 12px; border-radius: 12px; background: {{c.redBg}}; border: 1px solid {{c.redLine}}; display: flex; gap: 8px; align-items: flex-start">
+          <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="{{c.red}}" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 1px"><path d="M12 3l10 18H2z"></path><path d="M12 10v4M12 17.500v.5"></path></svg>
+          <span style="display: flex; flex-direction: column; gap: 6px"><span style="font-size: {{ f.small }}px; line-height: 1.4; color: {{c.red}}; font-weight: 600">Not stopped: Work Mac no longer knows this phone.</span><span style="font-size: {{ f.small }}px; line-height: 1.4; color: {{c.ink}}">Pair this phone again in Settings ▸ Work Mac, then press Stop again.</span></span>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ s.refused }}" hint-placeholder-val="{{ false }}">
+        <div role="alert" style="flex-shrink: 0; border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.redLine}}; display: flex; flex-direction: column; overflow: hidden">
+          <span style="padding: 10px 12px; background: {{c.redBg}}; color: {{c.red}}; font-size: {{ f.small }}px; line-height: 1.4; font-weight: 600">Not started: a start check failed. Fix it, then press Resume again.</span>
+          <sc-for list="{{ checks }}" as="k" hint-placeholder-count="3">
+            <div style="padding: 9px 12px; border-top: 1px solid {{c.line}}; display: flex; flex-direction: column; gap: 5px">
+              <span style="display: flex; align-items: center; gap: 7px; font-size: {{ f.small }}px"><span style="font-weight: 700; color: {{ k.color }}">{{ k.icon }} {{ k.mark }}</span><span style="font-weight: 600">{{ k.name }}</span></span>
+              <sc-if value="{{ k.fail }}" hint-placeholder-val="{{ false }}">
+                <span style="font-size: {{ f.small }}px; color: {{c.ink2}}">{{ k.detail }}</span>
+                <span style="font-size: {{ f.small }}px; font-weight: 600">Fix, in a terminal on Work Mac:</span>
+                <span style="display: flex; align-items: center; gap: 8px"><code style="flex-grow: 1; padding: 6px 8px; border-radius: 8px; background: {{c.surface2}}; font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: {{ f.mono }}px">{{ k.cmd }}</code><button aria-label="Copy the command {{ k.cmd }}" style="min-height: 36px; padding: 0 12px; border-radius: 18px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: {{ f.small }}px; font-weight: 600">Copy</button></span>
+              </sc-if>
+            </div>
+          </sc-for>
+          <div style="padding: 9px 12px 12px; border-top: 1px solid {{c.line}}; display: flex; flex-direction: column; gap: 8px; align-items: flex-start">
+            <span style="font-size: {{ f.small }}px; line-height: 1.4; color: {{c.ink2}}">Is the failed check for a CLI you do not use? Change the models in settings.</span>
+            <button style="min-height: 40px; padding: 0 16px; border-radius: 20px; border: 1px solid {{c.line}}; background: {{c.surface2}}; color: {{c.ink}}; font-size: {{ f.btn }}px; font-weight: 600">Check again</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ s.coordoff }}" hint-placeholder-val="{{ false }}">
+        <div role="status" style="flex-shrink: 0; padding: 10px 12px; border-radius: 12px; background: {{c.surface}}; border: 1px dashed {{c.dash}}; display: flex; flex-direction: column; gap: 3px">
+          <span style="font-size: {{ f.small }}px; font-weight: 600">The notes coordinator is not running: claude coordinator is signed out</span>
+          <span style="font-size: {{ f.small }}px; line-height: 1.4"><span style="font-weight: 600">Fix:</span> sign in to claude at this Mac (Work Mac). Running tasks go on.</span>
+        </div>
+      </sc-if>
+
+      <div style="flex-shrink: 0; display: flex; flex-direction: column; gap: 5px">
+        <label for="tell" style="font-size: {{ f.small }}px; font-weight: 600; color: {{c.ink2}}; padding: 0 4px">Tell the notes factory</label>
+        <div style="display: flex; align-items: center; gap: 8px; min-height: 44px; border-radius: 22px; border: 1px solid {{c.line}}; background: {{ s.boxBg }}; padding: 0 6px 0 14px">
+          <sc-if value="{{ s.oneLine }}" hint-placeholder-val="{{ true }}"><input id="tell" type="text" value="{{ s.typed }}" placeholder="An instruction, in your own words" aria-describedby="tellnote" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; font-size: {{ f.body }}px; outline: none; color: {{c.ink}}"></sc-if>
+          <sc-if value="{{ s.areaEmpty }}" hint-placeholder-val="{{ false }}"><textarea id="tell" rows="3" aria-describedby="tellnote" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; font-size: {{ f.body }}px; line-height: 1.25; outline: none; color: {{c.ink}}; resize: none; padding: 10px 0"></textarea></sc-if><sc-if value="{{ s.toolong }}" hint-placeholder-val="{{ false }}"><textarea id="tell" rows="3" aria-describedby="tellnote" style="flex-grow: 1; min-width: 0; border: 0; background: transparent; font-size: {{ f.body }}px; line-height: 1.25; outline: none; color: {{c.ink}}; resize: none; padding: 10px 0">Before you go on with T11, read the whole sync design note I left in docs/sync.md, then compare it with what T8 built…</textarea></sc-if>
+          <button aria-label="Send to the notes factory" style="width: 32px; height: 32px; border-radius: 16px; border: 0; background: {{ s.sendBg }}; color: {{ s.sendFg }}; display: flex; align-items: center; justify-content: center; flex-shrink: 0"><svg width="15" height="15" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M6 11l6-6 6 6"></path></svg></button>
+        </div>
+        <span id="tellnote" role="status" style="display: flex; align-items: flex-start; gap: 6px; font-size: {{ f.small }}px; line-height: 1.4; color: {{ s.noteColor }}; padding: 0 4px; font-weight: {{ s.noteWeight }}"><sc-if value="{{ s.told }}" hint-placeholder-val="{{ false }}"><svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0; margin-top: 2px"><path d="M5 12l5 5 9-10"></path></svg></sc-if>{{ s.note }}</span>
+        <sc-if value="{{ s.toolong }}" hint-placeholder-val="{{ false }}"><span aria-label="1,012 of 1,000 characters" style="align-self: flex-end; font-size: {{ f.small }}px; font-weight: 600; color: {{c.red}}; padding: 0 4px">1,012 / 1,000</span><span role="alert" style="padding: 8px 10px; border-radius: 10px; background: {{c.redBg}}; color: {{c.red}}; font-size: {{ f.small }}px; line-height: 1.4; font-weight: 600">Too long. Keep it under 1,000 characters.</span></sc-if>
+        <span style="font-size: {{ f.small }}px; line-height: 1.4; color: {{c.ink2}}; padding: 0 4px">A question? Ask by voice, or ask Sheepdog in Conversation.</span>
+      </div>
+
+      <sc-if value="{{ s.ask }}" hint-placeholder-val="{{ true }}">
+        <h2 style="margin: 4px 4px 0; font-size: {{ f.small }}px; font-weight: 600; color: {{c.accentText}}">Asks for you · 1 open</h2>
+        <dc-import name="FactoryAskCard" kind="delete" dark="{{ dark }}" ax="{{ ax }}" w="{{ 358 }}" style="display: block; width: 358px; flex-shrink: 0" hint-size="358px,236px"></dc-import>
+      </sc-if>
+
+      <h2 style="margin: 4px 4px 0; font-size: {{ f.small }}px; font-weight: 600; color: {{c.ink2}}">Tasks</h2>
+      <div style="flex-shrink: 0; border-radius: 14px; background: {{c.surface}}; border: 1px solid {{c.line}}; display: flex; flex-direction: column">
+        <sc-for list="{{ rows }}" as="t" hint-placeholder-count="6">
+          <sc-if value="{{ t.isGroup }}" hint-placeholder-val="{{ false }}">
+            <span style="padding: 8px 14px 2px; border-top: {{ t.top }}; font-size: {{ f.small }}px; font-weight: 600; color: {{ t.color }}">{{ t.label }} <span style="font-weight: 400; color: {{c.ink2}}">{{ t.count }}</span></span>
+          </sc-if>
+          <sc-if value="{{ t.isTask }}" hint-placeholder-val="{{ true }}">
+            <a href="FactoryTask.dc.html" aria-label="{{ t.aria }}" style="min-height: 56px; box-sizing: border-box; padding: 6px 10px 8px 14px; display: flex; align-items: center; gap: 8px; color: {{c.ink}}; text-decoration: none;">
+              <span style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px">
+                <span style="font-size: {{ f.row }}px; line-height: 1.3; font-weight: 600"><span style="font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: 0.82em; font-weight: 500; color: {{c.ink2}}">{{ t.id }}</span> {{ t.title }}</span>
+                <span aria-hidden="true" style="display: flex; gap: 3px">
+                  <sc-for list="{{ t.steps }}" as="g" hint-placeholder-count="5"><span style="flex: 1 1 0; height: 5px; border-radius: 3px; background: {{ g.col }}"></span></sc-for>
+                </span>
+                <span style="font-size: {{ f.small }}px; line-height: 1.35; color: {{c.ink}}">{{ t.bar }}</span>
+                <sc-if value="{{ t.hasRun }}" hint-placeholder-val="{{ false }}">
+                  <span style="font-size: {{ f.small }}px; color: {{c.ink2}}">{{ t.run }}</span>
+                </sc-if>
+              </span>
+              <svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="{{c.chevron}}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><path d="M9 6l6 6-6 6"></path></svg>
+            </a>
+          </sc-if>
+          <sc-if value="{{ t.isFold }}" hint-placeholder-val="{{ false }}">
+            <button aria-expanded="{{ t.expanded }}" style="min-height: 44px; border: 0; border-top: 1px solid {{c.line}}; background: transparent; color: {{c.ink2}}; padding: 0 14px; display: flex; align-items: center; gap: 6px; font-size: {{ f.small }}px; font-weight: 600; text-align: left"><svg width="12" height="12" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="{{ t.chev }}"></path></svg>{{ t.label }}</button>
+          </sc-if>
+        </sc-for>
+      </div>
+      <button style="flex-shrink: 0; min-height: 48px; border-radius: 14px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; padding: 0 14px; display: flex; align-items: center; font-size: {{ f.row }}px; text-align: left"><span style="flex-grow: 1">Settings</span><svg width="13" height="13" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="{{c.chevron}}" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"></path></svg></button>
+    </sc-if>
+  </main>
+
+  <sc-if value="{{ s.sheet }}" hint-placeholder-val="{{ false }}">
+    <div style="position: absolute; left: 0; top: 0; width: 390px; height: {{ h }}px; background: {{c.scrim}}"></div>
+    <section role="dialog" aria-labelledby="sheettitle" style="position: absolute; left: 8px; right: 8px; bottom: 8px; border-radius: 22px; background: {{c.surface}}; padding: 18px 16px 16px; display: flex; flex-direction: column; gap: 10px; box-shadow: {{c.pop}}">
+      <h2 id="sheettitle" style="margin: 0; font-size: {{ f.row }}px; font-weight: 700">{{ s.sheetTitle }}</h2>
+      <sc-if value="{{ s.sheetIsStop }}" hint-placeholder-val="{{ false }}">
+        <span style="font-size: {{ f.body }}px; line-height: 1.4; color: {{c.ink2}}">Its running agents end now. Resume goes on with the same goal.</span>
+        <button autofocus="" style="min-height: 50px; border-radius: 14px; border: 2px solid {{c.ink}}; background: {{c.surface}}; color: {{c.ink}}; font-size: {{ f.btn }}px; font-weight: 600">Keep it running</button>
+        <button style="min-height: 50px; border-radius: 14px; border: 1px solid {{c.red}}; background: {{c.surface}}; color: {{c.red}}; font-size: {{ f.btn }}px; font-weight: 600">Stop the project</button>
+      </sc-if>
+      <sc-if value="{{ s.sheetIsGoal }}" hint-placeholder-val="{{ false }}">
+        <label for="newgoal" style="font-size: {{ f.small }}px; font-weight: 600; color: {{c.ink2}}">New goal</label>
+        <sc-if value="{{ s.same }}" hint-placeholder-val="{{ false }}"><textarea id="newgoal" rows="3" aria-describedby="nghint" style="border-radius: 12px; border: 1px solid {{c.line}}; background: {{c.bg}}; color: {{c.ink}}; padding: 10px 12px; font-size: {{ f.body }}px; line-height: 1.4; resize: none">A notes page with search</textarea></sc-if><sc-if value="{{ s.notSame }}" hint-placeholder-val="{{ true }}"><textarea id="newgoal" rows="3" aria-describedby="nghint" style="border-radius: 12px; border: 1px solid {{c.line}}; background: {{c.bg}}; color: {{c.ink}}; padding: 10px 12px; font-size: {{ f.body }}px; line-height: 1.4; resize: none">Add tags to notes, and leave the export out</textarea></sc-if>
+        <sc-if value="{{ s.same }}" hint-placeholder-val="{{ false }}">
+          <span role="alert" style="padding: 8px 10px; border-radius: 10px; background: {{c.redBg}}; color: {{c.red}}; font-size: {{ f.small }}px; font-weight: 600">This project is finished. Give it a new goal.</span>
+        </sc-if>
+        <span id="nghint" style="font-size: {{ f.small }}px; line-height: 1.4; color: {{c.ink2}}">{{ s.goalHint }}</span>
+        <span style="font-size: {{ f.small }}px; line-height: 1.4; color: {{c.ink2}}">Starting runs agents on your model accounts. They use your quota.</span>
+        <button style="min-height: 50px; border-radius: 14px; border: 0; background: {{c.accent}}; color: #1F1F22; font-size: {{ f.btn }}px; font-weight: 600">{{ s.goalGo }}</button>
+        <button style="min-height: 44px; border-radius: 14px; border: 0; background: transparent; color: {{c.accentText}}; font-size: {{ f.btn }}px">Cancel</button>
+      </sc-if>
+    </section>
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "ax": {"editor": "boolean", "default": false}, "state": {"editor": "enum", "options": ["running", "told", "stopped", "finished", "coordoff", "stopconfirm", "newgoal", "resumefail", "reopen", "pairagain", "loadfail", "toolong", "loading", "pairsay"], "default": "running"}, "$preview": {"width": 390, "height": 844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = {"bg": "#FAF8F3", "surface": "#FFFFFF", "surface2": "#F1EEE7", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7", "accent": "#D98718", "accentText": "#8A5700", "blocked": "#D99417", "blue": "#1F5F9E", "green": "#1D6B46", "idle": "#5C6370", "red": "#B42318", "redBg": "#FEF3F2", "redLine": "#F4C7C3", "chevron": "#8E929A", "dash": "#8E8A80", "scrim": "rgba(31,31,34,0.32)", "pop": "0 12px 40px rgba(31,31,34,0.18), 0 0 0 1px #E4E0D7"};
+    const dark = {"bg": "#16181C", "surface": "#1F2126", "surface2": "#26292F", "ink": "#F5F2EA", "ink2": "#A3A7AF", "line": "#2E3138", "accent": "#F39C1F", "accentText": "#F5B83D", "blocked": "#F0A92A", "blue": "#6AA8EB", "green": "#5CC792", "idle": "#9AA1AD", "red": "#F26B5B", "redBg": "#2A1C1C", "redLine": "#5A2A2A", "chevron": "#8E929A", "dash": "#6B707A", "scrim": "rgba(0,0,0,0.5)", "pop": "0 12px 40px rgba(0,0,0,0.5), 0 0 0 1px #2E3138"};
+    const d = !!this.props.dark, ax = !!this.props.ax;
+    const c = d ? dark : light;
+    const st = this.props.state ?? 'running';
+    const kind = { stopconfirm: 'running', pairagain: 'running', told: 'running', coordoff: 'running', newgoal: 'running', toolong: 'running', pairsay: 'running', loading: 'loadfail', resumefail: 'stopped', reopen: 'finished' }[st] || st;
+    const btn = (label, aria, danger) => ({ label, aria, border: c.line, color: danger ? c.red : c.ink });
+    const actions = {
+      running: [btn("Stop", "Stop this project"), btn("New goal", "New goal")],
+      stopped: [btn("Resume", "Resume this project"), btn("New goal", "New goal")],
+      finished: [btn("Reopen with a new goal", "Reopen with a new goal")],
+      loadfail: []
+    }[kind] || [];
+    const note = {
+      running: ["Delivered when the coordinator is next free. To answer an ask, use its card.", c.ink2, 400],
+      told: ["Told the notes factory.", c.green, 600],
+      toolong: ["", c.ink2, 400],
+      pairsay: ["Not sent: Work Mac no longer knows this phone. Pair this phone again in Settings ▸ Work Mac, then send again.", c.red, 600],
+      coordoff: ["The notes coordinator is not running. It gets this when it is back.", c.ink2, 400],
+      stopped: ["notes is stopped. It gets this when you resume it.", c.ink2, 400],
+      finished: ["notes is finished. Give it a new goal.", c.ink2, 400]
+    };
+    const n = note[st] || note[kind] || note.running;
+    const sheetIsStop = st === 'stopconfirm', sheetIsGoal = st === 'newgoal' || st === 'reopen';
+    const s = {
+      word: { running: "running", stopped: "stopped", finished: "finished", loadfail: "running" }[kind],
+      dot: { running: c.blue, stopped: c.idle, finished: c.green, loadfail: c.blue }[kind],
+      counts: { running: "3 working · 1 waiting on you · 9 of 14 done", stopped: "1 waiting on you · 9 of 14 done", finished: "14 of 14 done", loadfail: "" }[kind],
+      coordBtn: kind === 'running' && st !== 'coordoff',
+      loadfail: st === 'loadfail', loading: st === 'loading', board: kind !== 'loadfail', actions,
+      oneLine: !ax && st !== 'toolong', areaEmpty: ax && st !== 'toolong', toolong: st === 'toolong',
+      barNote: kind === 'stopped' || kind === 'finished',
+      barNoteText: kind === 'stopped' ? "Stopped. No agent is running. Resume goes on with the same goal." : "Finished. To go on, reopen it with a new goal.",
+      pair: st === 'pairagain', refused: st === 'resumefail', coordoff: st === 'coordoff',
+      typed: st === 'pairsay' ? "Skip the export task" : st === 'toolong' ? "Before you go on with T11, read the whole sync design note I left in docs/sync.md, then compare it with what T8 built…" : (st === 'stopped' ? "Use the new tag colours" : ""),
+      boxBg: kind === 'finished' ? c.surface2 : c.surface,
+      sendBg: st === 'stopped' ? c.accent : c.line, sendFg: st === 'stopped' ? "#1F1F22" : c.surface,
+      note: n[0], noteColor: n[1], noteWeight: n[2], told: st === 'told',
+      ask: kind === 'running' || kind === 'stopped',
+      sheet: sheetIsStop || sheetIsGoal, sheetIsStop, sheetIsGoal,
+      sheetTitle: sheetIsStop ? "Stop this project?" : (st === 'reopen' ? "Reopen with a new goal" : "New goal"),
+      goalText: st === 'reopen' ? "A notes page with search" : "Add tags to notes, and leave the export out",
+      same: st === 'reopen', notSame: st !== 'reopen',
+      goalHint: st === 'reopen' ? "The folder and the settings stay as they are. To change a model first, use settings." : "The folder and the settings stay as they are. The coordinator plans the new goal.",
+      goalGo: st === 'reopen' ? "Reopen with this goal" : "Give it this goal"
+    };
+    const seg = { d: c.green, n: c.blue, t: c.line, e: c.idle };
+    const steps = (code) => code.split('').map((k) => ({ col: seg[k] }));
+    const group = (label, count, color, first) => ({ isGroup: true, isTask: false, isFold: false, label, count, color, top: first ? "0" : "1px solid " + c.line });
+    const task = (id, title, code, bar, run, stage) => ({ isGroup: false, isTask: true, isFold: false, id, title, steps: steps(code), bar, run: run || "", hasRun: !!run && kind === 'running', aria: id + ", " + title + ", " + stage + ". " + bar + (run && kind === 'running' ? ". " + run : "") });
+    const fold = (label, open) => ({ isGroup: false, isTask: false, isFold: true, label, expanded: open ? "true" : "false", chev: open ? "M6 9l6 6 6-6" : "M9 6l6 6-6 6" });
+    let rows;
+    if (kind === 'finished') {
+      rows = [
+        group("done", "14", c.ink2, true),
+        task("T14", "feat: search filters", "ddddd", "merged", "", "done"),
+        task("T9", "feat: export to PDF", "dddte", "dropped, ended without merging", "", "dropped"),
+        task("T6", "feat: storage", "ddtte", "split into T12 and T13", "", "split"),
+        fold("11 more", false)
+      ];
+    } else {
+      rows = [
+        group("waiting on you", "1", c.accentText, true),
+        task("T10", "feat: import", "dnttt", "implementing, waiting on your answer", "", "waiting on you"),
+        group("working", "2", c.ink2, false),
+        task("T8", "feat: tags", "dnttt", "implementing, sent back from review round 1", "worker · codex · 31 min", "working"),
+        task("T7", "feat: search", "ddntt", "review round 2; needs 2 passing, at most 5", "reviewer · claude · 6 min", "working"),
+        group("waiting on others", "1", c.ink2, false),
+        task("T11", "feat: sync", "ttttt", "planned, after T8", "", "waiting on others"),
+        fold("done 9", false)
+      ];
+    }
+    const checks = [
+      { icon: "✕", mark: "fail", color: c.red, name: "start claude", fail: true, detail: "claude is not signed in", cmd: "claude auth login" },
+      { icon: "✓", mark: "pass", color: c.green, name: "start git", fail: false },
+      { icon: "✓", mark: "pass", color: c.green, name: "pr workflow", fail: false }
+    ];
+    return {
+      c, dark: d, ax, s, rows, checks, barDir: ax ? "column" : "row", barAlign: ax ? "stretch" : "center",
+      h: ax ? 4150 : 844,
+      f: ax ? { h1: 53, body: 43, small: 40, mono: 34, row: 43, btn: 43 } : { h1: 30, body: 15, small: 12.5, mono: 11.5, row: 15, btn: 15 }
+    };
+  }
+}
+</script>
+</body>
+</html>

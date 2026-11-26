@@ -1070,10 +1070,10 @@ Every surface reads a **view**: a pure function of the stored state. The JSON sh
 
 | Surface (canvas board) | View | Built from |
 |---|---|---|
-| Space-page factory section (FactoryPage, FactoryIPad*) | section state; "Milestone 3 of 4 · 7 of 12 merged"; time left along the critical path; task rows by dependency layer with stage, why, model, rounds and live terminal | the project rules (section 6); `plan` layers and critical path; section 4.11 |
-| Ask cards (FactoryAsk, FactoryAskCard), on Conversation and on Agents with a badge | open owner asks | ask table |
-| Start row and shell start (FactoryStartEntry, FactoryStartShell) | doctor lines, then five questions | `doctor.go`; J1 |
-| Agents block, worker window (FactoryAgents, FactoryWorker) | coordinator state and age; each run's terminal, model and effort | run table; labels `sheepdog.project/role/task/model` set at launch |
+| Space-page factory section (FactoryProject, FactoryIPad*) | section state; "Milestone 3 of 4 · 7 of 12 merged"; time left along the critical path; task rows by dependency layer with stage, why, model, rounds and live terminal | the project rules (section 6); `plan` layers and critical path; section 4.11 |
+| Ask cards (FactoryAskCard, FactoryAskCardStates, FactoryHeadStates), on Conversation and on Agents with a badge | open owner asks | ask table |
+| Start row and shell start (FactoryNewProject, FactoryNewProjectChecks) | doctor lines, then five questions | `doctor.go`; J1 |
+| Agents block, worker window (FactoryAgents, FactoryTask) | coordinator state and age; each run's terminal, model and effort | run table; labels `sheepdog.project/role/task/model` set at launch |
 | Log (FactoryTerminal, FactoryWebLog) | `at, by, wake, task, decision, why, kind, model` | `log.jsonl` (section 14) |
 | Debug | for a task: the rule that matched, and for each earlier rule the part of its condition that was false; refusals with their codes | `log.jsonl`; refusals from the daemon's event log (section 14) |
 | Voice digest | merged, waiting, pools, alerts; any PR merged outside the accept bar; any task that has waited on the coordinator for hours | a pure function over state and log; no model |
@@ -1324,7 +1324,7 @@ The first check produced 181 gaps. Absorbing them all would rebuild the old engi
 | O1 | Evidence (11.6) is **parked (2026-11-23, [plan.md](plan.md) §2)** after 23 kept run logs and 38 review verdicts showed zero rounds spent on failing tests; revisit only if real projects show such rounds (spike S0.7 deferred with slice 10) |
 | O2 | A third review round happens by itself after two that asked for changes (L13). In the old engine the coordinator granted it. Code is more hands-off; the cost is one automatic round on tasks a coordinator would have stopped. `retro_from_round` set to 2 removes it |
 | O3 | The contract has five alert kinds. `agents_down` is a sixth |
-| O4 | Approved board text says "engine and Python" (FactoryStartShell, FactoryTerminal). With a Go engine that line must change |
+| O4 | Approved board text says "engine and Python" (FactoryNewProjectChecks, FactoryTerminal). With a Go engine that line must change |
 | O5 | **Resolved (D14, slice 9 #777, and O33 #767):** `/factory` is the v1 web board (`web/factory/`), and `docs/dev/factory/owner-contract.md` is superseded by this document (deleted in the docs sweep) |
 | O6 | Order is form B's failure mode. The order tests of section 16 are the guard; whether they are enough is judged at each review point of [plan.md](plan.md), with real rows |
 | O7 | The ladder (4.6) treats review, retro, recap and owner as one loop at four levels. The levels are not alike (three retro verdicts, four recap choices). If the special cases grow, split the function per level rather than adding conditions |

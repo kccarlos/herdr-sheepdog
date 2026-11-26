@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — Conversation: a judgement question answered from the project’s record</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<div style="width: 990px; height: 844px; display: flex; gap: 40px; background: {{c.bg}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+<div style="position: relative; width: 390px; height: 844px; flex-shrink: 0; display: flex; flex-direction: column; overflow: hidden; background: {{c.bg}}; color: {{c.ink}}">
+  <dc-import name="TopBar" pane="conversation" waiting="0" dark="{{ dark }}" hint-size="390px,102px"></dc-import>
+  <main style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; justify-content: flex-end; padding: 8px 16px 104px; border-top: 1px solid {{c.line}}">
+    <sc-for list="{{ rows }}" as="r" hint-placeholder-count="6">
+      <div style="margin-top: {{ r.gap }}px; width: 358px">
+        <dc-import name="ChatRow" kind="{{ r.kind }}" pos="single" text="{{ r.text }}" time="{{ r.time }}" gutter="" dark="{{ dark }}" ax="{{ false }}" w="{{ 358 }}" style="display: block; width: 358px" hint-size="358px,48px"></dc-import>
+      </div>
+    </sc-for>
+  </main>
+  <div style="position: absolute; left: 12px; bottom: 26px; width: 366px; height: 60px; display: flex">
+    <dc-import name="Dock" label="Sheepdog" status="Listening" mode="live" dark="{{ dark }}" style="display: block; width: 366px; height: 60px" hint-size="366px,60px"></dc-import>
+  </div>
+</div>
+<aside aria-label="What the voice says and what stays quiet" style="width: 560px; box-sizing: border-box; padding: 24px 28px; display: flex; flex-direction: column; gap: 14px; color: {{c.ink}}">
+    <h2 style="margin: 0; font-family: ui-rounded, 'SF Pro Rounded', Outfit, sans-serif; font-size: 20px; font-weight: 700">Narrated, and quiet</h2>
+    <span style="font-size: 13px; line-height: 18px; color: {{c.ink2}}">From the design's section 7. Narrated means spoken and a row in the conversation. Quiet means on the board and in the log only.</span>
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: {{c.line}}; border: 1px solid {{c.line}}; border-radius: 14px; overflow: hidden">
+      <span style="background: {{c.surface2}}; padding: 8px 12px; font-size: 13px; font-weight: 700">Narrated</span><span style="background: {{c.surface2}}; padding: 8px 12px; font-size: 13px; font-weight: 700">Quiet</span>
+      <sc-for list="{{ pairs }}" as="p" hint-placeholder-count="5"><span style="background: {{c.surface}}; padding: 8px 12px; font-size: 13px; line-height: 18px">{{ p.a }}</span><span style="background: {{c.surface}}; padding: 8px 12px; font-size: 13px; line-height: 18px; color: {{c.ink2}}">{{ p.b }}</span></sc-for>
+    </div>
+    <span style="font-size: 13px; line-height: 18px; color: {{c.ink2}}">A question never starts a stopped project, and never reaches the coordinator: a fresh read-only agent reads the project’s log, plan and code, and the answer says “from the project’s record”.</span>
+  </aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "$preview": {"width": 990, "height": 844}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = {"bg": "#FAF8F3", "surface": "#FFFFFF", "surface2": "#F1EEE7", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7"};
+    const dark = {"bg": "#16181C", "surface": "#1F2126", "surface2": "#26292F", "ink": "#F5F2EA", "ink2": "#A3A7AF", "line": "#2E3138"};
+    const d = !!this.props.dark;
+    const c = d ? dark : light;
+    const R = (kind, gap, text, time) => ({ kind, gap, text: text || '', time: time || '' });
+    const rows = [
+      R('day', 0, 'Today', ''),
+      R('you', 14, 'Why did notes split T6?', ''),
+      R('voice', 6, 'Looking into notes, about half a minute.', ''),
+      R('you', 18, 'Tell recipes to add a print button.', ''),
+      R('voice', 6, 'recipes is finished. Give it a new goal.', ''),
+      R('voiceDetails', 18, 'From the project’s record: the coordinator split T6 at the recap on Tuesday, because it was two changes over 400 lines, storage and the migration. T12 and T13 hold them now. The log says nothing more about it.', '')
+    ];
+    const P = (a, b) => ({ a, b });
+    const pairs = [
+      P("An open ask, with its options and the recommendation", "A worker or reviewer starting, working, finishing, failing or stuck"),
+      P("The result of your override", "Review rounds and verdicts, retro and plan review"),
+      P("The coordinator stuck on a prompt", "CI passing, a PR opening, a merge"),
+      P("“Told the notes factory.” after an instruction", "The coordinator’s routine wakes, recaps and decisions"),
+      P("Anything you ask: status from the board, why from the project’s record", "A model handoff, a retry, a new coordinator session")
+    ];
+    return { c, dark: d, rows, pairs };
+  }
+}
+</script>
+</body>
+</html>

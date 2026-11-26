@@ -294,6 +294,63 @@ strings; a test's expected string is the **Text** column
 | `ni.inproj` | card text | 2 open | inside a project the asks-for-you card counts and lists only that project (exists; now per project) |
 | `ni.none` | empty state | No open asks right now. | the asks card of a project with none (exists), even while the header's count shows another project's |
 
+## The app (canvas Part 3)
+
+Strings the iPhone and iPad app shows that `/factory` does not have. The
+boards are the Part 3 `Factory…` boards (`FactoryHead`, `FactoryProject`,
+`FactoryNewProject`, `FactoryModels`, `FactoryWindow`, `FactoryWindowStates`,
+`FactoryStates`).
+Every other string on those boards is a string of the tables above. The app
+uses the web's words with the app's casing for screen titles and section
+labels ("Settings", "Tasks", "Asks for you"); state and stage words stay
+lowercase.
+
+| Id | Kind | Text | Where and when |
+|---|---|---|---|
+| `app.head.kind` | mark | factory | after the project's name on its head in Agents |
+| `app.sec.stopped` | section label | Stopped | Agents, between Working and Done, only while a project is stopped |
+| `app.head.stuck` | heading | The notes coordinator is stuck on a prompt | on the head under Needs you; the coordinator's own dialog follows |
+| `app.head.stuck.no` | hint | To say what to do instead, use the box on the notes page. The coordinator gets it when it is next free. | under the dialog's "No" option |
+| `app.new` | menu item | New factory project | the + menu |
+| `app.tell` | label | Tell the notes factory | the text box on the project page |
+| `app.tell.ph` | placeholder | An instruction, in your own words | the text box; never the only label |
+| `app.tell.note` | hint | Delivered when the coordinator is next free. To answer an ask, use its card. | under the box, running |
+| `app.tell.ask` | hint | A question? Ask by voice, or ask Sheepdog in Conversation. | under the box, every state |
+| `app.tell.told` | status | Told the notes factory. | after Send; the voice's sentence (6.1) |
+| `app.tell.stopped` | status | notes is stopped. It gets this when you resume it. | the voice's sentence (6.1) |
+| `app.tell.coord` | status | The notes coordinator is not running. It gets this when it is back. | the voice's sentence (6.1) |
+| `app.tell.fin` | refusal | notes is finished. Give it a new goal. | the daemon's sentence (6.2) |
+| `app.tell.long` | refusal | Too long. Keep it under 1,000 characters. | with the counter `app.tell.count` (6.2) |
+| `app.tell.count` | counter | 1,012 / 1,000 | beside the box, near the cap |
+| `app.tell.gone` | status | This project is gone. | on Agents, after the project page closes (6.2) |
+| `app.pair.stop` | refusal | Not stopped: Work Mac no longer knows this phone. Pair this phone again in Settings ▸ Work Mac, then press Stop again. | a project action without a paired-device identity; the computer's own name |
+| `app.pair.say` | refusal | Not sent: Work Mac no longer knows this phone. Pair this phone again in Settings ▸ Work Mac, then send again. | the text box without a paired-device identity |
+| `app.coord.btn` | button | Coordinator | opens the coordinator's live window (D10); shown only while a coordinator runs |
+| `app.coord.off` | heading | The notes coordinator is not running: claude coordinator is signed out | the one not-running heading. On the project page the alert's cause follows the colon; in the coordinator's window the heading stops at "not running" and the cause and `app.coord.fix` follow in a box. Without an alert, no cause and no fix |
+| `app.coord.fix` | sentence | Fix: sign in to claude at this Mac (Work Mac). Running tasks go on. | the alert's fix |
+| `app.win.title` | heading | notes · Coordinator | the coordinator's window header; no model or effort |
+| `app.win.ph` | placeholder | Ask the notes coordinator… | the window's prompt box; screen-reader label "Message to the notes coordinator" |
+| `app.win.ask` | link | T10 is waiting on your answer. Answer it on its card; typing here is not an answer. | above the key bar while the project has an open ask; opens the project at its asks. One open ask names its task; an ask with no task: "An ask is waiting on your answer. Answer it on its card; typing here is not an answer."; two or more: "2 asks are waiting on your answer. Answer them on their cards; typing here is not an answer." The screen-reader label is the visible text |
+| `app.win.off.body` | sentence | This window comes back when a coordinator runs again. To tell it something meanwhile, use the box on the notes page; it gets it when it is back. | under `app.coord.off` in the window, in place of the terminal, key bar and box, when the coordinator goes while the window is open |
+| `app.win.stopped` | heading | notes is stopped | in place of the terminal, key bar and box while the project is stopped |
+| `app.win.stopped.body` | sentence | Resume notes on its page; it goes on with the same goal. | under `app.win.stopped` |
+| `app.win.finished` | heading | notes is finished | in place of the terminal, key bar and box when the project finishes while the window is open |
+| `app.win.finished.body` | sentence | To go on, reopen notes with a new goal on its page. | under `app.win.finished` |
+| `app.win.blocked` | refusal | Not sent: the notes coordinator is waiting at its own prompt. Answer it with the keys, or on its card in Agents. | under the box when Send hits a coordinator blocked on its own CLI dialog (`WindowPrompt` refuses a blocked pane); the text stays in the box |
+| `app.win.keys` | rule | (no text) | the window's key bar is the ordinary one; More keys has no Interrupt row and the box has no Stop button. Esc and the Ctrl latch stay, because dialogs need them, so Esc or Ctrl, c still interrupts the coordinator's turn |
+| `app.win.back` | button | Back to notes | under either |
+| `app.task.last` | heading | Last decision | the task view: the last coordinator or owner decision and its why |
+| `app.run` | row text | worker · codex · 31 min | one run line under a task: role, CLI, time since it started |
+| `app.np.folders` | label | folders sheepdog knows on Work Mac | the folder list in New project |
+| `app.np.known` | mark | already a project: open it to give it a new goal | a folder that is already a project; not pickable |
+| `app.np.none` | empty state | No folders to pick: herdr cannot be reached on Work Mac. Open herdr-app on Work Mac, then try again. | replaces `np.sugg.none`, which tells the reader to type a path |
+| `app.np.fix` | label | Fix, in a terminal on Work Mac: | before a command fix; the phone cannot run it |
+| `app.np.nofactory` | heading | The factory is not available on Work Mac | New project when the computer has no factory |
+| `app.np.nofactory.p` | sentence | It needs sheepdog on herdr-core. Work Mac's sheepdog runs on herdr-tui, or herdr-core does not answer. | with the fix "Open herdr-app, or start herdr-core in a terminal:" and `hc server start` |
+| `app.mo.done` | sentence | Used when you start the project. Nothing is sent until then. | the models editor opened from New project, with the button Done |
+| `app.load` | status | Loading notes from Work Mac… | first load of a project |
+| `app.cant` | error | Can't load notes. Trying again. | followed by "Work Mac did not answer in time. The rest of the app still works." |
+
 ## Marks: never colour alone
 
 | Mark | Icon | Word | Colour (token) |

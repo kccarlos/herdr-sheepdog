@@ -56,10 +56,10 @@ Accept bar -> Owner asked "one card, one question" only for "a release, a paid k
 Drift check -> Coordinator woken (judges and fixes) on "approved but not merged, red after approval, a stale ask".
 Footer: each step writes one log line; each run and round records model and effort.
 
-States board (FactoryStates.dc.html -> FactoryPage.dc.html script, state enum):
+States board (FactoryStates.dc.html -> FactoryProject.dc.html script, state enum):
 running | noask ("Nothing needs you") | planning | finished | stopped ("Stopped, with the fix") | ownerstop ("Stopped by you: start it again")
 | loadfail ("Could not load") | end (Close space refused) | debug (later task).
-Copy (FactoryPage.dc.html script `msg`): planning "The coordinator is turning your goal into milestones and tasks.";
+Copy (FactoryProject.dc.html script `msg`): planning "The coordinator is turning your goal into milestones and tasks.";
 finished "All 4 milestones are done. 41 tasks merged."; loadfail "Couldn't load the factory / The engine didn't answer. The agents below are still live." + "Try again";
 ownerstop "Stopped by you / Nothing is running. The plan and the tasks are kept." + "Start the factory again…".
 stopped alert banner: "Stopped: no model has quota left / It starts again by itself at 6:10 PM, when Claude resets." (alert title/body/fix).
@@ -75,10 +75,10 @@ Ask card (FactoryAskCard.dc.html): aria "The <project> factory needs your answer
 options as outlined buttons, recommend tagged "Recommended" (e.g. "Tag 0.1.31" Recommended / "Wait for one more QA pass" / "Not now").
 Shown at head of factory section AND as project-level card under Needs you on Agents with badge (addendum :119).
 
-Start entry (FactoryStartEntry): row "Start a factory here" beside "Run a command…"; greyed with reason:
+Start entry (FactoryNewProject): row "Start a factory here" beside "Run a command…"; greyed with reason:
 shelloff "Commands need the phone shell. Turn on Shell from your phone on your computer's setup page."
 outside "Commands run only in your project folders. Add this folder to them on your computer."
-Start shell (FactoryStartShell script): `$ sheepdog factory start` / "Checking this computer" / ok engine and Python / git repository, branch main /
+Start shell (FactoryNewProjectChecks script): `$ sheepdog factory start` / "Checking this computer" / ok engine and Python / git repository, branch main /
 claude and codex signed in / models: opus, gpt-6.2-sol / WARN gh is not signed in, fix: run gh auth login, until then: merges stay local /
 quota unknown, no codexbar, fix: nothing needed / no factory runs here yet / notice (addendum :57) / "1 of 5  What should it build? One sentence, or a file path."
 Fail variant: "no agent CLI is signed in / fix: at your Mac, run claude and sign in. codex or agy work too." "1 thing stops the start. Fix it, then press Return to check again. Control-C quits."
@@ -165,18 +165,18 @@ Engine store today (Python): <data_dir>/tasks/<slug>.json (task list incl. coord
 - Alerts, digest, graph, say, rules: client methods exist, no daemon caller -> contract §6.3 delivery (at-most-once alert ids, APNs factory-alert-<id>, voice) unbuilt in Go.
 - Asks reach the daemon by a 2 s CLI poll spawning Python each time (cache by store digest mitigates); engine wakes daemon via hc label sheepdog.alert (contract :412) — awkward cross-process signalling; in-process engine can push.
 - Loopback proof round-trip (engine -> daemon HTTP) only exists because of the process boundary; residual "local process runs `owner say`" (contract :372) disappears with no CLI, but a `sheepdog factory …` CLI must not reintroduce gated actions.
-- Boards FactoryStartShell + FactoryTerminal print "ok engine and Python": contradicts the Go-only decision; copy must change (owner-facing text change on approved boards).
+- Boards FactoryNewProjectChecks + FactoryTerminal print "ok engine and Python": contradicts the Go-only decision; copy must change (owner-facing text change on approved boards).
 - Coordinator quiet: contract §6.1 + code (herdr/factory.go:28) keep coordinator loud; addendum :127/:171 decides done/idle silent, blocked speaks.
 - Lifecycle board "Owner asked … only a release, a paid key, a delete, or a rule that says designs wait for me" vs contract §4.1: also install, reset, rule asks, and `gate` for out-of-rounds tasks (field note 47); board sends "two rounds with majors" to the retro round first. Board's "drop it, or how to go on?" ask has no clear kind (decision is coordinator-answerable, gated kinds don't fit).
 - Project status `stopped` overloaded; addendum owner-stop mark + reason "stopped by the owner" has no contract field; section state `planning` and `finished` have no contract field (derive from graph).
 - Pool `reason` (contract text :112-113, addendum §3) is not a key in the Pool shape (:110) — strict decoders would refuse it.
-- Graph tasks lack terminal, model, rounds, layer (addendum :170; FactoryPage rows need them); graph still provisional (:197-209).
+- Graph tasks lack terminal, model, rounds, layer (addendum :170; FactoryProject rows need them); graph still provisional (:197-209).
 - Contract still names a `/factory` web page and "/events SSE + /factory" (:410, :487 SDF-34/35); addendum replaces it with the space-page section and cancels SDF-34.
 - Contract lists no `stop` or `owner touch` action; addendum adds both.
 - Factory ask currently shows only on Conversation, badge 0 (addendum :107); approved: also project-level card on Agents with badge.
 - Alert ci_stalled says "ready or merging task" but STAGE_TABLE has no ready/merging stage.
 - Drift check "every tick" on the lifecycle board: drift_pass not in tick.py yet (addendum :18).
-UNVERIFIED (not opened): docs/dev/architecture.md beyond grep hits, glossary.md (grep found no factory/owner terms), m1-acceptance.md body, internal/herdr/{events,bridge,watcher}.go bodies, herdrcore/spaces.go, supervisor/inputs.go, iOS sources, FactoryVoice/FactoryAsk/FactoryWorker/FactoryAgents/FactoryIPad* templates beyond extracted strings, PNGs other than Lifecycle.
+UNVERIFIED (not opened): docs/dev/architecture.md beyond grep hits, glossary.md (grep found no factory/owner terms), m1-acceptance.md body, internal/herdr/{events,bridge,watcher}.go bodies, herdrcore/spaces.go, supervisor/inputs.go, iOS sources, FactoryVoice/FactoryAsk/FactoryTask/FactoryAgents/FactoryIPad* templates beyond extracted strings, PNGs other than Lifecycle.
 
 ## Corrections after review (supersede earlier lines)
 - Task state has TWO engine layers: stored task status (agents.py:162-163 STATUSES todo|scheduled|queued|working|needs|ready|merging|done;
@@ -190,7 +190,7 @@ UNVERIFIED (not opened): docs/dev/architecture.md beyond grep hits, glossary.md 
   unknown kind creates no card or proof; local tap / WindowKeys / typed input / negative speech refused; redacted option label still verifies.
 - Surfaces: desktop panel has factory-ask code (mods/sheepdog/ui/questions.js, model/questions.js; read-only for fask-). web/ no hits. Menu bar UNVERIFIED.
   iOS: 5 grep hits not inspected; addendum :103 says the app has no factory code and does not decode labels.
-- FactoryWorker board title still says "opened from a /factory row" (another /factory leftover).
+- FactoryTask board title still says "opened from a /factory row" (another /factory leftover).
 - Cadences: engine's own tick 15 s (owner-contract.md:21); tick.go 10 s is only the liveness re-check of the tick terminal; daemon ask poll 2 s.
 - DELETE also (UNVERIFIED, not opened): factory/ tree, root-package Python-import parity test (architecture.md:58), uv dependency (python.go:46 UVMissingError), any Homebrew/uninstall/data-clear handling of <data_dir>/factory.
 - Glossary has no owner/coordinator/factory terms (grep): owner-contract.md says owner == user; a new engine doc must add terms or use "user".

@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sheepdog — a factory project's head on Agents</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=Outfit:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500;600&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}
+button{font:inherit;cursor:pointer}
+</style>
+</helmet>
+<section aria-label="{{ p.aria }}" style="width: {{ w }}px; box-sizing: border-box; border-radius: 14px; background: {{ cardBg }}; border: {{ cardBorder }}; display: flex; flex-direction: column; color: {{c.ink}}; font-family: -apple-system, 'SF Pro Text', Inter, system-ui, sans-serif; -webkit-font-smoothing: antialiased">
+  <a href="FactoryProject.dc.html" aria-label="{{ p.aria }}. Opens the project." style="display: flex; flex-direction: column; gap: 3px; padding: 10px 12px 10px 14px; color: {{c.ink}}; text-decoration: none;">
+    <span style="display: flex; align-items: center; gap: 7px; flex-wrap: wrap">
+      <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="{{ p.dot }}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink: 0"><circle cx="5" cy="6" r="2.5"></circle><circle cx="5" cy="18" r="2.5"></circle><circle cx="19" cy="12" r="2.5"></circle><path d="M7.500 6.800l9 4M7.500 17.200l9-4"></path></svg>
+      <span style="font-size: {{ f.name }}px; font-weight: 600">{{ p.name }}</span>
+      <span style="font-size: {{ f.small }}px; color: {{c.ink2}}">factory</span>
+      <span style="flex-grow: 1"></span>
+      <span style="display: flex; align-items: center; gap: 5px; font-size: {{ f.small }}px; font-weight: 600; padding: 2px 8px; border-radius: 9px; background: {{c.surface2}}; color: {{c.ink}}"><span style="width: 7px; height: 7px; border-radius: 4px; background: {{ p.dot }}"></span>{{ p.state }}</span>
+    </span>
+    <span style="font-size: {{ f.body }}px; line-height: 1.3; padding-left: 23px">{{ p.goal }}</span>
+    <span style="font-size: {{ f.small }}px; line-height: 1.35; color: {{c.ink2}}; padding-left: 23px">{{ p.counts1 }}<span style="color: {{c.accentText}}; font-weight: 600">{{ p.waiting }}</span>{{ p.counts2 }}</span>
+    <span style="font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: {{ f.mono }}px; color: {{c.ink2}}; padding-left: 23px">{{ p.folder }}{{ comp }}</span>
+  </a>
+  <sc-if value="{{ p.resume }}" hint-placeholder-val="{{ false }}">
+    <div style="display: flex; align-items: center; gap: 10px; padding: 0 12px 12px 37px; flex-wrap: wrap">
+      <button aria-label="{{ p.resumeAria }}" style="min-height: 40px; padding: 0 16px; border-radius: 20px; border: 1px solid {{c.line}}; background: {{c.surface2}}; color: {{c.ink}}; font-size: {{ f.btn }}px; font-weight: 600">Resume</button>
+    </div>
+  </sc-if>
+  <sc-if value="{{ blocked }}" hint-placeholder-val="{{ false }}">
+    <div role="group" aria-label="The notes coordinator is stuck on a prompt" style="margin: 0 10px 10px; padding: 10px 12px; border-radius: 12px; background: {{c.surface}}; display: flex; flex-direction: column; gap: 8px">
+      <span style="font-size: {{ f.body }}px; font-weight: 600; line-height: 1.3">The notes coordinator is stuck on a prompt</span>
+      <span style="align-self: flex-start; border-radius: 7px; background: {{c.surface2}}; padding: 3px 8px; font-family: 'JetBrains Mono', 'SF Mono', ui-monospace, monospace; font-size: {{ f.mono }}px">gh pr list --state open</span>
+      <button style="min-height: 44px; padding: 6px 14px; border-radius: 22px; border: 0; background: {{c.accent}}; color: #1F1F22; font-size: {{ f.btn }}px; font-weight: 600; text-align: left">Yes</button>
+      <button style="min-height: 44px; padding: 6px 14px; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: {{ f.btn }}px; text-align: left">Yes, and don’t ask again for gh pr commands</button>
+      <button style="min-height: 44px; padding: 6px 14px; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.red}}; font-size: {{ f.btn }}px; text-align: left">No</button>
+      <span style="font-size: {{ f.small }}px; line-height: 1.4; color: {{c.ink2}}">To say what to do instead, use the box on the notes page. The coordinator gets it when it is next free.</span>
+    </div>
+  </sc-if>
+</section>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"project": {"editor": "enum", "options": ["notes", "photos", "recipes", "notes2"], "default": "notes"}, "blocked": {"editor": "boolean", "default": false}, "dark": {"editor": "boolean", "default": false}, "ax": {"editor": "boolean", "default": false}, "w": {"editor": "int", "default": 358}, "computer": {"editor": "text", "default": ""}, "$preview": {"width": 358, "height": 140}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const light = {"board": "#F3F0E8", "surface": "#FFFFFF", "surface2": "#F1EEE7", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7", "accent": "#D98718", "accentText": "#8A5700", "accentTint": "#FDF1DC", "blocked": "#D99417", "blue": "#1F5F9E", "green": "#1D6B46", "idle": "#5C6370", "red": "#B42318"};
+    const dark = {"board": "#0E0F12", "surface": "#1F2126", "surface2": "#26292F", "ink": "#F5F2EA", "ink2": "#A3A7AF", "line": "#2E3138", "accent": "#F39C1F", "accentText": "#F5B83D", "accentTint": "#2A2416", "blocked": "#F0A92A", "blue": "#6AA8EB", "green": "#5CC792", "idle": "#9AA1AD", "red": "#F26B5B"};
+    const d = !!this.props.dark, ax = !!this.props.ax, blocked = !!this.props.blocked;
+    const c = d ? dark : light;
+    const P = {
+      notes: { name: "notes", state: "running", dot: c.blue, goal: "A notes page with search", counts1: "3 working · ", waiting: "1 waiting on you", counts2: " · 9 of 14 done", folder: "~/code/notes", resume: false },
+      notes2: { name: "notes", state: "running", dot: c.blue, goal: "Notes sync for the phone app", counts1: "1 working · 0 of 3 done", waiting: "", counts2: "", folder: "~/work/notes", resume: false },
+      photos: { name: "photos", state: "stopped", dot: c.idle, goal: "Faster thumbnails in the photo grid", counts1: "2 of 6 done", waiting: "", counts2: "", folder: "~/code/photos", resume: true },
+      recipes: { name: "recipes", state: "finished", dot: c.green, goal: "Import recipes from a link", counts1: "8 of 8 done", waiting: "", counts2: "", folder: "~/code/recipes", resume: false }
+    };
+    const p = Object.assign({}, P[this.props.project ?? 'notes'] || P.notes);
+    if (blocked) { p.counts1 = "3 working · 9 of 14 done"; p.waiting = ""; p.counts2 = ""; }
+    p.resumeAria = "Resume " + p.name;
+    p.aria = p.name + " factory, " + p.goal + ", " + p.state + ", " + p.counts1 + p.waiting + p.counts2 + (blocked ? ", the coordinator is stuck on a prompt" : "");
+    const comp = this.props.computer ? " · " + this.props.computer : "";
+    return {
+      comp,
+      c, p, blocked, w: this.props.w ?? 358,
+      cardBg: blocked ? c.accentTint : c.surface,
+      cardBorder: blocked ? "1px solid " + c.blocked : "1px solid " + c.line,
+      f: ax ? { name: 53, small: 43, body: 43, mono: 40, btn: 43 } : { name: 16, small: 12.5, body: 14, mono: 11.5, btn: 15 }
+    };
+  }
+}
+</script>
+</body>
+</html>

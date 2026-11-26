@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<title>Sheepdog — iPad sidebar with a factory space</title>
+<title>Sheepdog — iPad sidebar with factory project heads</title>
 <script src="./support.js"></script>
 </head>
 <body>
@@ -57,16 +57,14 @@ class Component extends DCLogic {
     const pc = (label, meta) => ({ ...base, isComputer: true, label, meta });
     const sp = (key, label, meta) => ({ ...base, isSpace: true, key, label, meta });
     const ag = (label, role, dot, meta, blocked) => ({ ...base, isAgent: true, key: label, label, role, dot, meta, metaColor: blocked ? c.accentText : c.muted, metaWeight: blocked ? 600 : 400 });
+    const idle = dk ? '#9AA1AD' : '#5C6370';
     const rows = [
       nav('conversation', 'Conversation'),
       nav('overview', 'All agents', '1 waiting'),
       pc('Work Mac', 'Voice is here'),
-      sp('space', 'herdr-sheepdog', 'main'),
-      ag('coordinator', '', blue, '2 min'),
-      ag('SDF-57', 'worker', blue, '12 min'),
-      ag('SDF-53', 'worker', blue, '31 min'),
-      ag('SDF-48', 'reviewer', blue, '6 min'),
-      ag('SDF-55', 'worker', green, '18 min'),
+      sp('factory', 'Factory projects', '· 2, and 1 done'),
+      ag('notes', 'factory', blue, '1 waiting', true),
+      ag('photos', 'factory', idle, 'stopped'),
       sp('webapp', 'webapp', 'main'),
       ag('payments', '', blue, '2 min'),
       sp('docs', 'docs-site', 'main'),
