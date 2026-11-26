@@ -219,7 +219,7 @@ it moves into the daemon so every surface agrees.
 
 - A. Leave the agent table as it is. The app builds the project, its tasks
   and their runs from the engine's views. The screen reads learn a second
-  lookup: a pane the engine names is readable without a table row.
+  lookup: a project's current coordinator pane is readable without a table row.
 - B. Put factory terminals back into the agent table and filter every
   reader of it (there are 21 `List()` call sites).
 
@@ -912,7 +912,7 @@ tools run only in the owner's turn.
 | Piece | Where |
 |---|---|
 | The project name, and its use in ask lines, the pseudo-pane's name, the blocked coordinator's name, what voice stop and start say back, push titles | `internal/factory/view.go`, `internal/supervisor` |
-| The coordinator's pane on the project view; one read on the `Factory` interface: is this pane a run of a started project | `internal/factory`, `internal/supervisor/factory.go` |
+| The coordinator's pane on the project view; one read on the `Factory` interface: is this pane a project's current coordinator | `internal/factory`, `internal/supervisor/factory.go` |
 | The screen reads (`Screen`, `ScreenANSI`, and through them the `/ws` subscription), the live attach and the input accept the coordinator's pane | `internal/supervisor/window.go`, `internal/web/term.go` |
 | One rail: rename, interrupt and close refuse every factory pane, blocked or not, on the user and the orchestrator route | `internal/supervisor` (`names.go`, `brainhost.go`, `close.go`, `useractions.go`) |
 | The `factory` object on a `fask-` card | `internal/state`, `internal/supervisor/factory.go` |
