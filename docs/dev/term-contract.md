@@ -31,9 +31,13 @@ from 1 to 65535. For each channel the daemon runs one
 herdr-core the bridge is an attach stream instead ([On
 herdr-core](#on-herdr-core)); the rest of this page holds for both.
 
-- A channel targets only a **tracked agent** (a row of `GET /api/agents`).
-  Any other pane is refused with `refused:not_tracked`, so the user's other
-  herdr panes are never reachable.
+- An agent channel targets either a **tracked agent** (a row of
+  `GET /api/agents`) or a factory project's **current coordinator**. Both
+  use `kind: "agent"`. Worker, reviewer and other untracked panes are
+  refused with `refused:not_tracked`.
+- Input to a coordinator reaches its terminal as the owner's own typing.
+  Esc and Ctrl-C can interrupt a turn. A gated factory ask still requires
+  an answer proof through the ask's own route.
 - **`control`** resizes the real pane to the channel's size and takes
   input. herdr allows one controller per pane; a second one is refused with
   `refused:busy` unless it asks for `takeover`. herdr returns the pane to

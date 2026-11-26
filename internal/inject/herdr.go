@@ -372,6 +372,14 @@ func (h *Herdr) Interrupt(ctx context.Context, paneID string) error {
 	return h.SendKeys(ctx, paneID, "ctrl+c")
 }
 
+// TerminalLabels checks the real terminal unless the pane is synthetic.
+func (h *Herdr) TerminalLabels(ctx context.Context, paneID string) (map[string]string, error) {
+	if h.inner == nil || h.IsSynthetic(paneID) {
+		return nil, nil
+	}
+	return herdr.PaneLabels(ctx, h.inner, paneID)
+}
+
 // ListAgents implements supervisor.Herdr: the inner list (when there is
 // one and it answers) plus every synthetic pane, sorted by pane id.
 func (h *Herdr) ListAgents(ctx context.Context) ([]herdr.AgentInfo, error) {

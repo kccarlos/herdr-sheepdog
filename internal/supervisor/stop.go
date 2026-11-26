@@ -255,7 +255,10 @@ func (s *Supervisor) resolveStop(ctx context.Context) stopOutcome {
 				s.interrupted[p.PaneID] = sentAt
 				s.mu.Unlock()
 
-				err := s.herdr.Interrupt(ctx, p.PaneID)
+				err := s.refuseFactoryPane(ctx, p.PaneID)
+				if err == nil {
+					err = s.herdr.Interrupt(ctx, p.PaneID)
+				}
 
 				s.mu.Lock()
 				if err != nil {

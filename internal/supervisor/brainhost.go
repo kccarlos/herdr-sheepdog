@@ -492,6 +492,12 @@ func (h brainHost) sendInterrupt(ctx context.Context, paneID string, first bool)
 	ps := s.paneSend(paneID)
 	ps.Lock()
 	defer ps.Unlock()
+	if err := s.refuseFactoryPane(ctx, paneID); err != nil {
+		return "", err
+	}
+	if _, ok := s.store.Get(paneID); !ok {
+		return "", ErrNoSuchAgent
+	}
 
 	s.mu.Lock()
 	alias := s.sayOf(paneID)

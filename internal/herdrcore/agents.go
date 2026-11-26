@@ -19,6 +19,15 @@ func (b *Backend) ListAgents(ctx context.Context) ([]herdr.AgentInfo, error) {
 	return snap.Agents, nil
 }
 
+// TerminalLabels reads one terminal's labels, including shells still starting an agent.
+func (b *Backend) TerminalLabels(ctx context.Context, address string) (map[string]string, error) {
+	t, err := b.client.Get(ctx, address)
+	if errors.Is(err, hc.ErrNotFound) {
+		return nil, nil
+	}
+	return t.Labels, err
+}
+
 // GetAgent returns one agent by address or name. The error matches
 // herdr.ErrAgentNotFound when there is no such terminal or it is not a
 // live agent.

@@ -126,7 +126,7 @@ func taskFacts(t flow.Task, f flow.Facts, now time.Time) string {
 // differs from its default.
 func wakeMessage(s flow.State) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "Wake: %d task wake(s) wait on you.\n", len(s.Project.Wakes))
+	fmt.Fprintf(&b, "%s%d task wake(s) wait on you.\n", flow.CoordWakePromptPrefix, len(s.Project.Wakes))
 	for i, w := range s.Project.Wakes {
 		if i == maxFactsWakes {
 			fmt.Fprintf(&b, "- and %d more.\n", len(s.Project.Wakes)-i)
@@ -190,7 +190,8 @@ func (e *Engine) deliverWakesLocked(ctx context.Context, id string, s *flow.Stat
 				s.Project.CoordWakesInFlight = append(s.Project.CoordWakesInFlight, w)
 			}
 		}
-		s.Project.CoordWakeTurn = s.Project.Run.Turn
+		s.Project.CoordWakeRetried = slices.ContainsFunc(s.Project.CoordWakesInFlight, func(w flow.Wake) bool { return w.Retried })
+		s.Project.CoordWakeTurn, s.Project.CoordWakeActed = s.Project.Run.Turn, false
 	}
 	s.Project.Wakes, s.Project.CoordLastWakeAt = s.Project.Wakes[n:], now
 	e.commitLogLocked(id, s, LogLine{By: "engine", Rule: "J12", Asked: keys, Decision: fmt.Sprintf("delivered %d wake(s) to the coordinator", len(keys)), Why: "wakes held and the coordinator is idle"})

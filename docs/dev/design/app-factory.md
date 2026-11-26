@@ -963,6 +963,7 @@ is no docs PR at the end. Sizes are net lines without tests.
 | 1b | `feat(factory): the TaskView run and decision keys, and the factory object on ask cards` (keys into ws-contract.md) | 1a | ~90 |
 | 2 | `feat(window): the coordinator's live window, and one rail refusing rename, interrupt and close on factory panes` | 1a | ~120 |
 | 3 | `test(eval): a fake factory in the eval simulator` | 1a | ~220 |
+| 2b | `fix(factory): coordinator wakes without positive evidence (scrolled screen, Codex inferred mode, owner turn)` — state table first, design review, before 9 (split from 2, 2026-11-26) | 2 | ~100 |
 | 4 | `feat(brain): project rows, the tool helper, and board text in read_screen` (golden zero-project roster; scale-ten bar) | 1a, 3 | ~250 |
 | 5 | `feat(factory): Say behind prompt, the device say route, owner wakes first, and the coordinator prompt sentence` | 4 | ~210 |
 | 6 | `feat(supervisor): investigate on a project from its record` (with the Codex loopback check) | 4, 5 | ~150 |

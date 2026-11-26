@@ -45,6 +45,9 @@ func (h brainHost) CloseAgent(ctx context.Context, req brain.CloseRequest) (stri
 var _ brain.Closer = brainHost{}
 
 func (s *Supervisor) closeAgent(ctx context.Context, req brain.CloseRequest) (string, error) {
+	if err := s.refuseFactoryPane(ctx, req.PaneID); err != nil {
+		return "", err
+	}
 	row, ok := s.store.Get(req.PaneID)
 	if !ok {
 		return "", errors.New("that agent is gone")

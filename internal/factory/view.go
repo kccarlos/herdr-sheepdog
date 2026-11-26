@@ -181,6 +181,10 @@ func projectAlert(alerts map[string]flow.Alert) *ProjectAlert {
 	return &ProjectAlert{Kind: a.Kind, Cause: a.Cause, Fix: a.Fix}
 }
 
+func currentCoordinator(p flow.Project) bool {
+	return p.RunID != "" && flow.RunLive(p.RunID, p.Run)
+}
+
 func projectHeadOf(s flow.State) ProjectHead {
 	p := s.Project
 	h := ProjectHead{ID: p.ID, Name: ProjectName(p.ID, p.Folder), Goal: p.Goal, Folder: p.Folder,
@@ -190,7 +194,7 @@ func projectHeadOf(s flow.State) ProjectHead {
 	} else if p.Started {
 		h.State = "running"
 	}
-	if flow.RunLive(p.RunID, p.Run) {
+	if currentCoordinator(p) {
 		h.CoordinatorPane = p.RunID
 	}
 	for _, t := range s.Tasks {
@@ -334,11 +338,13 @@ func (e *Engine) initProjectHeads() {
 		e.projectHeadsMu.Lock()
 		defer e.projectHeadsMu.Unlock()
 		e.projectHeads = map[string]ProjectHead{}
+		e.projectPanes = map[string]map[string]Pane{}
 		entries, _ := e.readProjectDirs()
 		for _, ent := range entries {
 			if ent.IsDir() {
 				if s, err := LoadState(e.Paths.State(ent.Name())); err == nil {
 					e.projectHeads[ent.Name()] = projectHeadOf(s)
+					e.projectPanes[ent.Name()] = projectPanesOf(s)
 				}
 			}
 		}
@@ -364,11 +370,46 @@ func (e *Engine) ProjectName(id string) string {
 	return cmp.Or(e.projectHeads[id].Name, id)
 }
 
+// Pane describes a live terminal named by the factory's saved run records.
+type Pane struct {
+	Name, CLI, State   string
+	StateSince         time.Time
+	CurrentCoordinator bool
+}
+
+func projectPanesOf(s flow.State) map[string]Pane {
+	p := s.Project
+	if !currentCoordinator(p) {
+		return nil
+	}
+	info := Pane{Name: ProjectName(p.ID, p.Folder), CurrentCoordinator: true}
+	if r := p.Run; r != nil {
+		info.CLI, info.State, info.StateSince = r.CLI, r.State, r.StatusSince
+	}
+	return map[string]Pane{p.RunID: info}
+}
+
+// Pane looks up a run by terminal address using the project-head cache lock.
+func (e *Engine) Pane(id string) (Pane, bool) {
+	e.initProjectHeads()
+	e.projectHeadsMu.RLock()
+	defer e.projectHeadsMu.RUnlock()
+	var best Pane
+	var project string
+	found := false
+	for key, panes := range e.projectPanes {
+		if pane, ok := panes[id]; ok && (!found || key < project) {
+			best, project, found = pane, key, true
+		}
+	}
+	return best, found
+}
+
 func (e *Engine) publishProjectHead(id string, s flow.State, logLine bool) {
-	h := projectHeadOf(s)
+	h, panes := projectHeadOf(s), projectPanesOf(s)
 	e.projectHeadsMu.Lock()
 	changed := !reflect.DeepEqual(e.projectHeads[id], h)
-	e.projectHeads[id] = h
+	e.projectHeads[id], e.projectPanes[id] = h, panes
 	e.projectHeadsMu.Unlock()
 	if logLine || changed {
 		e.logEvent("factory.changed", map[string]string{"project": id})

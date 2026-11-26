@@ -465,11 +465,19 @@ func (c *termConn) open(m termproto.Message) {
 			return
 		}
 		kind = "shell"
-	} else if _, ok := c.t.s.deps.Store.Get(pane); !ok {
+	} else if !c.t.s.termPaneAvailable(pane) {
 		c.refuse(m.Ch, pane, termproto.RefusedNotTracked)
 		return
 	}
 	c.openChan(m, pane, kind)
+}
+
+func (s *Server) termPaneAvailable(pane string) bool {
+	if w, ok := s.deps.Supervisor.(interface{ WindowAvailable(string) bool }); ok {
+		return w.WindowAvailable(pane)
+	}
+	_, ok := s.deps.Store.Get(pane)
+	return ok
 }
 
 // openChan opens channel m.Ch on pane (an agent's or a phone shell's).

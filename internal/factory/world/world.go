@@ -541,6 +541,45 @@ func agyTrustDrawing(text string) bool {
 	return false
 }
 
+// retryCoordWake reports an interruption or a newer submitted non-wake prompt.
+func retryCoordWake(cli, clean string) bool {
+	prompt := map[string]string{"claude": "❯", CodexCLI: "›", AgyCLI: ">"}[cli]
+	if prompt == "" {
+		return false
+	}
+	lines := strings.Split(strings.TrimRight(clean, "\n \t"), "\n")
+	if anchor := uiAnchor(cli, lines); anchor >= 0 {
+		lines = lines[:anchor]
+	} else if strings.HasPrefix(lines[len(lines)-1], prompt) {
+		lines = lines[:len(lines)-1]
+	}
+	for i := len(lines) - 1; i >= 0; i-- {
+		line := lines[i]
+		switch cli {
+		case CodexCLI:
+			if strings.HasPrefix(strings.TrimSpace(line), "■ Conversation interrupted") {
+				return true
+			}
+			if !codexPromptRe.MatchString(line) {
+				continue
+			}
+		case AgyCLI, "claude":
+			marker := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(line), "⎿"))
+			if marker == "Interrupted · What should Antigravity CLI do instead?" && cli == AgyCLI ||
+				marker == "Interrupted · What should Claude do instead?" && cli == "claude" {
+				return true
+			}
+			if !strings.HasPrefix(line, prompt+" ") || cli == AgyCLI && i > 0 && !isRuleLine(lines[i-1]) {
+				continue
+			}
+		}
+		text := strings.TrimSpace(strings.TrimPrefix(line, prompt))
+		count, ok := strings.CutPrefix(text, flow.CoordWakePromptPrefix)
+		return !ok || count == "" || count[0] < '0' || count[0] > '9'
+	}
+	return false
+}
+
 // ObserveRun reads rec's terminal and screen from herdr-core and emits the events for one pass (design.md 5, 7.3).
 func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, codexHome ...string) ([]flow.RunEvent, error) {
 	if rec.State == flow.PhaseEnded {
@@ -634,7 +673,8 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, code
 		}
 	}
 	// An empty hash marks an unavailable screen; this tick cannot prove the run stayed quiet.
-	return append(evs, flow.RunEvent{Kind: flow.EvTick, Screen: cls, ScreenHash: hash, LimitLine: limitLine, Tail: tail, Model: t.Labels["sheepdog.model"]}), nil
+	return append(evs, flow.RunEvent{Kind: flow.EvTick, Screen: cls, ScreenHash: hash, LimitLine: limitLine, Tail: tail, Model: t.Labels["sheepdog.model"],
+		RetryCoordWake: rec.Role == flow.RoleCoordinator && nonEmpty && retryCoordWake(rec.CLI, clean)}), nil
 }
 
 // ActRun executes one run-table act against herdr-core.

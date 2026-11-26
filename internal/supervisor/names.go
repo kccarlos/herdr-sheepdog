@@ -2,7 +2,6 @@ package supervisor
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"strings"
 	"sync"
@@ -167,9 +166,12 @@ func (s *Supervisor) stopNames() {
 // "kvoice explainer" was refused by herdr while the daemon reported the
 // rename done).
 func (s *Supervisor) rename(ctx context.Context, paneID, name string) (string, error) {
+	if err := s.refuseFactoryPane(ctx, paneID); err != nil {
+		return "", err
+	}
 	row, ok := s.store.Get(paneID)
 	if !ok {
-		return "", errors.New("that agent is gone")
+		return "", ErrNoSuchAgent
 	}
 	old := state.Say(row)
 	name = strings.Join(strings.Fields(name), " ")
