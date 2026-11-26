@@ -316,4 +316,30 @@ final class FactoryProjectBoardTests: XCTestCase {
             )
         }
     }
+
+    /// PR 9b fix-round: whitespace-only `coordinator_pane` values must be treated
+    /// like no pane across `FactoryProjectBoard` (`showsCoordinatorButton`, `sayBox`)
+    /// and `FactoryCoordinatorWindow` (`isLive`).
+    func testWhitespaceCoordinatorPaneTreatedAsNotRunningOnBoardAndSayBox() throws {
+        for rawPane in ["", "   ", " \n\t "] {
+            let blankHead = try head(state: .running, coordinatorPane: rawPane)
+            let board = FactoryProjectBoard(head: blankHead, tasks: [], now: now)
+            let window = FactoryCoordinatorWindow(head: blankHead)
+
+            XCTAssertFalse(window.isLive, "window.isLive for \(rawPane.debugDescription)")
+            XCTAssertFalse(board.showsCoordinatorButton, "showsCoordinatorButton must be false for whitespace pane \(rawPane.debugDescription)")
+            XCTAssertEqual(board.showsCoordinatorButton, window.isLive)
+
+            let box = board.sayBox(text: "Wait on T11")
+            XCTAssertFalse(box.hasCoordinator, "sayBox.hasCoordinator must be false for whitespace pane \(rawPane.debugDescription)")
+            XCTAssertEqual(box.defaultNote, "The notes coordinator is not running. It gets this when it is back.")
+            XCTAssertEqual(box.sentStatus, "The notes coordinator is not running. It gets this when it is back.")
+        }
+
+        let paddedHead = try head(state: .running, coordinatorPane: "  coord-notes-1  ")
+        let paddedBoard = FactoryProjectBoard(head: paddedHead, tasks: [], now: now)
+        XCTAssertTrue(paddedBoard.showsCoordinatorButton)
+        XCTAssertEqual(FactoryCoordinatorWindow(head: paddedHead).coordinatorPane, "coord-notes-1")
+        XCTAssertEqual(paddedBoard.sayBox(text: "Wait on T11").sentStatus, "Told the notes factory.")
+    }
 }
