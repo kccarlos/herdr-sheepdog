@@ -6,7 +6,11 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/factory"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 )
 
 // Simulated-user scenarios (`sheepdog eval sim`, after pipecat's
@@ -63,6 +67,9 @@ type SimScenario struct {
 	Workday *Workday `json:"workday,omitempty"`
 	// Agents are the workers, in roster order.
 	Agents []SimAgent `json:"agents"`
+	// Factory are fake factory projects (inject.Factory): an agents list
+	// may then be empty.
+	Factory []SimProject `json:"factory,omitempty"`
 	// Events change a worker on cue.
 	Events []SimEvent `json:"events,omitempty"`
 	// Notes seed the user notes (USER.md ledger).
@@ -103,6 +110,21 @@ type SimAgent struct {
 	// (phone test 2026-10-04, "codex timed out" eleven times). Answer is
 	// then ignored.
 	CLIHangs bool `json:"cli_hangs,omitempty"`
+}
+
+// SimProject is one fake factory project, in the real factory shapes. A
+// running project with a coordinator_pane gets a coordinator terminal
+// (labelled as the factory labels it) in that coordinator state.
+type SimProject struct {
+	factory.ProjectHead
+	CoordinatorKind   string             `json:"coordinator_kind,omitempty"`
+	CoordinatorState  string             `json:"coordinator_state,omitempty"`
+	CoordinatorScreen string             `json:"coordinator_screen,omitempty"`
+	Tasks             []factory.TaskView `json:"tasks,omitempty"`
+	Log               []factory.LogEntry `json:"log,omitempty"`
+	Asks              []flow.Ask         `json:"asks,omitempty"`
+	// Answer is what an investigation of the project's folder finds.
+	Answer string `json:"answer,omitempty"`
 }
 
 // SimEvent changes a worker's screen and state when its trigger fires.
@@ -269,8 +291,18 @@ func (s SimScenario) validate() error {
 	if strings.TrimSpace(s.Goal) == "" {
 		return fmt.Errorf("no goal")
 	}
-	if len(s.Agents) == 0 {
-		return fmt.Errorf("no agents")
+	if len(s.Agents) == 0 && len(s.Factory) == 0 {
+		return fmt.Errorf("no agents and no factory projects")
+	}
+	projects := map[string]bool{}
+	for _, p := range s.Factory {
+		if p.ID == "" || projects[p.ID] {
+			return fmt.Errorf("factory project id %q empty or repeated", p.ID)
+		}
+		projects[p.ID] = true
+		if !slices.Contains([]string{"running", "stopped", "finished"}, p.State) || !validState(p.CoordinatorState) {
+			return fmt.Errorf("factory project %s: state %q, coordinator state %q", p.ID, p.State, p.CoordinatorState)
+		}
 	}
 	switch s.Language {
 	case "", "en", "zh":
