@@ -171,10 +171,12 @@ docs/dev/design/app-factory.md section 4): `DaemonState.factory`
 (`FactoryProjectHead`, nil from a daemon with no projects),
 `PendingAction.factory` (`FactoryAskMeta` on a `fask-` card), and the reads
 `DaemonClient.factoryProjects()`, `factoryGraph(projectID:)` and
-`factoryAsks()`. Decoding is lenient: an unknown project state reads as
-`.unknown` and a malformed factory key never fails `/api/state`. Unlike the
-other routes, a 404 or 503 here is `DaemonError.rejected` with the daemon's
-words, not "an older daemon". `factory.changed` re-reads `/api/state`
+`factoryAsks()`. An unknown project state word reads as `.unknown`.
+`DaemonState.factory` is nil for an omitted or non-array value and skips
+malformed heads in an array. A card with malformed factory metadata keeps the
+card and reads `PendingAction.factory` as nil. The factory routes return
+`DaemonError.rejected` with the daemon's message for a 404 or 503.
+`factory.changed` re-reads `/api/state`
 (`AttentionEvents.refreshesState`).
 
 ## Events

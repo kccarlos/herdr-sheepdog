@@ -4,9 +4,8 @@ import Foundation
 /// `/api/state`'s `factory`, the `factory` object on a `fask-` question,
 /// and the read-only views the project page reads. Go's `internal/factory`
 /// (`ProjectHead`, `ProjectView`, `GraphView`) and `internal/web/factory.go`
-/// are the source of truth (docs/dev/ws-contract.md "Factory"). A daemon
-/// without the factory omits every key here, and an unknown value never
-/// breaks `/api/state`.
+/// are the source of truth (docs/dev/ws-contract.md "Factory").
+/// At the state boundary, malformed factory heads and card metadata are dropped.
 
 /// A project's state word. Anything else reads as `.unknown`, as `Agent.State`.
 public enum FactoryProjectState: String, Codable, Equatable, Sendable {
@@ -37,7 +36,7 @@ public struct FactoryProjectHead: Codable, Equatable, Identifiable, Sendable {
     public var name: String
     public var goal: String
     public var state: FactoryProjectState
-    public var counts: [String: Int]
+    @FactoryDefaultEmpty public var counts: [String: Int]
     public var folder: String?
     /// Left out by the daemon when no coordinator runs.
     public var coordinatorPane: String?
@@ -47,18 +46,6 @@ public struct FactoryProjectHead: Codable, Equatable, Identifiable, Sendable {
         case id, name, goal, state, counts, folder, alert
         case coordinatorPane = "coordinator_pane"
     }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decode(String.self, forKey: .id)
-        name = try c.decodeIfPresent(String.self, forKey: .name) ?? id
-        goal = try c.decodeIfPresent(String.self, forKey: .goal) ?? ""
-        state = (try? c.decodeIfPresent(FactoryProjectState.self, forKey: .state)) ?? .unknown
-        counts = (try? c.decodeIfPresent([String: Int].self, forKey: .counts)) ?? [:]
-        folder = try c.decodeIfPresent(String.self, forKey: .folder)
-        coordinatorPane = try c.decodeIfPresent(String.self, forKey: .coordinatorPane)
-        alert = try? c.decodeIfPresent(FactoryProjectAlert.self, forKey: .alert)
-    }
 }
 
 /// The `factory` object on a `fask-` question card: its project (the id),
@@ -66,9 +53,9 @@ public struct FactoryProjectHead: Codable, Equatable, Identifiable, Sendable {
 public struct FactoryAskMeta: Codable, Equatable, Sendable {
     public var project: String
     public var task: String?
-    public var kind: String?
+    public var kind: String
 
-    public init(project: String, task: String? = nil, kind: String? = nil) {
+    public init(project: String, task: String? = nil, kind: String) {
         self.project = project
         self.task = task
         self.kind = kind
@@ -105,13 +92,13 @@ public struct FactoryProject: Decodable, Equatable, Identifiable, Sendable {
         folder = try c.decodeIfPresent(String.self, forKey: .folder)
         repoURL = try c.decodeIfPresent(String.self, forKey: .repoURL)
         goal = try c.decodeIfPresent(String.self, forKey: .goal) ?? ""
-        state = (try? c.decodeIfPresent(FactoryProjectState.self, forKey: .state)) ?? .unknown
+        state = try c.decodeIfPresent(FactoryProjectState.self, forKey: .state) ?? .unknown
         running = try c.decodeIfPresent(Bool.self, forKey: .running) ?? false
         live = try c.decodeIfPresent(Bool.self, forKey: .live)
         status = try c.decodeIfPresent(String.self, forKey: .status)
-        counts = (try? c.decodeIfPresent([String: Int].self, forKey: .counts)) ?? [:]
+        counts = try c.decodeIfPresent([String: Int].self, forKey: .counts) ?? [:]
         coordinatorPane = try c.decodeIfPresent(String.self, forKey: .coordinatorPane)
-        alert = try? c.decodeIfPresent(FactoryProjectAlert.self, forKey: .alert)
+        alert = try c.decodeIfPresent(FactoryProjectAlert.self, forKey: .alert)
         error = try c.decodeIfPresent(String.self, forKey: .error)
     }
 }
@@ -140,15 +127,15 @@ public struct FactoryTask: Decodable, Equatable, Identifiable, Sendable {
     public var brief: String?
     public var stage: String
     public var whyWaiting: String?
-    public var after: [String]
-    public var dependents: [String]
+    @FactoryDefaultEmpty public var after: [String]
+    @FactoryDefaultEmpty public var dependents: [String]
     public var layer: Int
     public var rounds: Int
     public var model: String?
     public var terminal: String?
     public var lastRule: String?
     public var lastDecision: String?
-    public var steps: [FactoryStep]
+    @FactoryDefaultEmpty public var steps: [FactoryStep]
     /// The live run's role, CLI and start; nil when no run is live.
     public var runRole: String?
     public var runCLI: String?
@@ -167,28 +154,6 @@ public struct FactoryTask: Decodable, Equatable, Identifiable, Sendable {
         case runCLI = "run_cli"
         case runStartedAt = "run_started_at"
         case lastActorDecision = "last_actor_decision"
-    }
-
-    public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        ref = try c.decode(String.self, forKey: .ref)
-        title = try c.decodeIfPresent(String.self, forKey: .title) ?? ref
-        brief = try c.decodeIfPresent(String.self, forKey: .brief)
-        stage = try c.decodeIfPresent(String.self, forKey: .stage) ?? ""
-        whyWaiting = try c.decodeIfPresent(String.self, forKey: .whyWaiting)
-        after = try c.decodeIfPresent([String].self, forKey: .after) ?? []
-        dependents = try c.decodeIfPresent([String].self, forKey: .dependents) ?? []
-        layer = try c.decodeIfPresent(Int.self, forKey: .layer) ?? 0
-        rounds = try c.decodeIfPresent(Int.self, forKey: .rounds) ?? 0
-        model = try c.decodeIfPresent(String.self, forKey: .model)
-        terminal = try c.decodeIfPresent(String.self, forKey: .terminal)
-        lastRule = try c.decodeIfPresent(String.self, forKey: .lastRule)
-        lastDecision = try c.decodeIfPresent(String.self, forKey: .lastDecision)
-        steps = try c.decodeIfPresent([FactoryStep].self, forKey: .steps) ?? []
-        runRole = try c.decodeIfPresent(String.self, forKey: .runRole)
-        runCLI = try c.decodeIfPresent(String.self, forKey: .runCLI)
-        runStartedAt = try? c.decodeIfPresent(Date.self, forKey: .runStartedAt)
-        lastActorDecision = try? c.decodeIfPresent(FactoryLogEntry.self, forKey: .lastActorDecision)
     }
 }
 
@@ -216,38 +181,51 @@ public struct FactorySettingChange: Codable, Equatable, Sendable {
 /// An open ask of `GET /api/factory/asks` (`flow.Ask` plus `command`).
 public struct FactoryAsk: Decodable, Equatable, Identifiable, Sendable {
     public var id: String
-    public var project: String
+    @FactoryDefaultEmpty public var project: String
     public var folder: String?
     public var kind: String
     public var gated: Bool
     public var question: String
-    public var options: [String]
+    @FactoryDefaultEmpty public var options: [String]
     public var recommend: String?
     public var task: String?
     public var set: FactorySettingChange?
     public var at: Date?
     public var status: String?
     public var command: String?
+}
 
-    enum CodingKeys: String, CodingKey {
-        case id, project, folder, kind, gated, question, options, recommend, task, set, at, status, command
-    }
+// Go can omit an ask's project and send null for nil collections.
+private protocol FactoryEmptyValue {
+    init()
+}
+
+extension Array: FactoryEmptyValue {}
+extension Dictionary: FactoryEmptyValue {}
+extension String: FactoryEmptyValue {}
+
+/// Supports synthesized decoding for fields where Go can send a nil collection or omit a value.
+@propertyWrapper
+public struct FactoryDefaultEmpty<Value: Decodable & Equatable & Sendable>: Decodable, Equatable, Sendable {
+    public var wrappedValue: Value
 
     public init(from decoder: Decoder) throws {
-        let c = try decoder.container(keyedBy: CodingKeys.self)
-        id = try c.decode(String.self, forKey: .id)
-        project = try c.decodeIfPresent(String.self, forKey: .project) ?? ""
-        folder = try c.decodeIfPresent(String.self, forKey: .folder)
-        kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? ""
-        gated = try c.decodeIfPresent(Bool.self, forKey: .gated) ?? false
-        question = try c.decodeIfPresent(String.self, forKey: .question) ?? ""
-        options = try c.decodeIfPresent([String].self, forKey: .options) ?? []
-        recommend = try c.decodeIfPresent(String.self, forKey: .recommend)
-        task = try c.decodeIfPresent(String.self, forKey: .task)
-        set = try? c.decodeIfPresent(FactorySettingChange.self, forKey: .set)
-        at = try? c.decodeIfPresent(Date.self, forKey: .at)
-        status = try c.decodeIfPresent(String.self, forKey: .status)
-        command = try c.decodeIfPresent(String.self, forKey: .command)
+        wrappedValue = try decoder.singleValueContainer().decode(Value.self)
+    }
+
+    fileprivate init(_ value: Value) { wrappedValue = value }
+}
+
+extension FactoryDefaultEmpty: Encodable where Value: Encodable {
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        try container.encode(wrappedValue)
+    }
+}
+
+private extension KeyedDecodingContainer {
+    func decode<Value: FactoryEmptyValue>(_ type: FactoryDefaultEmpty<Value>.Type, forKey key: Key) throws -> FactoryDefaultEmpty<Value> {
+        try decodeIfPresent(type, forKey: key) ?? FactoryDefaultEmpty(Value())
     }
 }
 

@@ -771,6 +771,34 @@ public struct DaemonState: Codable, Equatable, Sendable {
         self.conversationStartedAt = conversationStartedAt
     }
 
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        agents = try c.decode([Agent].self, forKey: .agents)
+        pendingAction = try c.decodeIfPresent(PendingAction.self, forKey: .pendingAction)
+        questions = try c.decodeIfPresent([PendingAction].self, forKey: .questions)
+        voice = try c.decode(VoiceInfo.self, forKey: .voice)
+        herdr = try c.decodeIfPresent(String.self, forKey: .herdr)
+        herdrBackend = try c.decodeIfPresent(String.self, forKey: .herdrBackend)
+        herdrBackends = try c.decodeIfPresent([String].self, forKey: .herdrBackends)
+        herdrBackendOverride = try c.decodeIfPresent(String.self, forKey: .herdrBackendOverride)
+        version = try c.decodeIfPresent(String.self, forKey: .version)
+        brain = try c.decodeIfPresent(BrainInfo.self, forKey: .brain)
+        voiceProvider = try c.decodeIfPresent(String.self, forKey: .voiceProvider)
+        voiceModel = try c.decodeIfPresent(String.self, forKey: .voiceModel)
+        conversationStartedAt = try c.decodeIfPresent(Date.self, forKey: .conversationStartedAt)
+        update = try c.decodeIfPresent(UpdateInfo.self, forKey: .update)
+        attentionCounts = try c.decodeIfPresent(AttentionCounts.self, forKey: .attentionCounts)
+        spaceMutes = try c.decodeIfPresent([SpaceMute].self, forKey: .spaceMutes)
+        if var heads = try? c.nestedUnkeyedContainer(forKey: .factory) {
+            factory = []
+            while !heads.isAtEnd {
+                // Advance past this entry before trying to decode it.
+                let entry = try heads.superDecoder()
+                if let head = try? FactoryProjectHead(from: entry) { factory?.append(head) }
+            }
+        }
+    }
+
     /// The open question of a pane: from `questions`, else the pending
     /// action when it is that pane's.
     public func question(for paneID: String) -> PendingAction? {
