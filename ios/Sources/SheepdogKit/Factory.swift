@@ -238,8 +238,7 @@ extension DaemonClient {
 
     /// `GET /api/factory/projects/{id}/graph`; the id is escaped as one path segment.
     public func factoryGraph(projectID: String) async throws -> FactoryGraphView {
-        let id = factoryPathSegment(projectID)
-        return try await factoryGet(FactoryGraphView.self, encodedPath: "/api/factory/projects/\(id)/graph", what: "the project graph")
+        try await factoryGet(FactoryGraphView.self, encodedPath: "/api/factory/projects/\(factoryPathSegment(projectID))/graph", what: "the project graph")
     }
 
     /// `GET /api/factory/asks` — the open asks.
@@ -249,17 +248,13 @@ extension DaemonClient {
     }
 
     /// Resume with the project's existing goal using the paired-device start route.
-    public func resumeFactory(folder: String, goal: String) async throws {
-        try await factoryPost("/api/factory/projects/start", ["folder": folder, "goal": goal])
-    }
+    public func resumeFactory(folder: String, goal: String) async throws { try await factoryPost("/api/factory/projects/start", ["folder": folder, "goal": goal]) }
 
     public func sayFactory(projectID: String, text: String) async throws {
         try await factoryPost("/api/factory/projects/\(factoryPathSegment(projectID))/say", ["text": text])
     }
 
-    public func stopFactory(projectID: String) async throws {
-        try await factoryPost("/api/factory/projects/stop", ["project": projectID])
-    }
+    public func stopFactory(projectID: String) async throws { try await factoryPost("/api/factory/projects/stop", ["project": projectID]) }
 
     private func factoryPathSegment(_ id: String) -> String {
         let allowed = CharacterSet.urlPathAllowed.subtracting(CharacterSet(charactersIn: "/%?#"))
@@ -268,11 +263,9 @@ extension DaemonClient {
 
     private func factoryPost(_ path: String, _ fields: [String: String]) async throws {
         struct Reply: Decodable { let ok: Bool }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = .withoutEscapingSlashes
-        let request = try request(encodedPath: path, method: "POST", body: encoder.encode(fields))
-        let reply = try await factoryReply(Reply.self, request: request, what: "the project action reply")
-        guard reply.ok else { throw DaemonError.malformed("the project action did not complete") }
+        let body = try JSONSerialization.data(withJSONObject: fields, options: .withoutEscapingSlashes)
+        let request = try request(encodedPath: path, method: "POST", body: body)
+        guard try await factoryReply(Reply.self, request: request, what: "the project action reply").ok else { throw DaemonError.malformed("the project action did not complete") }
     }
 
     /// One factory read. Unlike `sendJSON`, a 404 is not "an older daemon":

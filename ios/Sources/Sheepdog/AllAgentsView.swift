@@ -14,7 +14,7 @@ struct AllAgentsView: View {
     @State private var filter: AgentFilter = .all
 
     private var paneState: FlockPaneState {
-        model.flockPaneState(hasAgents: !model.agentsModel.factoryList.isEmpty)
+        model.flockPaneState
     }
 
     private var shown: [Agent] { model.flock.running.filter(filter.matches) }
@@ -41,7 +41,7 @@ struct AllAgentsView: View {
             }
             if paneState != .content, model.otherSnapshots.isEmpty {
                 FlockUnavailableView(state: paneState)
-            } else if shown.isEmpty, model.otherSnapshots.isEmpty, !model.agentsModel.factoryList.hasFactoryContent {
+            } else if shown.isEmpty, model.otherSnapshots.isEmpty {
                 ContentUnavailableView {
                     Label(filter.emptyText, systemImage: filter == .waiting ? "hand.raised" : "square.grid.2x2")
                 } actions: {
@@ -156,7 +156,6 @@ struct AllAgentsView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     let sections = model.sectionSnapshots
                     if sections.isEmpty {
-                        factoryLinks(model.fleet.current?.factoryHeads ?? [], on: model.currentComputerID)
                         sectioned(shown)
                     } else {
                         ForEach(sections) { computer in
@@ -178,7 +177,6 @@ struct AllAgentsView: View {
                             )
                             .padding(.top, computer.id == sections.first?.id ? 0 : 10)
                             if model.agentsModel.isComputerExpanded(computer.id) {
-                                if !offline { factoryLinks(computer.factoryHeads, on: computer.id) }
                                 if computer.isCurrent {
                                     sectioned(shown)
                                 } else if offline {
@@ -197,13 +195,6 @@ struct AllAgentsView: View {
             .onAppear { scrollToFocus(proxy) }
             .onChange(of: model.navigation.focusedAgent) { _, _ in scrollToFocus(proxy) }
             .onChange(of: renderedFocusToken) { _, _ in scrollToFocus(proxy) }
-        }
-    }
-
-    private func factoryLinks(_ heads: [FactoryProjectHead], on computer: String) -> some View {
-        ForEach(heads) { head in
-            NavigationLink(head.name) { FactoryProjectView(initialHead: head, computerID: computer) }
-            .accessibilityIdentifier("flock.factory.\(head.id)")
         }
     }
 

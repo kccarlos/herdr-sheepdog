@@ -78,12 +78,16 @@ public struct FactoryAgentsList: Equatable, Sendable {
     public var hasFactoryContent: Bool { !items.isEmpty || !factoryAsks.isEmpty }
     public var isEmpty: Bool { agents.isEmpty && !hasFactoryContent }
 
-    public static func resumeErrorMessage(_ error: Error, computerName: String) -> String {
-        if case .rejected(status: 403, message: "proof_required") = error as? DaemonError {
-            return "\(computerName) no longer knows this phone. Pair this phone again in Settings ▸ \(computerName), then press Resume again."
-        }
-        return RequestFailure(error, linkUsable: true, name: computerName).message
+    public static func resumeErrorMessage(_ error: Error, computerName: String, linkUsable: Bool = true) -> String {
+        factoryActionError(error, computerName: computerName, linkUsable: linkUsable, retry: "press Resume again")
     }
+}
+
+func factoryActionError(_ error: Error, computerName: String, linkUsable: Bool, prefix: String = "", retry: String) -> String {
+    if case .rejected(status: 403, message: "proof_required") = error as? DaemonError {
+        return "\(prefix)\(computerName) no longer knows this phone. Pair this phone again in Settings ▸ \(computerName), then \(retry)."
+    }
+    return RequestFailure(error, linkUsable: linkUsable, name: computerName).message
 }
 
 public struct FactoryAskCardPresentation: Equatable, Sendable {

@@ -177,7 +177,10 @@ malformed heads in an array. A card with malformed factory metadata keeps the
 card and reads `PendingAction.factory` as nil. The factory routes return
 `DaemonError.rejected` with the daemon's message for a 404 or 503.
 `factory.changed` re-reads `/api/state`
-(`AttentionEvents.refreshesState`).
+(`AttentionEvents.refreshesState`). `ComputerModel.factoryChanges` also
+tracks these events by project so an open board can reload its graph.
+`DaemonClient.sayFactory` and `stopFactory` send paired-device requests
+through the originating computer's action runner.
 
 ## Events
 
@@ -341,7 +344,9 @@ accessibility text sizes. The voice capsule stays in place.
   The Agents badge counts each open factory ask or stuck coordinator once.
   Factory asks use the same answer route and tap phases as ordinary
   questions. Resume sends the existing goal to the paired-device start
-  route.
+  route. On iPhone, tapping a head opens `FactoryProjectView` on that
+  computer. `FactoryProjectBoard` and `FactorySayBox` present the tasks,
+  open asks, instruction status and Stop or Resume controls.
 - **Agent window** (`AgentScreenView`). "Open window" on an Agents card
   (a `NavigationLink` to `AgentWindowRoute` on the main `NavigationStack`),
   or in the sheet behind a strip chip, pushes the agent's live terminal;
