@@ -353,6 +353,12 @@ Mac panel.
   It keeps Esc, Control-C and raw typing, and leaves out the agent menu,
   **Stop** and **Attach**. If the coordinator goes away while the window is
   open, the window shows the project's status and a button back to its page.
+- **Factory settings.** Tap **Settings** on a project's page (running,
+  stopped or finished) to review its settings and per-role models. Every
+  change is proposed to the daemon and read back as a confirmation ask
+  (**Save** or **Keep current**), never applied directly; model rules
+  (such as keeping reviewers distinct from the worker) are enforced by the
+  daemon.
 - **Cards.** Ask for a list or the details ("show me the failing tests",
   "show me what auth is asking") while the app is open on the conversation,
   and the orchestrator puts them on your screen: a card with a table, a

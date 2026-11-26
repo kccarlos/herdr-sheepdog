@@ -10,6 +10,7 @@ struct FactoryProjectView: View {
     @State private var text = ""
     @State private var feedback: (message: String, color: Color)?
     @State private var showsCoordinator = false
+    @State private var showsSettings = false
     @State private var showAsks = false
 
     private var computer: ComputerModel? { model.fleet.model(computerID) }
@@ -26,6 +27,9 @@ struct FactoryProjectView: View {
         }
         .navigationDestination(isPresented: $showsCoordinator) {
             FactoryCoordinatorView(initialHead: head, computerID: computerID) { showAsks = true }
+        }
+        .navigationDestination(isPresented: $showsSettings) {
+            FactorySettingsView(initialHead: head, computerID: computerID, onGone: projectGone)
         }
     }
 
@@ -44,11 +48,12 @@ struct FactoryProjectView: View {
                 let board = FactoryProjectBoard(head: head, tasks: tasks, asks: computer.questions, computerName: name, live: live)
                 VStack(alignment: .leading, spacing: 12) {
                     FactoryHeadCard(item: board.summary, computer: computer.snapshot, dialog: nil, answer: { _, _ in }, project: board, onGone: projectGone)
-                    if board.showsCoordinatorButton {
-                        Button("Coordinator") { showsCoordinator = true }
-                            .buttonStyle(.bordered).controlSize(.large)
-                            .accessibilityLabel(board.coordinatorAccessibilityLabel)
-                            .accessibilityIdentifier("factoryProject.coordinator")
+                    OptionFlow(spacing: 8) {
+                        if board.showsCoordinatorButton {
+                            Button("Coordinator") { showsCoordinator = true }.buttonStyle(.bordered).controlSize(.large)
+                                .accessibilityLabel(board.coordinatorAccessibilityLabel).accessibilityIdentifier("factoryProject.coordinator")
+                        }
+                        Button("Settings") { showsSettings = true }.buttonStyle(.bordered).controlSize(.large).accessibilityIdentifier("factoryProject.settings")
                     }
                     composer(board, on: computer)
                     if !board.openAsks.isEmpty {

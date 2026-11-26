@@ -195,6 +195,57 @@ public struct FactoryAsk: Decodable, Equatable, Identifiable, Sendable {
     public var command: String?
 }
 
+/// One row of `GET /api/factory/{projects/{id}/,}settings` (Go `flow.SettingRow`).
+public struct FactorySettingRow: Decodable, Equatable, Identifiable, Sendable {
+    public var name, label, value, defaultValue: String
+    public var min, max: Int
+    @FactoryDefaultEmpty public var allowed: [String]
+    @FactoryDefaultEmpty public var clis: [String]
+    @FactoryDefaultEmpty public var models: [String: [String]]
+    public var problem, note: String?
+    @FactoryDefaultEmpty public var top: Bool
+    public var id: String { name }
+    public var isModels: Bool { !clis.isEmpty }
+    public var isChoice: Bool { !isModels && !allowed.isEmpty }
+    public var isNumber: Bool { !isModels && !isChoice && max >= min && (min != 0 || max != 0) }
+    public var isChanged: Bool { value != defaultValue && problem == nil }
+    public var displayDefault: String { defaultValue.nonEmpty ?? "not set" }
+    public var displayValue: String { isModels ? FactoryModelCandidate.parse(value).map { "\($0.cli) · \($0.model) · \($0.effort)" }.joined(separator: ", ").nonEmpty ?? "not set" : value.nonEmpty ?? "not set" }
+    public var metaLine: String {
+        if isModels { return "default \(FactoryModelCandidate.parse(defaultValue).map { "\($0.cli)/\($0.model)/\($0.effort)" }.joined(separator: " then ").nonEmpty ?? "not set")" }
+        if isNumber { return "default \(displayDefault) · allowed \(min)–\(max)" }
+        return isChoice ? "default \(displayDefault) · allowed \(allowed.map { $0.nonEmpty ?? "not set" }.joined(separator: ", "))" : "default \(displayDefault)"
+    }
+    public var storedProblemMessage: String? {
+        problem?.nonEmpty.map { isNumber ? "The stored value \(value.nonEmpty ?? "not set") is not allowed (allowed \(min)–\(max)). Change it before the next start." : "\($0). Change it before the next start." }
+    }
+    public static func errorMessage(_ error: Error, computerName: String, linkUsable: Bool = true) -> String {
+        if case .rejected(403, "proof_required") = error as? DaemonError { return "Not changed: \(computerName) no longer knows this phone. Pair this phone again in Settings ▸ \(computerName), then try again." }
+        if case let .rejected(_, msg) = error as? DaemonError, !msg.isEmpty { return msg }
+        return RequestFailure(error, linkUsable: linkUsable, name: computerName).message
+    }
+    enum CodingKeys: String, CodingKey { case name, label, value, min, max, allowed, clis, models, problem, note, top; case defaultValue = "default" }
+}
+
+/// One CLI/model/effort candidate in a `models.<role>` setting value.
+public struct FactoryModelCandidate: Equatable, Sendable {
+    public var cli, model, effort: String
+    public static let efforts = ["low", "medium", "high"]
+    public init(cli: String, model: String, effort: String = "medium") { self.cli = cli; self.model = model; self.effort = effort }
+    public static func parse(_ raw: String) -> [FactoryModelCandidate] {
+        raw.split(separator: ",").compactMap { part in
+            let s = part.trimmingCharacters(in: .whitespacesAndNewlines); guard !s.isEmpty else { return nil }
+            let p = s.split(separator: "/", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
+            return p.count >= 3 ? .init(cli: p[0], model: p.dropFirst().dropLast().joined(separator: "/"), effort: p.last!.nonEmpty ?? "medium") : .init(cli: "", model: s)
+        }
+    }
+    public static func format(_ candidates: [FactoryModelCandidate]) -> String { candidates.map { "\($0.cli.trimmed)/\($0.model.trimmed)/\($0.effort.trimmed)" }.joined(separator: ", ") }
+    public static func ordinal(_ index: Int) -> String {
+        let w = ["first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth"]
+        return index < w.count ? "\(w[index]) choice" : "#\(index + 1) choice"
+    }
+}
+
 // Go can omit an ask's project and send null for nil collections.
 private protocol FactoryEmptyValue {
     init()
@@ -203,6 +254,7 @@ private protocol FactoryEmptyValue {
 extension Array: FactoryEmptyValue {}
 extension Dictionary: FactoryEmptyValue {}
 extension String: FactoryEmptyValue {}
+extension Bool: FactoryEmptyValue {}
 
 /// Supports synthesized decoding for fields where Go can send a nil collection or omit a value.
 @propertyWrapper
@@ -245,6 +297,22 @@ extension DaemonClient {
     public func factoryAsks() async throws -> [FactoryAsk] {
         struct Reply: Decodable { let asks: [FactoryAsk] }
         return try await factoryGet(Reply.self, encodedPath: "/api/factory/asks", what: "the ask list").asks
+    }
+
+    /// `GET /api/factory/settings` or `GET /api/factory/projects/{id}/settings`.
+    public func factorySettings(projectID: String? = nil) async throws -> [FactorySettingRow] {
+        struct Reply: Decodable { let rows: [FactorySettingRow] }
+        let path = projectID.flatMap { $0.isEmpty ? nil : "/api/factory/projects/\(factoryPathSegment($0))/settings" } ?? "/api/factory/settings"
+        return try await factoryGet(Reply.self, encodedPath: path, what: "the settings").rows
+    }
+
+    /// `POST /api/factory/projects/{id}/settings`: proposes a change as a read-back `rule` ask.
+    public func proposeFactorySetting(projectID: String, name: String, value: String) async throws -> FactoryAsk {
+        struct Reply: Decodable { let ok: Bool; let ask: FactoryAsk }
+        let body = try JSONSerialization.data(withJSONObject: ["name": name, "value": value], options: .withoutEscapingSlashes)
+        let reply = try await factoryReply(Reply.self, request: try request(encodedPath: "/api/factory/projects/\(factoryPathSegment(projectID))/settings", method: "POST", body: body), what: "the setting proposal")
+        guard reply.ok else { throw DaemonError.malformed("the setting proposal did not complete") }
+        return reply.ask
     }
 
     /// Resume with the project's existing goal using the paired-device start route.
