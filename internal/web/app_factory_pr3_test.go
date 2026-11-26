@@ -3,6 +3,7 @@ package web
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"maps"
 	"net/http"
 	"slices"
@@ -17,9 +18,28 @@ import (
 )
 
 var (
-	_ Factory      = (*inject.Factory)(nil)
 	_ factoryAsker = (*inject.Factory)(nil)
+	_ interface {
+		Projects() []factory.ProjectView
+		ProjectHeads() []factory.ProjectHead
+		ProjectName(string) string
+		Graph(string) (factory.GraphView, error)
+		Start(string, string, int) error
+		Stop(string) error
+	} = (*inject.Factory)(nil)
 )
+
+// injectWebFactory adapts *inject.Factory to web.Factory without requiring the
+// simulator fake itself to carry HTTP-only Report or LogLines methods.
+type injectWebFactory struct{ *inject.Factory }
+
+func (injectWebFactory) LogLines(string, int, string, bool) ([]factory.LogEntry, error) {
+	return nil, factory.ErrProjectNotFound
+}
+
+func (injectWebFactory) Report(string, string, json.RawMessage) error {
+	return &factory.Refusal{Code: "invalid_report", Why: "stub"}
+}
 
 type fnLogger func(source, typ, pane string, payload any)
 
@@ -27,11 +47,12 @@ func (f fnLogger) Log(s, typ, p string, pl any) { f(s, typ, p, pl) }
 
 // Pins app-factory.md §3.2, §4, §5.3 & PR 1 shapes: inject.Factory wired into
 // web.Server serves /api/state factory list (omitted when empty), fask- cards
-// with project name + factory meta, /graph TaskView steps, and factory.changed.
+// with project name + factory meta (including asks opened without explicit Gated),
+// /graph TaskView steps, and factory.changed.
 func TestFakeFactoryWebStateGraphAskCardAndEvents(t *testing.T) {
 	empty := inject.NewFactory(nil)
 	h0 := newHarness(t, harnessOpts{factory: empty})
-	h0.srv.deps.Factory = empty
+	h0.srv.deps.Factory = injectWebFactory{empty}
 	if got := getState(t, h0); got["factory"] != nil {
 		t.Fatalf("empty fake factory leaked factory = %v", got["factory"])
 	}
@@ -45,13 +66,13 @@ func TestFakeFactoryWebStateGraphAskCardAndEvents(t *testing.T) {
 	fk.SetProject(inject.FactoryProject{
 		ProjectHead: factory.ProjectHead{ID: "proj-1a2b3c4d", Folder: "/work/notes", Goal: "Notes", State: "running", CoordinatorPane: "coord-notes-1", Alert: &factory.ProjectAlert{Kind: flow.AlertAgentsDown, Cause: "signed out", Fix: "sign in"}},
 		Tasks:       []factory.TaskView{{Ref: "T1", Title: "tags", Stage: "working", RunRole: flow.RoleWorker, RunCLI: "codex", RunStartedAt: t0, LastActorDecision: &factory.LogEntry{At: t0, By: "coordinator", Decision: "sent back", Why: "case-insensitive"}, Steps: []factory.StepView{{Name: "planned", State: "done"}, {Name: "implementing", State: "now"}}}},
-		Asks:        []flow.Ask{{ID: "ask-1", Project: "proj-1a2b3c4d", Task: "T1", Kind: flow.KindDelete, Gated: true, Question: "Delete old notes table?", Options: []string{"Delete", "Keep"}, Recommend: "Keep", At: t0, Status: flow.AskStatusOpen}},
+		Asks:        []flow.Ask{{ID: "ask-1", Project: "proj-1a2b3c4d", Task: "T1", Kind: flow.KindDelete, Question: "Delete old notes table?", Options: []string{"Delete", "Keep"}, Recommend: "Keep", At: t0}},
 	})
 	h := newHarness(t, harnessOpts{factory: fk})
-	logTo, h.srv.deps.Factory = h.log, fk
+	logTo, h.srv.deps.Factory = h.log, injectWebFactory{fk}
 	startSupervisorRun(t, h)
 	var st, card map[string]any
-	waitFor(t, time.Second, func() bool {
+	waitFor(t, 400*time.Millisecond, func() bool {
 		st = getState(t, h)
 		for _, raw := range st["questions"].([]any) {
 			if m := raw.(map[string]any); m["id"] == "fask-ask-1" {
@@ -74,6 +95,16 @@ func TestFakeFactoryWebStateGraphAskCardAndEvents(t *testing.T) {
 	if !strings.Contains(strings.ToLower(ag), "notes") || strings.Contains(ag, "proj-1a2b3c4d") || fm["project"] != "proj-1a2b3c4d" || fm["task"] != "T1" || fm["kind"] != flow.KindDelete {
 		t.Errorf("fask card agent=%q factory=%v", ag, fm)
 	}
+	// An ask opened dynamically without explicit Gated/Status must also surface.
+	fk.OpenAsk(flow.Ask{ID: "ask-2", Project: "proj-1a2b3c4d", Task: "T2", Kind: flow.KindRelease, Question: "Tag v1?", Options: []string{"Tag", "Wait"}, Recommend: "Wait", At: t0.Add(time.Second)})
+	waitFor(t, 400*time.Millisecond, func() bool {
+		for _, raw := range getState(t, h)["questions"].([]any) {
+			if m := raw.(map[string]any); m["id"] == "fask-ask-2" {
+				return true
+			}
+		}
+		return false
+	}, "fask-ask-2 card from OpenAsk")
 	var graph factory.GraphView
 	if code := h.getJSON("/api/factory/projects/proj-1a2b3c4d/graph", &graph); code != http.StatusOK || len(graph.Tasks) != 1 || len(graph.Tasks[0].Steps) != 2 || graph.Tasks[0].RunCLI != "codex" || graph.Tasks[0].LastActorDecision == nil {
 		t.Fatalf("GET graph = (%d, %+v)", code, graph)
