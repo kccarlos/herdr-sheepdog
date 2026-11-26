@@ -22,6 +22,17 @@ var ErrProjectNotFound = errors.New("factory project not found")
 
 const DefaultLogLimit, MaxLogLimit = 50, 500
 
+// CoordinatorProjectLog selects coordinator entries without a task in LogLines.
+const CoordinatorProjectLog = "@coordinator"
+
+// MatchLogTask matches the LogLines task selector against an entry.
+func MatchLogTask(filter, task, by string) bool {
+	if filter == CoordinatorProjectLog {
+		return task == "" && by == flow.RoleCoordinator
+	}
+	return filter == "" || filter == task
+}
+
 type ProjectView struct {
 	Name            string         `json:"name"`
 	CoordinatorPane string         `json:"coordinator_pane,omitempty"`
@@ -424,13 +435,16 @@ func (e *Engine) Graph(project string) (GraphView, error) {
 	return GraphViewOf(s, logs), nil
 }
 
+// ProjectLogPath locates the log for a known project ID.
+func (e *Engine) ProjectLogPath(id string) string { return e.Paths.Log(id) }
+
 func (e *Engine) LogLines(project string, n int, task string, observations bool) ([]LogEntry, error) {
 	_, logs, err := e.loadProjectCopy(project)
 	if err != nil {
 		return nil, err
 	}
 	if task != "" {
-		logs = slices.DeleteFunc(logs, func(l LogLine) bool { return l.Task != task })
+		logs = slices.DeleteFunc(logs, func(l LogLine) bool { return !MatchLogTask(task, l.Task, l.By) })
 	}
 	return LogView(logs, n, observations), nil
 }

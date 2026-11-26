@@ -462,6 +462,8 @@ type InvestigationInfo struct {
 type AgentInfo struct {
 	PaneID string
 	Alias  string
+	// Project marks a factory contact rather than a terminal.
+	Project bool
 	// Spoken is the name the user hears and says (docs/dev/roles.md
 	// "Agent names"): the orchestrator speaks it verbatim, while tool calls
 	// take the alias. SpokenWas is its previous spoken name while the

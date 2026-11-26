@@ -2,7 +2,8 @@ import SheepdogKit
 import SwiftUI
 
 private struct FlockInputs: Equatable {
-    var flock: Flock = Flock([])
+    var factory = FactoryAgentsList(agents: [], heads: [], questions: [])
+    var approvals: (model: SessionViewModel, current: ApprovalFlow.Card?)?
     var computers: [ComputerSnapshot] = []
     var currentName = ""
     var voiceQuestionID: String?
@@ -17,7 +18,8 @@ private struct FlockInputs: Equatable {
     var expandComputer: (String) -> Void = { _ in }
 
     static func == (lhs: FlockInputs, rhs: FlockInputs) -> Bool {
-        lhs.flock == rhs.flock
+        lhs.factory == rhs.factory
+            && lhs.approvals?.current == rhs.approvals?.current
             && lhs.computers == rhs.computers
             && lhs.currentName == rhs.currentName
             && lhs.voiceQuestionID == rhs.voiceQuestionID
@@ -44,6 +46,8 @@ private extension EnvironmentValues {
 /// refreshed over `/events`.
 struct FlockView: View {
     let flock: Flock
+    var factory: FactoryAgentsList?
+    var model: SessionViewModel?
     /// The question shown on an agent's card, if it has one open.
     let question: (String) -> ApprovalFlow.Card?
     /// A tap on an option: the question's id and the option's index.
@@ -72,12 +76,10 @@ struct FlockView: View {
     var toggleComputer: (String) -> Void = { _ in }
     var expandComputer: (String) -> Void = { _ in }
 
-    /// Closed by default: the running agents are what matters.
-    @State private var showNotRunning = false
-
     private var inputs: FlockInputs {
         FlockInputs(
-            flock: flock,
+            factory: factory ?? FactoryAgentsList(agents: flock.all, heads: [], questions: []),
+            approvals: model.map { ($0, $0.approval) },
             computers: computers,
             currentName: currentName,
             voiceQuestionID: voiceQuestionID,
@@ -98,8 +100,7 @@ struct FlockView: View {
             FlockScrollContent(
                 proxy: proxy,
                 expanded: $expanded,
-                focusedAgent: $focusedAgent,
-                showNotRunning: $showNotRunning
+                focusedAgent: $focusedAgent
             )
         }
         .environment(\.flockInputs, inputs)
@@ -111,10 +112,11 @@ private struct FlockScrollContent: View {
     let proxy: ScrollViewProxy
     @Binding var expanded: Set<String>
     @Binding var focusedAgent: AgentFocus?
-    @Binding var showNotRunning: Bool
+    @State private var showNotRunning = false
+    @State private var openDone: Set<String> = []
     @Environment(\.flockInputs) private var inputs
 
-    private var flock: Flock { inputs.flock }
+    private var flock: Flock { inputs.factory.agents }
     private var computers: [ComputerSnapshot] { inputs.computers }
     private var currentName: String { inputs.currentName }
     private var voiceQuestionID: String? { inputs.voiceQuestionID }
@@ -176,7 +178,7 @@ private struct FlockScrollContent: View {
             .padding(.top, headerTopPadding(id))
         }
         if isExpanded(id) {
-            if flock.running.isEmpty {
+            if flock.running.isEmpty && !inputs.factory.hasFactoryContent {
                 if sectioned {
                     Text("No agents running here.")
                         .font(.subheadline)
@@ -187,12 +189,7 @@ private struct FlockScrollContent: View {
                         .padding(.top, 40)
                 }
             }
-            ForEach(flock.sections) { section in
-                AgentSectionHeader(group: section.group, count: section.agents.count)
-                ForEach(section.agents) { agent in
-                    card(agent, primary: isFirstQuestion(agent))
-                }
-            }
+            rows(inputs.factory, id: id)
             if !flock.notRunning.isEmpty {
                 notRunningRow
                 if showNotRunning {
@@ -209,27 +206,76 @@ private struct FlockScrollContent: View {
         computers.first?.id == id ? 0 : 14
     }
 
-    /// One accent per screen: only the first open question gets the filled
-    /// answer.
-    private func isFirstQuestion(_ agent: Agent) -> Bool {
-        flock.running.first { question($0.paneID) != nil }?.paneID == agent.paneID
+    @ViewBuilder
+    private func rows(_ list: FactoryAgentsList, id: String, computer: ComputerSnapshot? = nil) -> some View {
+        let settled = computer == nil ? inputs.approvals?.current.flatMap { card in
+            card.pending.factory != nil && card.isSettled && !list.factoryAsks.contains { $0.id == card.pending.id }
+                ? card.pending : nil
+        } : nil
+        let asks = list.factoryAsks + (settled.map { [$0] } ?? [])
+        ForEach([AgentGroup.needsYou, .working, .done], id: \.self) { group in
+            let agents = list.agents.sections.first { $0.group == group }?.agents ?? []
+            let heads = group == .needsYou ? list.needsYouHeads : group == .working ? list.workingHeads : list.finishedHeads
+            let count = agents.count + heads.count + (group == .needsYou ? asks.count : 0)
+            if group == .done && list.hasStoppedSection {
+                AgentSectionHeader(group: .working, count: list.stoppedHeads.count, title: "Stopped")
+                ForEach(list.stoppedHeads) { head($0, computer: computer) }
+            }
+            if count > 0 {
+                let folded = group == .done && !heads.isEmpty
+                if folded {
+                    foldRow("Done (\(count))", expanded: openDone.contains(id), identifier: "flock.section.done") {
+                        if openDone.contains(id) { openDone.remove(id) } else { openDone.insert(id) }
+                    }
+                } else if computer == nil || list.hasFactoryContent {
+                    AgentSectionHeader(group: group, count: count)
+                }
+                if !folded || openDone.contains(id) {
+                    if group == .needsYou {
+                        ForEach(asks, id: \.id) { ask in
+                            let card = askCard(ask, computer: computer)
+                            ApprovalCardView(card: card, primary: computer == nil && ask.id == asks.first?.id,
+                                             idPrefix: "factoryAsk.\(ask.id)") { answer(card.pending.id, $0) }
+                        }
+                    }
+                    ForEach(heads) { head($0, computer: computer) }
+                    ForEach(agents) { card($0, computer: computer) }
+                }
+            }
+        }
     }
 
-    private func card(_ agent: Agent, primary: Bool) -> some View {
-        AgentCard(
+    private func askCard(_ ask: PendingAction, computer: ComputerSnapshot?) -> ApprovalFlow.Card {
+        guard let computer else { return .init(pending: ask, phase: inputs.approvals?.model.questionPhase(ask.id) ?? .open(error: nil)) }
+        var pending = ask
+        pending.id = RemoteQuestion.id(computer: computer.id, question: ask.id)
+        return .init(pending: pending, phase: inputs.approvals?.model.session(computer.id)?.phase(ask.id) ?? .open(error: nil))
+    }
+
+    private func head(_ item: FactoryAgentsList.Item, computer: ComputerSnapshot?) -> some View {
+        let dialog = item.coordinatorDialog.map { askCard($0, computer: computer) }
+        return FactoryHeadCard(item: item, computer: computer, dialog: dialog, answer: answer)
+    }
+
+    private func card(_ agent: Agent, primary: Bool? = nil, computer: ComputerSnapshot? = nil) -> some View {
+        let key = computer.map { "\($0.id)|\(agent.paneID)" } ?? agent.paneID
+        let prompt = computer.map { remoteCard($0.id, agent.paneID) } ?? question(agent.paneID)
+        return AgentCard(
             agent: agent,
-            question: question(agent.paneID),
-            primary: primary,
-            voiceQuestion: question(agent.paneID)?.pending.id == voiceQuestionID,
+            question: prompt,
+            primary: primary ?? (computer == nil && inputs.factory.factoryAsks.isEmpty && inputs.factory.needsYouHeads.isEmpty &&
+                                 flock.running.first { question($0.paneID) != nil }?.paneID == agent.paneID),
+            voiceQuestion: prompt?.pending.id == voiceQuestionID,
+            computer: computer?.id,
             expanded: Binding(
-                get: { expanded.contains(agent.paneID) },
+                get: { expanded.contains(key) },
                 set: { open in
-                    if open { expanded.insert(agent.paneID) } else { expanded.remove(agent.paneID) }
+                    if open { expanded.insert(key) } else { expanded.remove(key) }
                 }
             ),
             answer: answer
         )
-        .id(agent.paneID)
+        .id(key)
     }
 
     /// Another computer: its header and voice marker, then its running agents
@@ -254,25 +300,8 @@ private struct FlockScrollContent: View {
             if offline {
                 OfflineComputerRow(name: computer.name, lastSeen: computer.lastSeen()) { retry(computer.id) }
             } else {
-                let running = Flock(computer.agents).running
-                ForEach(running, id: \.paneID) { agent in
-                    AgentCard(
-                        agent: agent,
-                        question: remoteCard(computer.id, agent.paneID),
-                        primary: false,
-                        voiceQuestion: false,
-                        computer: computer.id,
-                        expanded: Binding(
-                            get: { expanded.contains("\(computer.id)|\(agent.paneID)") },
-                            set: { open in
-                                let key = "\(computer.id)|\(agent.paneID)"
-                                if open { expanded.insert(key) } else { expanded.remove(key) }
-                            }
-                        ),
-                        answer: answer
-                    )
-                    .id("\(computer.id)|\(agent.paneID)")
-                }
+                rows(FactoryAgentsList(agents: computer.agents, heads: computer.factoryHeads, questions: computer.questions),
+                     id: computer.id, computer: computer)
             }
         }
     }
@@ -291,14 +320,21 @@ private struct FlockScrollContent: View {
     }
 
     private var notRunningRow: some View {
+        foldRow("Not running (\(flock.notRunning.count))", expanded: showNotRunning, identifier: "flock.notRunning") {
+            showNotRunning.toggle()
+        }
+        .accessibilityHint("Agents whose pane closed or that herdr no longer reports")
+    }
+
+    private func foldRow(_ title: String, expanded: Bool, identifier: String, toggle: @escaping () -> Void) -> some View {
         Button {
-            withAnimation(Theme.ease) { showNotRunning.toggle() }
+            withAnimation(Theme.ease, toggle)
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
-                    .rotationEffect(.degrees(showNotRunning ? 90 : 0))
-                Text("Not running (\(flock.notRunning.count))")
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                Text(title)
                     .font(.subheadline.weight(.medium))
                 Spacer()
             }
@@ -307,9 +343,8 @@ private struct FlockScrollContent: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityValue(showNotRunning ? "Shown" : "Hidden")
-        .accessibilityHint("Agents whose pane closed or that herdr no longer reports")
-        .accessibilityIdentifier("flock.notRunning")
+        .accessibilityValue(expanded ? "Shown" : "Hidden")
+        .accessibilityIdentifier(identifier)
     }
 
     private var renderedFocusToken: [String] {
@@ -364,10 +399,11 @@ private struct FlockScrollContent: View {
 struct AgentSectionHeader: View {
     let group: AgentGroup
     let count: Int
+    var title: String?
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(group.title)
+            Text(title ?? group.title)
                 .font(.footnote.weight(.semibold))
                 .textCase(.uppercase)
                 .foregroundStyle(group == .needsYou ? Theme.blockedText : Theme.muted)
@@ -380,7 +416,7 @@ struct AgentSectionHeader: View {
         .padding(.leading, 4)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
-        .accessibilityIdentifier("flock.section.\(group.rawValue)")
+        .accessibilityIdentifier("flock.section.\(title?.lowercased() ?? group.rawValue)")
     }
 }
 
@@ -943,5 +979,122 @@ struct SeenWhileVisible: ViewModifier {
         var turn: Int?
         var seen: Int?
         var phase: Bool
+    }
+}
+
+private struct FactoryHeadCard: View {
+    let item: FactoryAgentsList.Item
+    let computer: ComputerSnapshot?
+    let dialog: ApprovalFlow.Card?
+    let answer: (String, Int) -> Void
+
+    @EnvironmentObject private var model: SessionViewModel
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var resuming = false
+    @State private var resumeError: String?
+
+    private var tint: Color {
+        switch item.head.state {
+        case .running: return Theme.color(for: .working)
+        case .finished: return Theme.done
+        default: return Theme.idle
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 4) {
+                let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 6))
+                ViewThatFits(in: .horizontal) {
+                    HStack { layout { name; kind }.fixedSize(); Spacer(minLength: 8); state.fixedSize() }
+                    VStack(alignment: .leading, spacing: 4) { layout { name; kind }; state }
+                }
+                Text(item.head.goal).font(.subheadline)
+                Text(counts).font(.footnote).foregroundStyle(Theme.muted)
+                item.caption(computerName: computer?.name).map { Text($0).font(.caption.monospaced()).foregroundStyle(Theme.muted) }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel([item.accessibilitySummary, computer?.name.trimmedOrNil].compactMap { $0 }.joined(separator: ", "))
+            .accessibilityIdentifier("flock.factory.\(item.id)")
+            item.alertLine.map { Text($0).font(.subheadline.weight(.semibold)) }
+            item.alertFixLine.map { Text($0).font(.footnote).foregroundStyle(Theme.muted) }
+            if let folder = item.resumableFolder {
+                Button(resuming ? "Resuming…" : "Resume") { resume(folder: folder) }
+                    .buttonStyle(.bordered)
+                    .tint(Theme.ink)
+                    .controlSize(.large)
+                    .disabled(resuming)
+                    .accessibilityLabel(resuming ? "Resuming \(item.head.name)" : "Resume \(item.head.name)")
+                if let resumeError { Text(resumeError).font(.footnote).foregroundStyle(Theme.danger) }
+            }
+            if item.coordinatorBlocked {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.stuckHeading).font(.subheadline.weight(.semibold))
+                        .padding(EdgeInsets(top: 12, leading: 12, bottom: dialog == nil ? 12 : 0, trailing: 12))
+                    if let dialog {
+                        ApprovalCardView(card: dialog, embedded: true, idPrefix: "question.\(item.id)",
+                                         coordinatorHint: item.stuckNoHint) { answer(dialog.pending.id, $0) }
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card))
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(item.coordinatorBlocked ? Theme.accentSoft : Theme.card,
+                    in: RoundedRectangle(cornerRadius: Theme.Radius.card))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card)
+            .strokeBorder(item.coordinatorBlocked ? Theme.blocked : Theme.line))
+    }
+
+    private var counts: AttributedString {
+        var text = AttributedString(item.countsLine)
+        if item.waitingOnYouCount > 0, let range = text.range(of: "\(item.waitingOnYouCount) waiting on you") {
+            text[range].foregroundColor = Theme.blockedText
+            text[range].font = .footnote.weight(.semibold)
+        }
+        return text
+    }
+
+    private func resume(folder: String) {
+        guard let session = computer.flatMap({ model.session($0.id) }) ?? (computer == nil ? model.fleet.current : nil) else {
+            resumeError = "Check the computer's connection, then try again."
+            return
+        }
+        resuming = true
+        resumeError = nil
+        Task {
+            defer { resuming = false }
+            do {
+                try await session.actions.run("resume:\(item.id)", .init(timeout: 60, keyed: true), as: DaemonClient.self) { [goal = item.head.goal] in
+                    try await $0.resumeFactory(folder: folder, goal: goal)
+                }
+                await session.refresh()
+            } catch {
+                resumeError = FactoryAgentsList.resumeErrorMessage(error, computerName: session.name)
+            }
+        }
+    }
+
+    private var name: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(tint)
+            Text(item.head.name).font(.body.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var kind: some View { Text(item.kindWord).font(.footnote).foregroundStyle(Theme.muted) }
+
+    private var state: some View {
+        HStack(spacing: 5) {
+            Circle().fill(tint).frame(width: 7, height: 7)
+            Text(item.stateWord)
+        }
+        .font(.caption.weight(.semibold))
+        .padding(.horizontal, 8)
+        .padding(.vertical, 3)
+        .background(Theme.fill, in: Capsule())
     }
 }

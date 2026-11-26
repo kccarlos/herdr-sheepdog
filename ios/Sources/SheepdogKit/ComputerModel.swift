@@ -27,6 +27,7 @@ public final class ComputerModel {
     /// verified or refused is not switched to.
     public private(set) var canTalkTo = true
     public private(set) var agents: [Agent] = []
+    public private(set) var factoryHeads: [FactoryProjectHead] = []
     public private(set) var questions: [PendingAction] = []
     /// The voice's own question (`/api/state` `pending_action`).
     public private(set) var pendingAction: PendingAction?
@@ -394,6 +395,7 @@ public final class ComputerModel {
         if addresses != link.addresses { runtime.send(.addressesChanged(addresses)) }
         runtime.send(.credentialsChanged(.newPairing(certExpires: certExpires)))
         set(\.agents, [])
+        set(\.factoryHeads, [])
         set(\.questions, [])
         set(\.pendingAction, nil)
         set(\.herdr, nil)
@@ -528,6 +530,7 @@ public final class ComputerModel {
     private func apply(_ state: DaemonState) {
         lastState = state
         set(\.agents, state.agents)
+        set(\.factoryHeads, state.factory ?? [])
         set(\.questions, state.questions ?? state.pendingAction.map { [$0] } ?? [])
         set(\.pendingAction, state.pendingAction)
         set(\.herdr, HerdrBackendSwitch(state: state))
@@ -691,7 +694,7 @@ public final class ComputerModel {
     // MARK: - What the several-computers UI reads
 
     public var snapshot: ComputerSnapshot {
-        ComputerSnapshot(id: id, name: name, isCurrent: false, reachability: reachability, agents: agents, questions: questions, canTalkTo: canTalkTo)
+        ComputerSnapshot(id: id, name: name, isCurrent: false, reachability: reachability, agents: agents, questions: questions, factoryHeads: factoryHeads, canTalkTo: canTalkTo)
     }
 
     /// The questions as the floating stack carries them, labelled with this

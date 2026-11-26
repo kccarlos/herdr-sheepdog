@@ -55,6 +55,11 @@ func holdProjectWake(s *flow.State, k, why, facts string, now time.Time) {
 
 // The facts block's bounds: a title's characters, the wakes listed.
 const maxFactsTitle, maxFactsWakes = 120, 20
+const ownerSayPrefix = "owner_say:"
+
+func isOwnerSay(w flow.Wake) bool {
+	return w.Task == "" && strings.HasPrefix(w.Key, ownerSayPrefix)
+}
 
 // taskFacts is a waking task's line of the facts block: title, H, the PR
 // number and checks, the last verdict.
@@ -122,7 +127,7 @@ func taskFacts(t flow.Task, f flow.Facts, now time.Time) string {
 }
 
 // wakeMessage is the one message a batch of wakes is delivered as. It is
-// all facts built in code: each waking task, then every setting that
+// all facts built in code: owner instructions, waking tasks, then every setting that
 // differs from its default.
 func wakeMessage(s flow.State) string {
 	var b strings.Builder
@@ -132,7 +137,14 @@ func wakeMessage(s flow.State) string {
 			fmt.Fprintf(&b, "- and %d more.\n", len(s.Project.Wakes)-i)
 			break
 		}
-		fmt.Fprintf(&b, "- %s: %s. %s. (wake %s at %s)\n", cmp.Or(w.Task, "project"), w.Why, w.Facts, w.Key, w.At.Format(time.RFC3339))
+		sep, facts := ". ", w.Facts
+		if isOwnerSay(w) && w.Why != "owner said" {
+			sep = ": "
+			if w.Why == "owner said (typed)" {
+				facts = fmt.Sprintf("%q", facts)
+			}
+		}
+		fmt.Fprintf(&b, "- %s: %s%s%s. (wake %s at %s)\n", cmp.Or(w.Task, "project"), w.Why, sep, facts, w.Key, w.At.Format(time.RFC3339))
 	}
 	changed := cmp.Or(strings.Join(s.Settings.Changed(), ", "), "none")
 	fmt.Fprintf(&b, "Settings that differ from their default: %s.", changed)
@@ -181,6 +193,19 @@ func (e *Engine) deliverWakesLocked(ctx context.Context, id string, s *flow.Stat
 	if len(p.Wakes) == 0 || len(p.CoordWakesInFlight) != 0 || p.RunID == "" || p.Run == nil || e.HC == nil {
 		return
 	}
+	p.Wakes = slices.Clone(p.Wakes)
+	slices.SortStableFunc(p.Wakes, func(a, b flow.Wake) int {
+		switch ownerA, ownerB := isOwnerSay(a), isOwnerSay(b); {
+		case ownerA && ownerB:
+			return a.At.Compare(b.At)
+		case ownerA:
+			return -1
+		case ownerB:
+			return 1
+		default:
+			return 0
+		}
+	})
 	run := *p.Run
 	p.Run = &run
 	if e.sendCoordLocked(ctx, id, &next, wakeMessage(next), now, false) != nil {

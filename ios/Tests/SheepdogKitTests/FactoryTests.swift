@@ -508,6 +508,37 @@ final class FactoryClientRouteTests: XCTestCase {
         }
     }
 
+    /// Pins app-factory.md §8 & internal/web/factory.go (`POST /api/factory/projects/start`):
+    /// `resumeFactory` posts `{folder, goal}`, propagates `ActionRunner`'s
+    /// `Idempotency-Key`, and maps `403 proof_required` and `400` refusals cleanly.
+    func testFactoryResumeRoutePostsFolderAndGoalHonoursIdempotencyKeyAndMapsRefusals() async throws {
+        StubProtocol.handler = { _ in (200, Data(#"{"ok":true,"device_id":"dev-1"}"#.utf8)) }
+        try await DaemonClient.$idempotencyKey.withValue("resume-key-1") {
+            try await StubProtocol.client().resumeFactory(folder: "/work/notes", goal: "A notes page with search")
+        }
+        let request = try XCTUnwrap(StubProtocol.seen.first)
+        XCTAssertEqual(request.httpMethod, "POST")
+        XCTAssertEqual(request.url?.path, "/api/factory/projects/start")
+        XCTAssertEqual(request.value(forHTTPHeaderField: "Idempotency-Key"), "resume-key-1")
+        let payload = try JSONDecoder().decode([String: String].self, from: try XCTUnwrap(request.httpBody))
+        XCTAssertEqual(payload, ["folder": "/work/notes", "goal": "A notes page with search"])
+
+        let refusals: [(Int, String, DaemonError)] = [
+            (403, #"{"code":"proof_required","error":"proof_required"}"#, .rejected(status: 403, message: "proof_required")),
+            (400, #"{"error":"Not started: a setting is not allowed. Change it in settings below."}"#,
+             .rejected(status: 400, message: "Not started: a setting is not allowed. Change it in settings below.")),
+        ]
+        for (status, body, expected) in refusals {
+            StubProtocol.handler = { _ in (status, Data(body.utf8)) }
+            do {
+                try await StubProtocol.client().resumeFactory(folder: "/work/notes", goal: "A notes page with search")
+                XCTFail("expected \(expected) for HTTP \(status)")
+            } catch {
+                XCTAssertEqual(error as? DaemonError, expected, "HTTP \(status)")
+            }
+        }
+    }
+
     /// Deferred until daemon PR 5 lands `POST /api/factory/projects/{id}/say`
     /// (`docs/dev/design/app-factory.md` §6.2, §10 rows 5 and 7).
     func testFactorySayRouteDeferredUntilPR5() throws {

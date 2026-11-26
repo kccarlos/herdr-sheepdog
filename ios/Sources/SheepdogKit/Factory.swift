@@ -250,11 +250,23 @@ extension DaemonClient {
         return try await factoryGet(Reply.self, encodedPath: "/api/factory/asks", what: "the ask list").asks
     }
 
+    /// Resume with the project's existing goal using the paired-device start route.
+    public func resumeFactory(folder: String, goal: String) async throws {
+        struct Reply: Decodable { let ok: Bool }
+        let body = try JSONEncoder().encode(["folder": folder, "goal": goal])
+        let request = try request(path: "/api/factory/projects/start", method: "POST", body: body)
+        let reply = try await factoryReply(Reply.self, request: request, what: "the resume reply")
+        guard reply.ok else { throw DaemonError.malformed("the project did not resume") }
+    }
+
     /// One factory read. Unlike `sendJSON`, a 404 is not "an older daemon":
     /// the factory routes answer it for an unknown project, and 503 for a
     /// daemon with no factory; both carry the daemon's words (`.rejected`).
     private func factoryGet<T: Decodable>(_ type: T.Type, encodedPath: String, what: String) async throws -> T {
-        let request = try request(encodedPath: encodedPath)
+        try await factoryReply(type, request: request(encodedPath: encodedPath), what: what)
+    }
+
+    private func factoryReply<T: Decodable>(_ type: T.Type, request: URLRequest, what: String) async throws -> T {
         let (data, response) = try await perform(request)
         guard let http = response as? HTTPURLResponse else { throw DaemonError.malformed("no HTTP response") }
         switch http.statusCode {

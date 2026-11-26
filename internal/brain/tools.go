@@ -301,6 +301,10 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 		if !ok {
 			return toolOutcome{err: fmt.Errorf("to rename, name the agent: no agent called %q; the agents are %s", arg("agent"), b.aliases())}
 		}
+		out := toolOutcome{agent: row.Alias, pane: row.PaneID}
+		if blockProjectTool(&out, row, call.Name, "") {
+			return out
+		}
 		echo, err := b.host.Rename(ctx, row.PaneID, arg("name"))
 		if err != nil {
 			return toolOutcome{agent: row.Alias, err: err}
@@ -323,6 +327,9 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 		return toolOutcome{err: fmt.Errorf("no agent called %q; the agents are %s", arg("agent"), b.aliases())}
 	}
 	out := toolOutcome{agent: row.Alias, pane: row.PaneID}
+	if blockProjectTool(&out, row, call.Name, arg("source")) {
+		return out
+	}
 	switch call.Name {
 	case ToolReadScreen:
 		switch source := strings.ToLower(arg("source")); source {
@@ -375,7 +382,11 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 		// The job is running whatever happens to the rest of this turn,
 		// so the fallback path must say so rather than report the roster
 		// as if nothing were under way.
-		out.acted = "Looking into " + aliasOr(row.Alias) + " now; the answer comes on its own."
+		name := aliasOr(row.Alias)
+		if row.Project && row.Spoken != "" {
+			name = row.Spoken
+		}
+		out.acted = "Looking into " + name + " now; the answer comes on its own."
 	case ToolPrompt:
 		text := arg("text")
 		if text == "" {
@@ -455,6 +466,35 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 		out.err = fmt.Errorf("unknown tool %q", call.Name)
 	}
 	return out
+}
+
+func blockProjectTool(out *toolOutcome, row AgentInfo, tool, source string) bool {
+	if !row.Project {
+		return false
+	}
+	var reason string
+	switch tool {
+	case ToolInterrupt, ToolNote, ToolRunCLI, ToolPromise:
+		reason = "That works on an agent, not on a factory project."
+	case ToolReadScreen:
+		if strings.EqualFold(source, SourceSession) {
+			reason = "Read the factory board without source session."
+		}
+	case ToolInvestigate:
+		if strings.EqualFold(source, InvestigationSourceWorker) {
+			reason = "The factory coordinator's own session cannot be asked yet; ask without source."
+		}
+	case ToolSendKeys:
+		if row.Pending == nil {
+			reason = "The factory coordinator has no pending dialog to answer."
+		}
+	}
+	if reason == "" {
+		return false
+	}
+	out.railBlocked = reason
+	out.err = fmt.Errorf("%w: %s", ErrNotPermitted, reason)
+	return true
 }
 
 // readSession is read_screen with source session: the worker's own

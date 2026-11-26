@@ -253,7 +253,9 @@ func renderRoster(agents []AgentInfo, now time.Time) string {
 		if !a.StateSince.IsZero() {
 			fmt.Fprintf(&b, " for %s", ago(now.Sub(a.StateSince)))
 		}
-		if a.Task != "" {
+		if a.Project {
+			fmt.Fprintf(&b, ". %s", clipText(oneLine(a.Task), 220))
+		} else if a.Task != "" {
 			fmt.Fprintf(&b, "; task: %q", clipText(oneLine(a.Task), rosterTaskRunes))
 		}
 		if !a.LastInteraction.IsZero() {

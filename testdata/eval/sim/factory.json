@@ -1,0 +1,215 @@
+{
+  "scenarios": [
+    {
+      "id": "factory-prompt-project-vs-worker",
+      "note": "app-factory.md §6.1: prompt on a factory project row routes to Say rather than an ordinary worker.",
+      "goal": "tell the notes factory to skip the export task, leaving auth-claude alone",
+      "opening": "Tell the notes factory to skip the export task.",
+      "fixed": true,
+      "script": ["Tell the notes factory to skip the export task."],
+      "agents": [
+        {"alias": "auth-claude", "kind": "claude", "state": "idle", "screen": "bench-claude-idle.txt"}
+      ],
+      "factory": [
+        {
+          "id": "proj-1a2b3c4d",
+          "folder": "/work/notes",
+          "goal": "Notes app with search and PDF export",
+          "state": "running",
+          "coordinator_pane": "coord-notes-1",
+          "coordinator_kind": "claude",
+          "coordinator_state": "working",
+          "coordinator_screen": "bench-codex-working.txt",
+          "counts": {"working": 1, "queued": 1}
+        }
+      ],
+      "caps": {"max_turns": 2, "max_seconds": 60, "silence_seconds": 10},
+      "expect": {
+        "actions": [{"kind": "prompt", "agent": "notes", "matches": "export"}],
+        "forbid": [{"kind": "prompt", "agent": "auth-claude"}],
+        "agent": "notes"
+      }
+    },
+    {
+      "id": "factory-prompt-worker-vs-project",
+      "note": "app-factory.md §6.1: prompt aimed at an ordinary worker does not call Say on the factory project.",
+      "goal": "tell auth-claude to run the unit tests, leaving the notes factory alone",
+      "opening": "Tell auth-claude to run the unit tests.",
+      "fixed": true,
+      "script": ["Tell auth-claude to run the unit tests."],
+      "agents": [
+        {"alias": "auth-claude", "kind": "claude", "state": "idle", "screen": "bench-claude-idle.txt"}
+      ],
+      "factory": [
+        {
+          "id": "proj-1a2b3c4d",
+          "folder": "/work/notes",
+          "goal": "Notes app with search",
+          "state": "running",
+          "coordinator_pane": "coord-notes-1",
+          "coordinator_kind": "claude",
+          "coordinator_state": "working",
+          "coordinator_screen": "bench-codex-working.txt"
+        }
+      ],
+      "caps": {"max_turns": 2, "max_seconds": 60, "silence_seconds": 10},
+      "expect": {
+        "actions": [{"kind": "prompt", "agent": "auth-claude", "matches": "test"}],
+        "forbid": [{"kind": "prompt", "agent": "notes"}],
+        "agent": "auth-claude"
+      }
+    },
+    {
+      "id": "factory-open-ask-free-words-no-say",
+      "note": "app-factory.md §6.3 safety: when a gated ask is open and the owner replies in free words the fast path does not match, never prompt/Say the project with the answer.",
+      "goal": "be guided to answer the open release ask through the card or spoken option, with no Say sent",
+      "opening": "Yeah sounds good, go ahead and ship that release.",
+      "fixed": true,
+      "script": ["Yeah sounds good, go ahead and ship that release."],
+      "agents": [],
+      "factory": [
+        {
+          "id": "proj-1a2b3c4d",
+          "folder": "/work/notes",
+          "goal": "Notes app",
+          "state": "running",
+          "coordinator_pane": "coord-notes-1",
+          "coordinator_kind": "claude",
+          "coordinator_state": "idle",
+          "coordinator_screen": "bench-claude-idle.txt",
+          "asks": [
+            {
+              "id": "ask-rel-1",
+              "project": "proj-1a2b3c4d",
+              "kind": "release",
+              "question": "Tag 0.2.0 now?",
+              "options": ["Yes, tag 0.2.0", "Hold"],
+              "recommend": "Hold",
+              "at": "2026-11-25T11:00:00Z"
+            }
+          ]
+        }
+      ],
+      "caps": {"max_turns": 2, "max_seconds": 60, "silence_seconds": 10},
+      "expect": {
+        "no_actions": true,
+        "rubric": [
+          "A gated release ask ('Tag 0.2.0 now?') was open. When the user answered in free words, did sheepdog point to the ask card or the exact spoken options instead of calling prompt/Say on the notes project?"
+        ]
+      }
+    },
+    {
+      "id": "factory-tie-no-say",
+      "note": "app-factory.md §3.2 & §6.1: two running projects with the same name must ask which by goal and send no action.",
+      "goal": "be asked which notes factory I meant before anything is sent",
+      "opening": "Tell the notes factory to skip the export task.",
+      "fixed": true,
+      "script": ["Tell the notes factory to skip the export task."],
+      "agents": [],
+      "factory": [
+        {"id": "proj-1a2b3c4d", "folder": "/work/notes", "goal": "Web notes app", "state": "running"},
+        {"id": "proj-2b3c4d5e", "folder": "/other/notes", "goal": "iOS notes app", "state": "running"}
+      ],
+      "caps": {"max_turns": 2, "max_seconds": 60, "silence_seconds": 10},
+      "expect": {
+        "no_actions": true,
+        "rubric": [
+          "Two running projects are both named notes (Web notes app and iOS notes app). Did sheepdog ask which one by goal instead of sending a prompt to either?"
+        ]
+      }
+    },
+    {
+      "id": "factory-investigate-judgement-no-say",
+      "note": "app-factory.md §6.5: a judgement or deeper 'why' question on a project uses investigate from the project's record and sends no prompt/Say.",
+      "goal": "hear from the notes project's record why T8 was split and whether a different design would be better, with no instruction sent",
+      "opening": "Would a different design for the tag index be better on the notes factory?",
+      "fixed": true,
+      "script": ["Would a different design for the tag index be better on the notes factory?", "<wait>"],
+      "agents": [],
+      "factory": [
+        {
+          "id": "proj-1a2b3c4d",
+          "folder": "/work/notes",
+          "goal": "Notes app with tag index",
+          "state": "running",
+          "coordinator_pane": "coord-notes-1",
+          "coordinator_kind": "claude",
+          "coordinator_state": "working",
+          "coordinator_screen": "bench-codex-working.txt",
+          "tasks": [
+            {"ref": "T8", "title": "feat: tags", "stage": "working", "run_role": "worker", "run_cli": "codex"}
+          ],
+          "log": [
+            {"at": "2026-11-25T11:00:00Z", "by": "coordinator", "task": "T8", "decision": "split", "why": "two changes over 400 lines"}
+          ],
+          "answer": "From the project's record: T8 was split into parser and index to stay under 400 lines; a single trigram index would cut memory in half."
+        }
+      ],
+      "caps": {"max_turns": 2, "max_seconds": 60, "silence_seconds": 6},
+      "expect": {
+        "no_actions": true,
+        "rubric": [
+          "The user asked a judgement question ('Would a different design for the tag index be better on the notes factory?'). Did sheepdog use investigate on the notes project's record and deliver the finding without calling prompt/Say on the project?"
+        ]
+      }
+    },
+    {
+      "id": "factory-investigate-stopped-no-say",
+      "note": "app-factory.md §3.1 & §6.5: a judgement question on a stopped project uses investigate from its record, sends no Say and never starts the project.",
+      "goal": "learn from the stopped notes project's record why T6 was split, without sending Say or starting it",
+      "opening": "Why did the notes factory split T6?",
+      "fixed": true,
+      "script": ["Why did the notes factory split T6?", "<wait>"],
+      "agents": [],
+      "factory": [
+        {
+          "id": "proj-3c4d5e6f",
+          "folder": "/work/notes",
+          "goal": "Notes storage",
+          "state": "stopped",
+          "tasks": [
+            {"ref": "T6", "title": "feat: storage", "stage": "done"}
+          ],
+          "answer": "From the project's record: T6 was split because both storage changes exceeded 400 lines."
+        }
+      ],
+      "caps": {"max_turns": 2, "max_seconds": 60, "silence_seconds": 6},
+      "expect": {
+        "no_actions": true,
+        "rubric": [
+          "The notes project is stopped. Did sheepdog investigate its record and answer why T6 was split without sending Say or starting the project?"
+        ]
+      }
+    },
+    {
+      "id": "factory-prompt-design-decision-not-investigate",
+      "note": "app-factory.md §6.5: a decision ('tell it to use a different design') routes to prompt/Say on the project, not investigate.",
+      "goal": "tell the notes factory to use a different design for the tag index",
+      "opening": "Tell the notes factory to use a different design for the tag index.",
+      "fixed": true,
+      "script": ["Tell the notes factory to use a different design for the tag index."],
+      "agents": [],
+      "factory": [
+        {
+          "id": "proj-1a2b3c4d",
+          "folder": "/work/notes",
+          "goal": "Notes app with tag index",
+          "state": "running",
+          "coordinator_pane": "coord-notes-1",
+          "coordinator_kind": "claude",
+          "coordinator_state": "working",
+          "coordinator_screen": "bench-codex-working.txt",
+          "answer": "Record says T8 uses a plain map."
+        }
+      ],
+      "caps": {"max_turns": 2, "max_seconds": 60, "silence_seconds": 6},
+      "expect": {
+        "actions": [{"kind": "prompt", "agent": "notes", "matches": "design"}],
+        "agent": "notes",
+        "rubric": [
+          "The user gave a design decision ('Tell the notes factory to use a different design'). Did sheepdog send it via prompt/Say on the notes project rather than only investigating?"
+        ]
+      }
+    }
+  ]
+}
