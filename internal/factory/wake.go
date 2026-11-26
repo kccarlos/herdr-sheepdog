@@ -137,11 +137,14 @@ func wakeMessage(s flow.State) string {
 			fmt.Fprintf(&b, "- and %d more.\n", len(s.Project.Wakes)-i)
 			break
 		}
-		sep := ". "
+		sep, facts := ". ", w.Facts
 		if isOwnerSay(w) && w.Why != "owner said" {
 			sep = ": "
+			if w.Why == "owner said (typed)" {
+				facts = fmt.Sprintf("%q", facts)
+			}
 		}
-		fmt.Fprintf(&b, "- %s: %s%s%s. (wake %s at %s)\n", cmp.Or(w.Task, "project"), w.Why, sep, w.Facts, w.Key, w.At.Format(time.RFC3339))
+		fmt.Fprintf(&b, "- %s: %s%s%s. (wake %s at %s)\n", cmp.Or(w.Task, "project"), w.Why, sep, facts, w.Key, w.At.Format(time.RFC3339))
 	}
 	changed := cmp.Or(strings.Join(s.Settings.Changed(), ", "), "none")
 	fmt.Fprintf(&b, "Settings that differ from their default: %s.", changed)

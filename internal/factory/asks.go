@@ -155,10 +155,10 @@ func NormalizeSay(text, heard string) (string, string, *Refusal) {
 	if text == "" {
 		return "", "", &Refusal{Code: "why_missing", Why: "Say requires non-empty text."}
 	}
-	if utf8.RuneCountInString(text) > 1000 || utf8.RuneCountInString(heard) > 1000 {
+	if utf8.RuneCountInString(text) > 1000 {
 		return "", "", &Refusal{Code: "text_too_long", Why: "Too long. Keep it under 1,000 characters."}
 	}
-	return text, heard, nil
+	return text, flow.CapRunes(heard, 1000), nil
 }
 
 func (e *Engine) sayLocked(ctx context.Context, id string, s flow.State, text, heard, closedWhy string) error {
@@ -176,12 +176,13 @@ func (e *Engine) sayLocked(ctx context.Context, id string, s flow.State, text, h
 		return e.refuse(id, ref.Code, ref.Why)
 	}
 	input := map[string]string{"verb": "say", "text": msg}
-	why, facts := "owner said (typed)", fmt.Sprintf("%q", msg)
+	why, facts := "owner said (typed)", msg
 	if heard != "" {
 		input["heard"] = heard
 		why = "owner said, relayed by the orchestrator"
 		punct := ""
-		if !strings.ContainsRune(".?!", rune(msg[len(msg)-1])) {
+		last, _ := utf8.DecodeLastRuneInString(msg)
+		if !strings.ContainsRune(".?!。？！", last) {
 			punct = "."
 		}
 		facts = fmt.Sprintf("%s%s Heard: %q", msg, punct, heard)

@@ -41,6 +41,7 @@ func (h brainHost) sayToProject(ctx context.Context, id, text string) (string, e
 	if err != nil {
 		return "", err
 	}
+	h.s.setSubject(factoryPanePrefix + id)
 	switch {
 	case p.State == "stopped":
 		return p.Name + " is stopped. It gets this when you resume it.", nil
