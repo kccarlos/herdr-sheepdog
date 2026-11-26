@@ -28,6 +28,7 @@ struct ApprovalCardView: View {
     /// How many lines of the question show before a fade and "More"; nil
     /// for all of it (the sheet, the Agents page).
     var questionLines: Int?
+    var coordinatorHint: String?
     let answer: (Int) -> Void
 
     @State private var commandExpanded = false
@@ -40,6 +41,7 @@ struct ApprovalCardView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var pending: PendingAction { card.pending }
+    private var factory: FactoryAskCardPresentation? { FactoryAskCardPresentation(pending) }
     private var agent: String { pending.agent?.isEmpty == false ? pending.agent! : "An agent" }
     private var questionCut: Bool { questionLines != nil && !questionExpanded && questionFull > questionShown + 1 }
 
@@ -53,7 +55,12 @@ struct ApprovalCardView: View {
                     .accessibilityLabel("On \(remote.label)")
                     .accessibilityIdentifier("computerLabel.question.\(remote.computerID)")
             }
-            if !embedded { header }
+            if let factory {
+                Text(factory.headerLine)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Theme.blockedText)
+                    .accessibilityAddTraits(.isHeader)
+            } else if !embedded { header }
             question
             if let command = pending.command?.trimmingCharacters(in: .whitespacesAndNewlines), !command.isEmpty {
                 // Up to three lines, never cut in the middle (where the
@@ -79,6 +86,9 @@ struct ApprovalCardView: View {
                 .accessibilityIdentifier("\(idPrefix).command")
             }
             phaseView
+            if let footer = factory?.overrideFooter ?? coordinatorHint, !card.isSettled {
+                Text(footer).font(.footnote).foregroundStyle(Theme.muted)
+            }
             if let remote, !card.isSettled {
                 remoteFooter(remote)
             }
@@ -88,7 +98,7 @@ struct ApprovalCardView: View {
         .padding(.bottom, embedded ? 12 : 14)
         .background(
             RoundedRectangle(cornerRadius: embedded ? 12 : Theme.Radius.large, style: .continuous)
-                .fill(embedded ? Theme.accentSoft : Theme.card)
+                .fill((embedded || factory != nil) ? Theme.accentSoft : Theme.card)
                 .shadow(color: .black.opacity(embedded ? 0 : 0.12), radius: 12, y: 8)
         )
         .overlay {
@@ -98,6 +108,7 @@ struct ApprovalCardView: View {
             }
         }
         .accessibilityElement(children: .contain)
+        .accessibilityLabel(factory?.accessibilityLabel ?? "")
         .accessibilityIdentifier("\(idPrefix).card")
     }
 
@@ -280,7 +291,8 @@ struct ApprovalCardView: View {
                     option: option,
                     sending: sending?.index == option.index,
                     enabled: sending == nil,
-                    identifier: "\(idPrefix).option.\(option.index)"
+                    identifier: "\(idPrefix).option.\(option.index)",
+                    emphasized: factory != nil && option.isRecommended
                 ) {
                     answer(option.index)
                 }
@@ -298,6 +310,7 @@ private struct OptionRow: View {
     let sending: Bool
     let enabled: Bool
     let identifier: String
+    var emphasized = false
     let action: () -> Void
 
     var body: some View {
@@ -321,7 +334,7 @@ private struct OptionRow: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         }
-        .buttonStyle(OptionRowStyle(sending: sending))
+        .buttonStyle(OptionRowStyle(sending: sending, emphasized: emphasized))
         .opacity(enabled || sending ? 1 : 0.5)
         .disabled(!enabled)
         .accessibilityLabel(option.accessibilityLabel)
@@ -375,12 +388,13 @@ private struct RecommendedTag: View {
 /// pressed, the amber line while its answer is sending.
 private struct OptionRowStyle: ButtonStyle {
     var sending: Bool
+    var emphasized: Bool
 
     func makeBody(configuration: Configuration) -> some View {
         let shape = RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous)
         configuration.label
             .background(shape.fill(configuration.isPressed ? Theme.fill : Theme.card))
-            .overlay(shape.strokeBorder(sending ? Theme.blocked : Theme.line, lineWidth: 1))
+            .overlay(shape.strokeBorder(sending ? Theme.blocked : emphasized ? Theme.ink : Theme.line, lineWidth: emphasized ? 2 : 1))
     }
 }
 

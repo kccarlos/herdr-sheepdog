@@ -208,6 +208,9 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
     /// Group, unread, pinned and muted (`attention`), from a daemon that
     /// keeps them; nil from an older one.
     public var attention: AgentAttention?
+    public var labels: [String: String]?
+
+    public var isFactoryAgent: Bool { labels?["sheepdog.project"] != nil }
 
     public var id: String { paneID }
 
@@ -218,7 +221,7 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case alias, kind, name, state, journal, synthetic, spoken, cwd, title, attention
+        case alias, kind, name, state, journal, synthetic, spoken, cwd, title, attention, labels
         case paneID = "pane_id"
         case workspaceLabel = "workspace_label"
         case stateSince = "state_since"
@@ -245,7 +248,8 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         spoken: String? = nil,
         cwd: String? = nil,
         title: String? = nil,
-        attention: AgentAttention? = nil
+        attention: AgentAttention? = nil,
+        labels: [String: String]? = nil
     ) {
         self.paneID = paneID
         self.alias = alias
@@ -264,6 +268,7 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
         self.cwd = cwd
         self.title = title
         self.attention = attention
+        self.labels = labels
     }
 
     /// The one-line subtitle on a chip: the pending question wins, then an

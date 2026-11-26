@@ -166,7 +166,7 @@ Everything is in SheepdogKit and tested there:
 ## Factory models and routes
 
 `Factory.swift` (SheepdogKit, `FactoryTests`) mirrors Go's `internal/factory`
-views, with no UI yet (docs/dev/ws-contract.md "Factory",
+views (docs/dev/ws-contract.md "Factory",
 docs/dev/design/app-factory.md section 4): `DaemonState.factory`
 (`FactoryProjectHead`, nil from a daemon with no projects),
 `PendingAction.factory` (`FactoryAskMeta` on a `fask-` card), and the reads
@@ -332,6 +332,16 @@ accessibility text sizes. The voice capsule stays in place.
   (a long label takes a row); only the screen's first question has the
   filled accent, the others are outlined in amber. The agent strip above
   the conversation shows the same running agents.
+- **Factory projects in Agents** (`FactoryAgentsList`). Each computer
+  supplies permanent project heads and open asks from its existing
+  `/api/state` refresh. A blocked coordinator's dialog appears on its
+  head in Needs you, alongside separate factory ask cards. Running heads
+  appear in Working, stopped heads in Stopped, and finished heads in the
+  collapsed Done section. Factory panes are filtered from ordinary rows.
+  The Agents badge counts each open factory ask or stuck coordinator once.
+  Factory asks use the same answer route and tap phases as ordinary
+  questions. Resume sends the existing goal to the paired-device start
+  route.
 - **Agent window** (`AgentScreenView`). "Open window" on an Agents card
   (a `NavigationLink` to `AgentWindowRoute` on the main `NavigationStack`),
   or in the sheet behind a strip chip, pushes the agent's live terminal;

@@ -219,7 +219,9 @@ extension SessionViewModel {
 
     /// The Agents badge: waiting agents on every computer.
     var waitingEverywhere: Int {
-        flock.waitingCount + (showsComputerLabels ? others.reduce(0) { $0 + $1.snapshot.waitingCount } : 0)
+        agentsModel.factoryList.waitingCount + (showsComputerLabels ? others.reduce(0) {
+            $0 + FactoryAgentsList(agents: $1.agents, heads: $1.factoryHeads, questions: $1.questions).waitingCount
+        } : 0)
     }
 
     /// Blocked agents on other computers, for the agent strip, with the

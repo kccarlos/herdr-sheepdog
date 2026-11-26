@@ -67,18 +67,20 @@ public struct ComputerSnapshot: Equatable, Sendable, Identifiable {
     public var reachability: Reachability
     public var agents: [Agent]
     public var questions: [PendingAction]
+    public var factoryHeads: [FactoryProjectHead]
     /// Talk to may switch here now (`ComputerModel.canTalkTo`): a computer
     /// that is backing off is not switched to, even inside the quiet period
     /// that still reads "Connecting…".
     public var canTalkTo: Bool
 
-    public init(id: String, name: String, isCurrent: Bool, reachability: Reachability, agents: [Agent] = [], questions: [PendingAction] = [], canTalkTo: Bool? = nil) {
+    public init(id: String, name: String, isCurrent: Bool, reachability: Reachability, agents: [Agent] = [], questions: [PendingAction] = [], factoryHeads: [FactoryProjectHead] = [], canTalkTo: Bool? = nil) {
         self.id = id
         self.name = name
         self.isCurrent = isCurrent
         self.reachability = reachability
         self.agents = agents
         self.questions = questions
+        self.factoryHeads = factoryHeads
         if let canTalkTo {
             self.canTalkTo = canTalkTo
         } else if case .offline = reachability {
