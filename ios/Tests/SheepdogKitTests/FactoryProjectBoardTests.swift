@@ -184,4 +184,22 @@ final class FactoryProjectBoardTests: XCTestCase {
         do { try await StubProtocol.client().sayFactory(projectID: "proj-1", text: "hi"); XCTFail("expected 409") }
         catch { XCTAssertEqual(error as? DaemonError, .rejected(status: 409, message: "notes is finished. Give it a new goal.")) }
     }
+
+    /// Fix-round: `owner_gate` and `owner_answer` never emit duplicate `"waiting on you"`
+    /// group headers, and raw underscore stage keys never leak as labels.
+    func testStageGroupingNeverDuplicatesWaitingOnYouOrLeaksRawStageKeys() throws {
+        let tasks = try decodeTasks(#"""
+        [
+          {"ref":"T2","title":"feat: answer","stage":"owner_answer","why_waiting":"Delete table?","after":[],"dependents":[],"layer":1,"rounds":0,"steps":[{"name":"implementing","state":"now"}]},
+          {"ref":"T1","title":"feat: gate","stage":"owner_gate","why_waiting":"Approve deploy?","after":[],"dependents":[],"layer":0,"rounds":0,"steps":[{"name":"CI","state":"now"}]},
+          {"ref":"T3","title":"feat: broken","stage":"blocked_or_failed","why_waiting":"CI red","after":[],"dependents":[],"layer":2,"rounds":0,"steps":[{"name":"CI","state":"now"}]}
+        ]
+        """#)
+        let board = FactoryProjectBoard(head: try head(), tasks: tasks, now: now)
+        let labels = board.activeGroups.map(\.label)
+        XCTAssertEqual(Set(labels).count, labels.count, "must not emit duplicate 'waiting on you' group headers: \(labels)")
+        XCTAssertFalse(labels.contains("owner_gate") || labels.contains("owner_answer") || labels.contains("blocked_or_failed"), "labels: \(labels)")
+        XCTAssertTrue(board.activeGroups.allSatisfy(\.isAlert))
+        XCTAssertEqual(board.activeGroups.flatMap(\.tasks).map(\.ref), ["T1", "T2", "T3"])
+    }
 }
