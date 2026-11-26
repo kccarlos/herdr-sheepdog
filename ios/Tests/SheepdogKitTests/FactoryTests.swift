@@ -23,10 +23,253 @@ final class FactoryStateDecodeTests: XCTestCase {
         XCTAssertNil(oldState.factory)
         XCTAssertNil(oldState.pendingAction?.factory)
         XCTAssertNil(oldState.questions?.first?.factory)
+        XCTAssertEqual(oldState.agents.map(\.alias), ["auth", "docs"])
+        XCTAssertEqual(oldState.pendingAction?.id, "ap-golden-2")
+        XCTAssertEqual(oldState.questions?.count, 1)
+        XCTAssertEqual(oldState.voice.mode, "gemini")
+        XCTAssertEqual(oldState.brain?.provider, "gemini")
+        XCTAssertEqual(oldState.herdr, "mock")
+        XCTAssertEqual(oldState.version, "test")
+        XCTAssertNotNil(oldState.conversationStartedAt)
 
         let emptyJSON = #"{"agents":[],"factory":[],"voice":{"mode":"off","status":"closed","muted":false,"stalled":false,"client_connected":false}}"#
         let emptyState = try DaemonClient.decoder.decode(DaemonState.self, from: Data(emptyJSON.utf8))
         XCTAssertEqual(emptyState.factory, [])
+    }
+
+    private static let minimalAgentJSON = #"{"pane_id":"fake:1","alias":"auth","kind":"codex","workspace":"synthetic","spoken":"auth","state":"working","state_since":"2026-11-25T11:00:00Z","last_interaction":"2026-11-25T11:00:00Z"}"#
+    private static let minimalVoiceJSON = #"{"mode":"off","status":"closed","muted":false,"stalled":false,"client_connected":false}"#
+
+    /// Boundary isolation: one malformed factory head (missing required `id`)
+    /// must be dropped without failing `/api/state`; good sibling heads and the
+    /// rest of the state survive intact.
+    func testStateDropsMalformedFactoryHeadMissingIDAndKeepsRestOfState() throws {
+        let json = """
+        {
+          "agents": [\(Self.minimalAgentJSON)],
+          "factory": [
+            {"id":"proj-good-1","name":"notes","goal":"A notes page","state":"running","counts":{"done":2}},
+            {"name":"broken-no-id","goal":"missing id","state":"running","counts":{}},
+            {"id":"proj-good-2","name":"recipes","goal":"Recipe index","state":"stopped","counts":{"queued":1}}
+          ],
+          "voice": \(Self.minimalVoiceJSON),
+          "version": "test"
+        }
+        """
+        let state = try DaemonClient.decoder.decode(DaemonState.self, from: Data(json.utf8))
+        XCTAssertEqual(state.factory?.map(\.id), ["proj-good-1", "proj-good-2"])
+        XCTAssertEqual(state.agents.map(\.alias), ["auth"])
+        XCTAssertEqual(state.version, "test")
+        XCTAssertEqual(state.voice.mode, "off")
+    }
+
+    /// Boundary isolation + strict inner decoding: a head with a malformed
+    /// nested field (`alert`, `counts`, non-string `state`) fails its own decode
+    /// and is dropped from `/api/state` rather than kept with silently zeroed fields.
+    func testStateDropsFactoryHeadWithMalformedNestedFields() throws {
+        let json = """
+        {
+          "agents": [\(Self.minimalAgentJSON)],
+          "factory": [
+            {"id":"proj-good-1","name":"notes","goal":"g","state":"running","counts":{"done":2}},
+            {"id":"proj-bad-alert","name":"bad-alert","goal":"g","state":"running","counts":{},"alert":{"kind":"disk"}},
+            {"id":"proj-bad-counts","name":"bad-counts","goal":"g","state":"running","counts":{"done":"nine"}},
+            {"id":"proj-bad-state","name":"bad-state","goal":"g","state":123,"counts":{}},
+            {"id":"proj-good-2","name":"recipes","goal":"g","state":"stopped","counts":{"queued":1}}
+          ],
+          "voice": \(Self.minimalVoiceJSON),
+          "version": "test"
+        }
+        """
+        let state = try DaemonClient.decoder.decode(DaemonState.self, from: Data(json.utf8))
+        XCTAssertEqual(state.factory?.map(\.id), ["proj-good-1", "proj-good-2"])
+        XCTAssertEqual(state.agents.map(\.alias), ["auth"])
+    }
+
+    /// Boundary isolation: a non-array `"factory"` value on `/api/state` decodes
+    /// as `nil` factory while leaving the rest of the state intact.
+    func testStateNonArrayFactoryDecodesAsNilAndKeepsRestOfState() throws {
+        let cases: [(label: String, factoryJSON: String)] = [
+            ("object", #"{"id":"proj-1"}"#),
+            ("string", #""not-an-array""#),
+            ("number", "42"),
+            ("boolean", "true"),
+            ("null", "null"),
+        ]
+        for (label, factoryJSON) in cases {
+            let json = """
+            {
+              "agents": [\(Self.minimalAgentJSON)],
+              "factory": \(factoryJSON),
+              "voice": \(Self.minimalVoiceJSON),
+              "version": "test"
+            }
+            """
+            let state = try DaemonClient.decoder.decode(DaemonState.self, from: Data(json.utf8))
+            XCTAssertNil(state.factory, "non-array factory (\(label)) should decode as nil")
+            XCTAssertEqual(state.agents.map(\.alias), ["auth"], "agents intact for \(label)")
+            XCTAssertEqual(state.version, "test", "version intact for \(label)")
+            XCTAssertEqual(state.voice.mode, "off", "voice intact for \(label)")
+        }
+    }
+
+    /// Boundary isolation: a `PendingAction` with a malformed `"factory"` object
+    /// (missing `project`, wrong field type, or non-object) still decodes the card
+    /// and `/api/state` with `factory == nil`.
+    func testStateWithMalformedPendingActionFactoryDecodesCardWithNilFactory() throws {
+        let json = """
+        {
+          "agents": [\(Self.minimalAgentJSON)],
+          "pending_action": {
+            "id": "fask-missing-project",
+            "pane_id": "factory:proj-1",
+            "kind": "answer_prompt",
+            "agent": "notes",
+            "question": "Delete?",
+            "factory": {"kind": "delete"}
+          },
+          "questions": [
+            {
+              "id": "fask-missing-project",
+              "pane_id": "factory:proj-1",
+              "kind": "answer_prompt",
+              "agent": "notes",
+              "question": "Delete?",
+              "factory": {"kind": "delete"}
+            },
+            {
+              "id": "fask-wrong-type",
+              "pane_id": "factory:proj-1",
+              "kind": "answer_prompt",
+              "agent": "notes",
+              "question": "Save?",
+              "factory": {"project": 123, "kind": "rule"}
+            },
+            {
+              "id": "fask-non-object",
+              "pane_id": "factory:proj-1",
+              "kind": "answer_prompt",
+              "agent": "notes",
+              "question": "Merge?",
+              "factory": "bad"
+            }
+          ],
+          "factory": [
+            {"id":"proj-1","name":"notes","goal":"g","state":"running","counts":{}}
+          ],
+          "voice": \(Self.minimalVoiceJSON)
+        }
+        """
+        let state = try DaemonClient.decoder.decode(DaemonState.self, from: Data(json.utf8))
+        let pinned = try XCTUnwrap(state.pendingAction)
+        XCTAssertEqual(pinned.id, "fask-missing-project")
+        XCTAssertEqual(pinned.agent, "notes")
+        XCTAssertNil(pinned.factory)
+
+        let questions = try XCTUnwrap(state.questions)
+        XCTAssertEqual(questions.map(\.id), ["fask-missing-project", "fask-wrong-type", "fask-non-object"])
+        for q in questions {
+            XCTAssertNil(q.factory, "malformed factory on \(q.id) should decode as nil")
+        }
+        XCTAssertEqual(state.factory?.map(\.id), ["proj-1"])
+        XCTAssertEqual(state.agents.map(\.alias), ["auth"])
+    }
+
+    /// Strict inner decoding: malformed `alert`, `counts`, or non-string `state`
+    /// on `FactoryProjectHead` must fail decoding rather than silently zeroing the field.
+    func testFactoryProjectHeadRejectsMalformedNestedValues() throws {
+        let badCases: [(label: String, json: String)] = [
+            ("alert missing cause", #"{"id":"proj-1","name":"notes","goal":"g","state":"running","counts":{},"alert":{"kind":"disk"}}"#),
+            ("alert non-object", #"{"id":"proj-1","name":"notes","goal":"g","state":"running","counts":{},"alert":"disk"}"#),
+            ("counts wrong value type", #"{"id":"proj-1","name":"notes","goal":"g","state":"running","counts":{"done":"nine"}}"#),
+            ("counts non-object", #"{"id":"proj-1","name":"notes","goal":"g","state":"running","counts":"bad"}"#),
+            ("state non-string", #"{"id":"proj-1","name":"notes","goal":"g","state":123,"counts":{}}"#),
+        ]
+        for (label, json) in badCases {
+            XCTAssertThrowsError(
+                try DaemonClient.decoder.decode(FactoryProjectHead.self, from: Data(json.utf8)),
+                "FactoryProjectHead must fail on \(label), not silently zero the field"
+            )
+        }
+
+        let validNulls = #"{"id":"proj-1","name":"notes","goal":"g","state":"paused","counts":null,"alert":null}"#
+        let head = try DaemonClient.decoder.decode(FactoryProjectHead.self, from: Data(validNulls.utf8))
+        XCTAssertEqual(head.state, .unknown)
+        XCTAssertEqual(head.counts, [:])
+        XCTAssertNil(head.alert)
+    }
+
+    /// Strict inner decoding: malformed `alert`, `counts`, or non-string `state`
+    /// on `FactoryProject` must fail decoding rather than silently zeroing the field.
+    func testFactoryProjectRejectsMalformedNestedValues() throws {
+        let badCases: [(label: String, json: String)] = [
+            ("alert wrong cause type", #"{"id":"proj-1","name":"notes","running":true,"state":"running","counts":{},"alert":{"kind":"disk","cause":42}}"#),
+            ("alert missing cause", #"{"id":"proj-1","name":"notes","running":true,"state":"running","counts":{},"alert":{"kind":"disk"}}"#),
+            ("counts non-object", #"{"id":"proj-1","name":"notes","running":true,"state":"running","counts":"bad"}"#),
+            ("counts wrong value type", #"{"id":"proj-1","name":"notes","running":true,"state":"running","counts":{"done":"nine"}}"#),
+            ("state non-string", #"{"id":"proj-1","name":"notes","running":true,"state":999,"counts":{}}"#),
+        ]
+        for (label, json) in badCases {
+            XCTAssertThrowsError(
+                try DaemonClient.decoder.decode(FactoryProject.self, from: Data(json.utf8)),
+                "FactoryProject must fail on \(label), not silently zero the field"
+            )
+        }
+
+        // Go's Engine.Projects() LoadState-error shape omits state/counts/goal/alert.
+        let loadErrorJSON = #"{"id":"proj-bad","name":"proj-bad","running":false,"error":"unexpected EOF"}"#
+        let errored = try DaemonClient.decoder.decode(FactoryProject.self, from: Data(loadErrorJSON.utf8))
+        XCTAssertEqual(errored.state, .unknown)
+        XCTAssertEqual(errored.counts, [:])
+        XCTAssertNil(errored.alert)
+        XCTAssertEqual(errored.error, "unexpected EOF")
+    }
+
+    /// Strict inner decoding: malformed `run_started_at` date or malformed
+    /// `last_actor_decision` on `FactoryTask` must fail decoding, while Go's
+    /// nil-slice `null` arrays still decode as empty arrays.
+    func testFactoryTaskRejectsMalformedDateAndLastActorDecision() throws {
+        let badCases: [(label: String, json: String)] = [
+            ("bad run_started_at", #"{"ref":"T8","title":"t","stage":"working","after":[],"dependents":[],"layer":0,"rounds":0,"steps":[],"run_role":"worker","run_cli":"codex","run_started_at":"not-a-date"}"#),
+            ("bad last_actor_decision date", #"{"ref":"T8","title":"t","stage":"working","after":[],"dependents":[],"layer":0,"rounds":0,"steps":[],"last_actor_decision":{"at":"bad-date","by":"coordinator","decision":"sent back"}}"#),
+            ("last_actor_decision missing by", #"{"ref":"T8","title":"t","stage":"working","after":[],"dependents":[],"layer":0,"rounds":0,"steps":[],"last_actor_decision":{"at":"2026-11-25T11:03:00Z","decision":"sent back"}}"#),
+        ]
+        for (label, json) in badCases {
+            XCTAssertThrowsError(
+                try DaemonClient.decoder.decode(FactoryTask.self, from: Data(json.utf8)),
+                "FactoryTask must fail on \(label), not silently nil the field"
+            )
+        }
+
+        let nilSlicesJSON = #"{"ref":"T11","title":"sync","stage":"queued","after":null,"dependents":null,"layer":0,"rounds":0,"steps":null}"#
+        let task = try DaemonClient.decoder.decode(FactoryTask.self, from: Data(nilSlicesJSON.utf8))
+        XCTAssertEqual(task.after, [])
+        XCTAssertEqual(task.dependents, [])
+        XCTAssertEqual(task.steps, [])
+        XCTAssertNil(task.runStartedAt)
+        XCTAssertNil(task.lastActorDecision)
+    }
+
+    /// Strict inner decoding: malformed `at` date or malformed `set` object on
+    /// `FactoryAsk` must fail decoding, while Go's nil-slice `null` options still decode.
+    func testFactoryAskRejectsMalformedDateAndSettingChange() throws {
+        let badCases: [(label: String, json: String)] = [
+            ("bad at date", #"{"id":"ask-1","project":"proj-1","kind":"rule","gated":true,"question":"Save?","options":["Save"],"at":"not-a-date"}"#),
+            ("set missing value", #"{"id":"ask-1","project":"proj-1","kind":"rule","gated":true,"question":"Save?","options":["Save"],"set":{"name":"max_running"}}"#),
+            ("set non-object", #"{"id":"ask-1","project":"proj-1","kind":"rule","gated":true,"question":"Save?","options":["Save"],"set":"bad"}"#),
+        ]
+        for (label, json) in badCases {
+            XCTAssertThrowsError(
+                try DaemonClient.decoder.decode(FactoryAsk.self, from: Data(json.utf8)),
+                "FactoryAsk must fail on \(label), not silently nil the field"
+            )
+        }
+
+        let nilOptionsJSON = #"{"id":"ask-2","project":"proj-1","kind":"rule","gated":true,"question":"Save?","options":null}"#
+        let ask = try DaemonClient.decoder.decode(FactoryAsk.self, from: Data(nilOptionsJSON.utf8))
+        XCTAssertEqual(ask.options, [])
+        XCTAssertNil(ask.set)
+        XCTAssertNil(ask.at)
     }
 
     /// Pins app-factory.md §3.2, §4 (`factory` head keys incl. optional
