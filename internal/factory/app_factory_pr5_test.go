@@ -1,12 +1,14 @@
 package factory
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"slices"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 )
@@ -116,6 +118,69 @@ func TestCoordinatorPromptHasOwnerSayRule(t *testing.T) {
 	for _, want := range []string{"ask", "never", "card"} {
 		if !strings.Contains(line, want) {
 			t.Errorf("coordinator.md \"owner said\" rule missing %q:\n%s", want, line)
+		}
+	}
+}
+
+// Pins Carbon F1: NormalizeSay refuses text > 1,000 runes, but caps a long
+// daemon-attached heard transcript instead of rejecting a short instruction.
+func TestNormalizeSayCapsLongHeardWithoutRefusingShortText(t *testing.T) {
+	t.Parallel()
+
+	longHeard := "prefix-" + strings.Repeat("h", 1050)
+	gotText, gotHeard, ref := NormalizeSay("skip the export task", longHeard)
+	if ref != nil {
+		t.Fatalf("NormalizeSay(short text, %d-rune heard) refused: %+v", utf8.RuneCountInString(longHeard), ref)
+	}
+	if gotText != "skip the export task" {
+		t.Errorf("text = %q, want %q", gotText, "skip the export task")
+	}
+	if gotHeard == "" || utf8.RuneCountInString(gotHeard) > 1000 || !strings.HasPrefix(gotHeard, "prefix-"+strings.Repeat("h", 50)) {
+		t.Errorf("heard = %q (runes=%d), want non-empty prefix capped at <= 1000 runes", gotHeard, utf8.RuneCountInString(gotHeard))
+	}
+	if _, _, ref := NormalizeSay(strings.Repeat("t", 1001), "short"); ref == nil || ref.Code != "text_too_long" {
+		t.Errorf("NormalizeSay(>1000-rune text) = %+v, want text_too_long refusal", ref)
+	}
+
+	h := newProjectHarness(t, "Long heard")
+	if _, err := h.eng.SayByID(context.Background(), h.id, "skip the export task", longHeard); err != nil {
+		t.Fatalf("SayByID(short text, long heard): %v", err)
+	}
+	wakes := h.state().Project.Wakes
+	if len(wakes) != 1 || !strings.HasPrefix(wakes[0].Key, "owner_say:") {
+		t.Fatalf("wakes = %+v, want 1 owner_say wake", wakes)
+	}
+	if strings.Contains(wakes[0].Facts, "\n") || !strings.Contains(wakes[0].Facts, "skip the export task") {
+		t.Errorf("wake facts = %q, want single line containing short instruction", wakes[0].Facts)
+	}
+}
+
+// Pins Carbon F4 / Neon observation 1: sayLocked checks the last rune
+// (including CJK sentence-final punctuation) rather than the last UTF-8 byte,
+// so relayed Chinese instructions do not get a spurious ASCII period ("。.").
+func TestSayByIDRelayedCJKPunctuationNoExtraPeriod(t *testing.T) {
+	t.Parallel()
+
+	h := newProjectHarness(t, "CJK say")
+	cases := []struct {
+		text, heard, wantPrefix, forbid string
+	}{
+		{text: "跳过导出。", heard: "让笔记工厂跳过导出。", wantPrefix: "跳过导出。 Heard: ", forbid: "。."},
+		{text: "跳过导出？", heard: "要跳过导出吗？", wantPrefix: "跳过导出？ Heard: ", forbid: "？."},
+		{text: "跳过导出！", heard: "立刻跳过导出！", wantPrefix: "跳过导出！ Heard: ", forbid: "！."},
+		{text: "skip export", heard: "please skip export", wantPrefix: "skip export. Heard: "},
+	}
+	for i, tc := range cases {
+		if _, err := h.eng.SayByID(context.Background(), h.id, tc.text, tc.heard); err != nil {
+			t.Fatalf("case %d SayByID(%q): %v", i, tc.text, err)
+		}
+		wakes := h.state().Project.Wakes
+		facts := wakes[len(wakes)-1].Facts
+		if !strings.HasPrefix(facts, tc.wantPrefix) {
+			t.Errorf("case %d facts = %q, want prefix %q", i, facts, tc.wantPrefix)
+		}
+		if tc.forbid != "" && strings.Contains(facts, tc.forbid) {
+			t.Errorf("case %d facts = %q, contains spurious %q", i, facts, tc.forbid)
 		}
 	}
 }

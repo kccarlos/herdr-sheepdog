@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/supervisor"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
@@ -129,5 +131,76 @@ func TestPromptOnProjectRoutesToSayWithHeardWordsAndNoTerminalWrite(t *testing.T
 	_, _ = e.brain.Turn(context.Background(), brain.Request{Kind: brain.KindAnnounce, Trigger: brain.TriggerEvent, Agent: "notes", Event: "done"})
 	if s, _ := factory.LoadState(paths.State("proj-1a2b3c4d")); len(s.Project.Wakes) != wakesBefore {
 		t.Errorf("event turn queued Say wake: before=%d after=%d", wakesBefore, len(s.Project.Wakes))
+	}
+}
+
+// Pins Carbon F1: an orchestrator turn whose recorded user text exceeds 1,000
+// runes still relays a short instruction via prompt on a factory project row.
+func TestPromptOnProjectAcceptsLongHeardTurnWithShortInstruction(t *testing.T) {
+	paths := factory.Paths{DataDir: t.TempDir()}
+	st := flow.State{
+		Seq:      1,
+		Settings: flow.DefaultSettings(),
+		Project: flow.Project{
+			ID: "proj-1a2b3c4d", Folder: "/work/notes", Goal: "Notes", Started: true, RunID: "hc:coord-1",
+			Run: &flow.RunRecord{Role: flow.RoleCoordinator, CLI: "claude", Address: "hc:coord-1", State: flow.PhaseIdle},
+		},
+	}
+	if err := factory.SaveState(paths.State(st.Project.ID), st); err != nil {
+		t.Fatal(err)
+	}
+	eng, m := factory.New(paths, nil), braintest.NewModel()
+	e := newPR4Env(t, m, eng)
+	lbl := map[string]string{"sheepdog.project": "proj-1a2b3c4d", "sheepdog.role": flow.RoleCoordinator}
+	e.addPane("hc:coord-1", "coord-1a2b", "claude", "", herdr.StateWorking, lbl, "")
+
+	longHeard := "Please look at this pasted context and tell the notes factory to skip export: " + strings.Repeat("x", 1050)
+	res, toolErr, _ := e.sayTool(m, longHeard, braintest.FC(brain.ToolPrompt, map[string]any{"agent": "the notes factory", "text": "skip the export task"}))
+	if toolErr != "" || res != "Told the notes factory." {
+		t.Fatalf("prompt with >1000-rune heard = (%q, %q), want (\"Told the notes factory.\", \"\")", res, toolErr)
+	}
+	after, err := factory.LoadState(paths.State("proj-1a2b3c4d"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(after.Project.Wakes) != 1 || !strings.HasPrefix(after.Project.Wakes[0].Key, "owner_say:") {
+		t.Fatalf("wakes = %+v, want 1 owner_say wake", after.Project.Wakes)
+	}
+	if !strings.Contains(after.Project.Wakes[0].Facts, "skip the export task") || !strings.Contains(after.Project.Wakes[0].Facts, "Please look at this pasted context") {
+		t.Errorf("wake facts = %q, want short instruction and capped heard prefix", after.Project.Wakes[0].Facts)
+	}
+}
+
+// Pins Carbon F2: prompting a factory project updates lastSubject so a
+// follow-up "and tell it ..." turn is not focused on a stale ordinary agent.
+func TestPromptOnProjectClearsStaleOrdinaryAgentFocus(t *testing.T) {
+	fac := inject.NewFactory(nil)
+	fac.SetProject(inject.FactoryProject{
+		ProjectHead: factory.ProjectHead{ID: "proj-1a2b3c4d", Name: "notes", Folder: "/work/notes", Goal: "Notes", State: "running", CoordinatorPane: "hc:coord-1"},
+	})
+	m := braintest.NewModel()
+	e := newPR4Env(t, m, fac)
+	e.addPane("w5:p1", "auth", "codex", "", herdr.StateIdle, nil, "")
+	e.srv.SetScreen("w5:p1", "auth screen\n")
+
+	e.sayTool(m, "check auth", braintest.FC(brain.ToolReadScreen, map[string]any{"agent": "auth"}))
+	res, toolErr, _ := e.sayTool(m, "tell the notes factory to skip PDF export", braintest.FC(brain.ToolPrompt, map[string]any{"agent": "the notes factory", "text": "skip PDF export"}))
+	if toolErr != "" || res != "Told the notes factory." {
+		t.Fatalf("prompt on notes factory = (%q, %q), want (\"Told the notes factory.\", \"\")", res, toolErr)
+	}
+
+	e.sayTool(m, "and tell it to keep Markdown export", &genai.FunctionCall{Name: brain.ToolListAgents})
+	found := false
+	for _, msg := range slices.Backward(e.brain.Transcript().Messages()) {
+		if msg.Kind == brain.KindRequest && strings.Contains(msg.Content, "and tell it to keep Markdown export") {
+			found = true
+			if strings.Contains(msg.Content, "the one in focus is\n- auth") {
+				t.Errorf("after prompting notes factory, follow-up 'it' still focused on auth:\n%s", msg.Content)
+			}
+			break
+		}
+	}
+	if !found {
+		t.Fatal("follow-up request not found in brain transcript")
 	}
 }
