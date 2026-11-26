@@ -127,4 +127,10 @@ func TestPR2bProjectGuards(t *testing.T) {
 			t.Errorf("Project.CoordWakeActed must be removed in PR 2b (design.md §10)")
 		}
 	})
+
+	t.Run("RetryCoordWake_removed_from_RunEvent", func(t *testing.T) {
+		if _, has := reflect.TypeFor[RunEvent]().FieldByName("RetryCoordWake"); has {
+			t.Errorf("RunEvent.RetryCoordWake must be removed in PR 2b (design.md §10)")
+		}
+	})
 }
