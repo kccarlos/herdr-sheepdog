@@ -268,6 +268,7 @@ type PendingAction struct {
 	PayloadText   string      `json:"payload_text"`
 	CreatedAt     time.Time   `json:"created_at"`
 	ExpiresAt     time.Time   `json:"expires_at"`
+	Factory       *FactoryAsk `json:"factory,omitempty"`
 
 	// Question is the short phrase completing "<alias> is asking …" for an
 	// answer_prompt action.
@@ -282,6 +283,13 @@ type PendingAction struct {
 	NoKeys   []string `json:"no_keys,omitempty"`
 	Held     bool     `json:"held,omitempty"`
 	Promoted bool     `json:"promoted,omitempty"`
+}
+
+type FactoryAsk struct {
+	Project     string `json:"project"`
+	Task        string `json:"task,omitempty"`
+	Kind        string `json:"kind"`
+	ProjectName string `json:"-"`
 }
 
 // Option is one selectable choice of an answer_prompt action.

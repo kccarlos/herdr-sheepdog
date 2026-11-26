@@ -32,6 +32,27 @@ var _ Factory = (*factory.Engine)(nil)
 
 type factoryAnnounce struct{ id, paneID, text string }
 
+func (s *Supervisor) factoryProjectName(id string) string {
+	if f, ok := s.cfg.Factory.(interface{ ProjectName(string) string }); ok {
+		return f.ProjectName(id)
+	}
+	if s.cfg.Factory != nil {
+		for _, p := range s.cfg.Factory.Projects() {
+			if p.ID == id {
+				return cmp.Or(p.Name, factory.ProjectName(id, p.Folder))
+			}
+		}
+	}
+	return id
+}
+
+func (s *Supervisor) coordinatorName(row state.Agent) string {
+	if id := row.Labels["sheepdog.project"]; s.cfg.Factory != nil && id != "" && row.Labels["sheepdog.role"] == flow.RoleCoordinator {
+		return s.factoryProjectName(id)
+	}
+	return ""
+}
+
 // FactoryQuestions returns open gated factory asks in creation order.
 func (s *Supervisor) FactoryQuestions() []state.PendingAction {
 	s.factoryMu.Lock()
@@ -69,7 +90,6 @@ func (s *Supervisor) syncFactoryAsks() {
 	s.factoryOpMu.Lock()
 	all := s.cfg.Factory.Asks(false)
 	var next []state.PendingAction
-	names := make(map[string]string, len(all))
 	for _, a := range all {
 		if !a.Gated || a.Status != flow.AskStatusOpen {
 			continue
@@ -79,16 +99,15 @@ func (s *Supervisor) syncFactoryAsks() {
 			opts[i] = state.Option{Label: lbl, Recommended: lbl == a.Recommend}
 		}
 		pid := factoryAskPrefix + a.ID
-		if names[pid] = strings.TrimSpace(a.Task); names[pid] == "" {
-			names[pid] = strings.TrimSpace(a.Project)
-		}
-		next = append(next, state.PendingAction{ID: pid, PaneID: factoryPanePrefix + a.Project, Kind: state.PendingAnswerPrompt, SpokenSummary: a.Question, Question: a.Question, Command: flow.FormatAskCommand(a), Options: opts, CreatedAt: a.At})
+		meta := &state.FactoryAsk{Project: a.Project, Task: a.Task, Kind: a.Kind, ProjectName: s.factoryProjectName(a.Project)}
+		next = append(next, state.PendingAction{ID: pid, PaneID: factoryPanePrefix + a.Project, Kind: state.PendingAnswerPrompt,
+			SpokenSummary: a.Question, Question: a.Question, Command: flow.FormatAskCommand(a), Options: opts, CreatedAt: a.At, Factory: meta})
 	}
 	var notifies []push.Notification
 	var announces []factoryAnnounce
 	s.mu.Lock()
 	s.factoryMu.Lock()
-	s.factoryAsks, s.factoryAskNames = next, names
+	s.factoryAsks = next
 	s.factoryMu.Unlock()
 	snap := s.store.Snapshot()
 	prev := snap.Session.FactoryAsks
@@ -158,8 +177,8 @@ func (s *Supervisor) pushFactoryAnnounces(announces []factoryAnnounce) {
 }
 
 func (s *Supervisor) collectFactoryAnnouncesLocked() []factoryAnnounce {
-	asks, names := s.snapshotFactoryAsksLocked()
 	zh := s.ceoChineseLocked()
+	asks, names := s.snapshotFactoryAsksLocked(zh)
 	var out []factoryAnnounce
 	for i, p := range asks {
 		k := keyOf(p)
@@ -176,12 +195,14 @@ func (s *Supervisor) collectFactoryAnnouncesLocked() []factoryAnnounce {
 	return out
 }
 
-func (s *Supervisor) snapshotFactoryAsksLocked() ([]state.PendingAction, []string) {
-	s.factoryMu.Lock()
-	defer s.factoryMu.Unlock()
-	asks, names := slices.Clone(s.factoryAsks), make([]string, len(s.factoryAsks))
+func (s *Supervisor) snapshotFactoryAsksLocked(zh bool) ([]state.PendingAction, []string) {
+	asks := s.FactoryQuestions()
+	names := make([]string, len(asks))
 	for i, p := range asks {
-		names[i] = s.factoryAskNames[p.ID]
+		names[i] = p.Factory.ProjectName
+		if task := strings.TrimSpace(p.Factory.Task); task != "" {
+			names[i] += pickLang(zh, ", ", "，") + task
+		}
 	}
 	return asks, names
 }
@@ -230,7 +251,6 @@ func (s *Supervisor) execFactoryAnswer(p state.PendingAction, option int, inputK
 	if err == nil || gone {
 		s.factoryMu.Lock()
 		s.factoryAsks = slices.DeleteFunc(s.factoryAsks, func(x state.PendingAction) bool { return x.ID == p.ID })
-		delete(s.factoryAskNames, p.ID)
 		s.factoryMu.Unlock()
 		had := false
 		_ = s.store.UpdateSession(func(ss *state.Session) {
@@ -287,7 +307,8 @@ func (s *Supervisor) factoryVoiceFastPath(c claim, callID string, daemon, forceS
 		return voice.ToolResult{}, false
 	}
 	s.mu.Lock()
-	asks, names := s.snapshotFactoryAsksLocked()
+	zh := s.ceoChineseLocked()
+	asks, names := s.snapshotFactoryAsksLocked(zh)
 	if len(asks) == 0 || slices.ContainsFunc(c.ins, func(in *shepherdInput) bool {
 		return in.kind != InputVoice || in.used || strings.TrimSpace(in.saidBefore) != ""
 	}) {
@@ -295,7 +316,6 @@ func (s *Supervisor) factoryVoiceFastPath(c claim, callID string, daemon, forceS
 		return voice.ToolResult{}, false
 	}
 	s.syncToldLocked()
-	zh := s.ceoChineseLocked()
 	target, targetName, optIdx, clarify, readBack := s.resolveFactoryVoiceLocked(asks, names, c.text, c.ins[0].began, zh)
 	if optIdx == 0 && clarify == "" {
 		s.mu.Unlock()
@@ -336,7 +356,7 @@ func (s *Supervisor) resolveFactoryVoiceLocked(asks []state.PendingAction, names
 		target, name = asks[0], names[0]
 		if o, ok := matchFactoryOption(target, text); ok {
 			opt = o
-		} else if opt, named = matchFactoryNamed(target, name, text); !named {
+		} else if opt, named = matchFactoryAsk(target, name, text); !named {
 			return state.PendingAction{}, "", 0, "", false
 		}
 	} else {
@@ -344,7 +364,7 @@ func (s *Supervisor) resolveFactoryVoiceLocked(asks []state.PendingAction, names
 		for i, p := range asks {
 			if _, ok := matchFactoryOption(p, text); ok {
 				wholeAny = true
-			} else if o, ok := matchFactoryNamed(p, names[i], text); ok {
+			} else if o, ok := matchFactoryAsk(p, names[i], text); ok {
 				target, name, opt, hits = p, names[i], o, hits+1
 			}
 		}
@@ -370,6 +390,13 @@ func (s *Supervisor) resolveFactoryVoiceLocked(asks []state.PendingAction, names
 		return target, name, 0, pickLang(zh, fmt.Sprintf("Did you mean %s or %s? Repeat your answer with the name.", agent, name), fmt.Sprintf("你说的是 %s 还是 %s？请带上名字再说一次。", agent, name)), false
 	}
 	return target, name, opt, "", false
+}
+
+func matchFactoryAsk(p state.PendingAction, name, text string) (int, bool) {
+	if opt, ok := matchFactoryNamed(p, strings.ReplaceAll(name, "，", " "), text); ok {
+		return opt, true
+	}
+	return matchFactoryNamed(p, cmp.Or(p.Factory.Task, p.Factory.Project), text)
 }
 
 func matchFactoryOption(p state.PendingAction, rem string) (int, bool) {
@@ -420,7 +447,7 @@ func (s *Supervisor) collidingAgentPromptLocked(text string) string {
 }
 
 func (s *Supervisor) factoryControl(start bool) voice.ToolResult {
-	var changed, errs []string
+	var changed, names, errs []string
 	for _, p := range s.cfg.Factory.Projects() {
 		st := cmp.Or(p.State, map[bool]string{true: "running", false: "stopped"}[p.Running])
 		if p.Error != "" || (start && st != "stopped") || (!start && st != "running" && (st != "finished" || !p.Live)) {
@@ -432,10 +459,12 @@ func (s *Supervisor) factoryControl(start bool) voice.ToolResult {
 		} else {
 			err = s.cfg.Factory.Stop(p.ID)
 		}
+		name := cmp.Or(p.Name, factory.ProjectName(p.ID, p.Folder))
 		if err != nil {
-			errs = append(errs, fmt.Sprintf("%s: %v", p.ID, err))
+			errs = append(errs, fmt.Sprintf("%s: %v", name, err))
 		} else {
 			changed = append(changed, p.ID)
+			names = append(names, name)
 		}
 	}
 	path, spoken := "factory_stop", "No factory project is running."
@@ -445,9 +474,9 @@ func (s *Supervisor) factoryControl(start bool) voice.ToolResult {
 	s.log.Log(logSource, "supervisor.fast_path", "", map[string]any{"path": path, "projects": changed})
 	switch {
 	case len(changed) > 0 && start:
-		spoken = fmt.Sprintf("Started the factory for %s.", strings.Join(changed, ", "))
+		spoken = fmt.Sprintf("Started the factory for %s.", strings.Join(names, ", "))
 	case len(changed) > 0:
-		spoken = fmt.Sprintf("Stopped the factory for %s. The plan is kept.", strings.Join(changed, ", "))
+		spoken = fmt.Sprintf("Stopped the factory for %s. The plan is kept.", strings.Join(names, ", "))
 	case len(errs) > 0:
 		spoken = "Could not update the factory: " + strings.Join(errs, "; ") + "."
 	}

@@ -1066,7 +1066,7 @@ answer a question by tap. All three need a paired device under "Auth".
   `herdr.state` is `herdr`, `pending.created` is `pending`, and
   `supervisor.relay` is `supervisor`. The current kinds are `agent`,
   `brain`, `card`, `cli`, `context`, `conversation`, `daemon`,
-  `eventlog`, `events`, `files`, `herdr`, `investigation`, `note`,
+  `eventlog`, `events`, `factory`, `files`, `herdr`, `investigation`, `note`,
   `observe`, `pending`, `promise`, `prompts`, `push`, `question`,
   `space`, `supervisor`, `turn`, `user`, `voice`, `web`, and `worker`.
   An unknown kind is a 400 with
@@ -1891,8 +1891,7 @@ The factory engine (`internal/factory`) serves nine HTTP routes alongside the
 `/factory` board (`accessLoopback`). Per rule V1 in
 [`engine-v2/design.md`](engine-v2/design.md#121-what-the-surfaces-read), the
 Go structs returned by `internal/factory` and `internal/web/factory.go` are
-the single source of truth for factory JSON shapes (no duplicate schema is
-kept here):
+the single source of truth for factory JSON shapes.
 
 - **Paired device (`accessDevice`):** `GET /api/factory/projects`,
   `GET /api/factory/projects/{id}/graph`, `GET /api/factory/projects/{id}/log`,
@@ -1902,6 +1901,28 @@ kept here):
 - **Loopback only (`accessLoopback`):** `GET /api/factory/status`,
   `POST /api/factory/start`, `POST /api/factory/stop`, and
   `POST /api/factory/report`.
+
+`GET /api/state` includes `factory` when there are projects. Each entry has
+`id`, `name`, `goal`, `state` (running, stopped or finished), and `counts`
+(task counts by stage). It also includes `folder` when known,
+`coordinator_pane` when the coordinator has a live pane, and `alert` when
+one is open. The alert has `kind`, `cause`, and an optional `fix`. The
+stopping alert wins, then the first `agents_down` alert by key, then the
+first remaining alert by key. The project view shares `name`,
+`coordinator_pane` and `alert` with this entry. The name comes from the last
+part of the folder path and falls back to the id when there is no folder.
+
+Factory question cards include `factory` with `project` (the id), `kind`
+and `task` when the ask is about a task. Their `agent` is the project name.
+Graph tasks can include `run_role`, `run_cli` and `run_started_at` from
+the live run, plus `last_actor_decision` with `by`, `decision`, `at` and
+`why` when available. It is the most recent nonempty decision for the task
+by the coordinator or owner. `last_rule` and `last_decision` still carry
+the engine's task rule and decision.
+
+`factory.changed` carries `{project}` when the project gets a log line
+or its `/api/state` entry changes. Clients can use it to refresh the
+project state. Factory-quiet `herdr.transition` events carry `muted: true`.
 
 See [`engine-v2/design.md`](engine-v2/design.md) §7.1 (asks, browser
 enrolment, `AnswerProof`, and O32 no-quick-reply pushes) and §12.1 (views).

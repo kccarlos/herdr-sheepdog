@@ -90,6 +90,9 @@ type Engine struct {
 	logClean          map[string]bool                                   // true after TrimLog + state write-back succeeded under mu
 	git               *world.Git
 	mu                sync.Mutex
+	projectHeadsOnce  sync.Once
+	projectHeadsMu    sync.RWMutex
+	projectHeads      map[string]ProjectHead
 	wake              chan struct{}
 	lastPass          map[string]time.Time            // monotonic reading of previous pass per project (design.md 2.5)
 	lastSweep         map[string]time.Time            // per-process last sweep per project (design.md 7.3)
@@ -1587,7 +1590,7 @@ func (e *Engine) launchRunLocked(ctx context.Context, id string, s *flow.State, 
 		term, abort, err = world.StartTerminal(ctx, e.HC, spec, func() error {
 			tok := rand.Text()
 			*hash, *recp, env["SHEEPDOG_RUN_TOKEN"], minted = tokenHash(tok), &rec, tok, true
-			if sErr := e.saveStateLocked(id, *s); sErr != nil {
+			if sErr := e.saveStateLocked(id, *s, false); sErr != nil {
 				*hash, *recp = prevHash, prevRec
 				e.logError("factory.commit_error", id, sErr)
 				return sErr
@@ -3235,11 +3238,16 @@ func (e *Engine) freshLocked(id string, s flow.State) error {
 	return e.markStoreLocked(id, err)
 }
 
-func (e *Engine) saveStateLocked(id string, s flow.State) error {
+func (e *Engine) saveStateLocked(id string, s flow.State, logLine bool) error {
 	if !e.cleanLocked(id) {
 		return errStoreDirty
 	}
-	return e.markStoreLocked(id, map[bool]func(string, flow.State) error{true: e.writeState, false: SaveState}[e.writeState != nil](e.Paths.State(id), s))
+	e.initProjectHeads()
+	if err := e.markStoreLocked(id, map[bool]func(string, flow.State) error{true: e.writeState, false: SaveState}[e.writeState != nil](e.Paths.State(id), s)); err != nil {
+		return err
+	}
+	e.publishProjectHead(id, s, logLine)
+	return nil
 }
 
 func (e *Engine) appendLogLocked(id string, l LogLine) error {
@@ -3250,7 +3258,7 @@ func (e *Engine) appendLogLocked(id string, l LogLine) error {
 }
 
 func (e *Engine) saveLocked(id string, s flow.State) bool {
-	err := e.saveStateLocked(id, s)
+	err := e.saveStateLocked(id, s, false)
 	if err != nil {
 		e.logError("factory.commit_error", id, err)
 	}
@@ -3272,7 +3280,7 @@ func (e *Engine) commitLocked(id string, s *flow.State, l LogLine) error {
 		s.Seq--
 		return err
 	}
-	if err := e.saveStateLocked(id, *s); err != nil {
+	if err := e.saveStateLocked(id, *s, true); err != nil {
 		s.Seq--
 		return err
 	}

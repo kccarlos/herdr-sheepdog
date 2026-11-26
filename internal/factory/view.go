@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"time"
@@ -20,16 +23,36 @@ var ErrProjectNotFound = errors.New("factory project not found")
 const DefaultLogLimit, MaxLogLimit = 50, 500
 
 type ProjectView struct {
-	ID      string         `json:"id"`
-	Folder  string         `json:"folder,omitempty"`
-	RepoURL string         `json:"repo_url,omitempty"`
-	Goal    string         `json:"goal,omitempty"`
-	State   string         `json:"state,omitempty"`
-	Running bool           `json:"running"`
-	Live    bool           `json:"live,omitempty"`
-	Status  string         `json:"status,omitempty"`
-	Counts  map[string]int `json:"counts,omitempty"`
-	Error   string         `json:"error,omitempty"`
+	Name            string         `json:"name"`
+	CoordinatorPane string         `json:"coordinator_pane,omitempty"`
+	Alert           *ProjectAlert  `json:"alert,omitempty"`
+	ID              string         `json:"id"`
+	Folder          string         `json:"folder,omitempty"`
+	RepoURL         string         `json:"repo_url,omitempty"`
+	Goal            string         `json:"goal,omitempty"`
+	State           string         `json:"state,omitempty"`
+	Running         bool           `json:"running"`
+	Live            bool           `json:"live,omitempty"`
+	Status          string         `json:"status,omitempty"`
+	Counts          map[string]int `json:"counts,omitempty"`
+	Error           string         `json:"error,omitempty"`
+}
+
+type ProjectHead struct {
+	ID              string         `json:"id"`
+	Name            string         `json:"name"`
+	Goal            string         `json:"goal"`
+	State           string         `json:"state"`
+	Counts          map[string]int `json:"counts"`
+	Folder          string         `json:"folder,omitempty"`
+	CoordinatorPane string         `json:"coordinator_pane,omitempty"`
+	Alert           *ProjectAlert  `json:"alert,omitempty"`
+}
+
+type ProjectAlert struct {
+	Kind  string `json:"kind"`
+	Cause string `json:"cause"`
+	Fix   string `json:"fix,omitempty"`
 }
 
 type GraphView struct {
@@ -46,20 +69,24 @@ type StepView struct {
 }
 
 type TaskView struct {
-	Ref          string     `json:"ref"`
-	Title        string     `json:"title"`
-	Brief        string     `json:"brief,omitempty"`
-	Stage        string     `json:"stage"`
-	WhyWaiting   string     `json:"why_waiting,omitempty"`
-	After        []string   `json:"after"`
-	Dependents   []string   `json:"dependents"`
-	Layer        int        `json:"layer"`
-	Rounds       int        `json:"rounds"`
-	Model        string     `json:"model,omitempty"`
-	Terminal     string     `json:"terminal,omitempty"`
-	LastRule     string     `json:"last_rule,omitempty"`
-	LastDecision string     `json:"last_decision,omitempty"`
-	Steps        []StepView `json:"steps"`
+	RunRole           string     `json:"run_role,omitempty"`
+	RunCLI            string     `json:"run_cli,omitempty"`
+	RunStartedAt      time.Time  `json:"run_started_at,omitzero"`
+	LastActorDecision *LogEntry  `json:"last_actor_decision,omitempty"`
+	Ref               string     `json:"ref"`
+	Title             string     `json:"title"`
+	Brief             string     `json:"brief,omitempty"`
+	Stage             string     `json:"stage"`
+	WhyWaiting        string     `json:"why_waiting,omitempty"`
+	After             []string   `json:"after"`
+	Dependents        []string   `json:"dependents"`
+	Layer             int        `json:"layer"`
+	Rounds            int        `json:"rounds"`
+	Model             string     `json:"model,omitempty"`
+	Terminal          string     `json:"terminal,omitempty"`
+	LastRule          string     `json:"last_rule,omitempty"`
+	LastDecision      string     `json:"last_decision,omitempty"`
+	Steps             []StepView `json:"steps"`
 }
 
 // LogEntry is the read-only log projection (design.md 12.1); Wake/Model await core writers.
@@ -118,16 +145,53 @@ func projectLive(s flow.State) bool {
 		})
 }
 
+func ProjectName(id, folder string) string {
+	if folder == "" {
+		return id
+	}
+	return filepath.Base(folder)
+}
+
+func projectAlert(alerts map[string]flow.Alert) *ProjectAlert {
+	a := flow.StoppingAlert(alerts)
+	if a == nil {
+		for _, key := range slices.Sorted(maps.Keys(alerts)) {
+			candidate := alerts[key]
+			if a == nil || candidate.Kind == flow.AlertAgentsDown {
+				a = &candidate
+			}
+			if candidate.Kind == flow.AlertAgentsDown {
+				break
+			}
+		}
+	}
+	if a == nil {
+		return nil
+	}
+	return &ProjectAlert{Kind: a.Kind, Cause: a.Cause, Fix: a.Fix}
+}
+
+func projectHeadOf(s flow.State) ProjectHead {
+	p := s.Project
+	h := ProjectHead{ID: p.ID, Name: ProjectName(p.ID, p.Folder), Goal: p.Goal, Folder: p.Folder,
+		State: "stopped", Counts: map[string]int{}, Alert: projectAlert(p.Alerts)}
+	if p.Finished {
+		h.State = "finished"
+	} else if p.Started {
+		h.State = "running"
+	}
+	if flow.RunLive(p.RunID, p.Run) {
+		h.CoordinatorPane = p.RunID
+	}
+	for _, t := range s.Tasks {
+		stage, _, _ := taskStageWhy(t, s.Tasks, s.Asks, s.Settings, p.Started)
+		h.Counts[stage]++
+	}
+	return h
+}
+
 func projectViewOf(s flow.State) ProjectView {
-	counts, status, state := map[string]int{}, "", "stopped"
-	if s.Project.Finished {
-		state = "finished"
-	} else if s.Project.Started {
-		state = "running"
-	}
-	for _, tv := range GraphViewOf(s, nil).Tasks {
-		counts[tv.Stage]++
-	}
+	h, status := projectHeadOf(s), ""
 	if s.Project.Started && !s.Project.Finished && !flow.ProjectFinished(s.Project, s.Tasks) {
 		if open := len(flow.OpenPlanFindings(s.Project)); open > 0 {
 			status = fmt.Sprintf("%d plan findings open, waiting on the coordinator", open)
@@ -137,7 +201,9 @@ func projectViewOf(s flow.State) ProjectView {
 			}
 		}
 	}
-	return ProjectView{ID: s.Project.ID, Folder: s.Project.Folder, RepoURL: s.Project.RepoURL, Goal: s.Project.Goal, State: state, Running: s.Project.Started, Live: projectLive(s), Status: status, Counts: counts}
+	return ProjectView{ID: h.ID, Name: h.Name, Folder: h.Folder, RepoURL: s.Project.RepoURL, Goal: h.Goal,
+		State: h.State, Running: s.Project.Started, Live: projectLive(s), Status: status, Counts: h.Counts,
+		CoordinatorPane: h.CoordinatorPane, Alert: h.Alert}
 }
 
 var taskRows = func() map[string]flow.Row[flow.In] {
@@ -161,7 +227,13 @@ func lastTaskRows(logs []LogLine) map[string]LogLine {
 }
 
 func GraphViewOf(s flow.State, logs []LogLine) GraphView {
-	return graphViewOf(s, lastTaskRows(logs))
+	lastActor := map[string]*LogEntry{}
+	for _, l := range logs {
+		if l.Task != "" && l.Decision != "" && (l.By == "coordinator" || l.By == "owner") {
+			lastActor[l.Task] = &LogEntry{At: l.At, By: l.By, Decision: l.Decision, Why: l.Why}
+		}
+	}
+	return graphViewOf(s, lastTaskRows(logs), lastActor)
 }
 
 func revActive(a *flow.Attempt) bool {
@@ -169,7 +241,7 @@ func revActive(a *flow.Attempt) bool {
 		!slices.ContainsFunc(a.Rounds, func(r flow.Round) bool { return r.N == a.Review.Round && r.Verdict != "" })
 }
 
-func graphViewOf(s flow.State, lastRow map[string]LogLine) GraphView {
+func graphViewOf(s flow.State, lastRow map[string]LogLine, lastActor map[string]*LogEntry) GraphView {
 	idx, deps := make(map[string]int, len(s.Tasks)), map[string][]string{}
 	for i, t := range s.Tasks {
 		idx[t.ID] = i
@@ -194,15 +266,25 @@ func graphViewOf(s flow.State, lastRow map[string]LogLine) GraphView {
 		if att != nil {
 			rounds = len(slices.DeleteFunc(slices.Clone(flow.Counted(*att)), func(r flow.Round) bool { return r.Kind == flow.RoundSendBack || r.Kind == flow.RoundRetro }))
 		}
+		var run *flow.RunRecord
 		if revActive(att) {
 			model, term = att.Review.Reviewer.Model, cmp.Or(att.Review.RunID, att.RunID)
+			run = att.Review.Run
 		} else if att != nil && att.RunID != "" {
 			model, term = storedWorkerModel(t).Model, att.RunID
+			run = att.Run
+		} else if att != nil {
+			run = att.Run
 		}
-		tasks = append(tasks, TaskView{
+		tv := TaskView{
 			Ref: t.ID, Title: t.Title, Brief: t.Brief, Stage: stage, WhyWaiting: why, After: append([]string{}, t.After...), Dependents: append([]string{}, deps[t.ID]...),
 			Layer: layers[i], Rounds: rounds, Model: model, Terminal: term, LastRule: l.Rule, LastDecision: l.Decision, Steps: taskSteps(t, s, att, stage, why, row, rounds),
-		})
+			LastActorDecision: lastActor[t.ID],
+		}
+		if run != nil && flow.RunLive("", run) {
+			tv.RunRole, tv.RunCLI, tv.RunStartedAt = run.Role, run.CLI, run.StartedAt
+		}
+		tasks = append(tasks, tv)
 	}
 	return GraphView{Protocol: 1, Project: s.Project.ID, Folder: s.Project.Folder, Tasks: tasks}
 }
@@ -228,13 +310,62 @@ func (e *Engine) Projects() []ProjectView {
 			continue
 		}
 		if s, err := LoadState(e.Paths.State(ent.Name())); err != nil {
-			out = append(out, ProjectView{ID: ent.Name(), Error: err.Error()})
+			out = append(out, ProjectView{ID: ent.Name(), Name: ent.Name(), Error: err.Error()})
 		} else {
 			out = append(out, projectViewOf(s))
 		}
 	}
 	slices.SortFunc(out, func(a, b ProjectView) int { return cmp.Compare(a.ID, b.ID) })
 	return out
+}
+
+func (e *Engine) initProjectHeads() {
+	e.projectHeadsOnce.Do(func() {
+		e.projectHeads = map[string]ProjectHead{}
+		for _, ent := range e.projectDirs() {
+			if ent.IsDir() {
+				if s, err := LoadState(e.Paths.State(ent.Name())); err == nil {
+					e.projectHeads[ent.Name()] = projectHeadOf(s)
+				}
+			}
+		}
+	})
+}
+
+// ProjectHeads returns the compact project views for /api/state in id order.
+func (e *Engine) ProjectHeads() []ProjectHead {
+	e.initProjectHeads()
+	e.projectHeadsMu.RLock()
+	defer e.projectHeadsMu.RUnlock()
+	out := make([]ProjectHead, 0, len(e.projectHeads))
+	for _, id := range slices.Sorted(maps.Keys(e.projectHeads)) {
+		h := e.projectHeads[id]
+		h.Counts = maps.Clone(h.Counts)
+		if h.Alert != nil {
+			a := *h.Alert
+			h.Alert = &a
+		}
+		out = append(out, h)
+	}
+	return out
+}
+
+func (e *Engine) ProjectName(id string) string {
+	e.initProjectHeads()
+	e.projectHeadsMu.RLock()
+	defer e.projectHeadsMu.RUnlock()
+	return cmp.Or(e.projectHeads[id].Name, id)
+}
+
+func (e *Engine) publishProjectHead(id string, s flow.State, logLine bool) {
+	h := projectHeadOf(s)
+	e.projectHeadsMu.Lock()
+	changed := !reflect.DeepEqual(e.projectHeads[id], h)
+	e.projectHeads[id] = h
+	e.projectHeadsMu.Unlock()
+	if logLine || changed {
+		e.logEvent("factory.changed", map[string]string{"project": id})
+	}
 }
 
 func (e *Engine) Graph(project string) (GraphView, error) {

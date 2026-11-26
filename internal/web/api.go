@@ -11,6 +11,7 @@ import (
 
 	"github.com/kccarlos/herdr-sheepdog/internal/config"
 	"github.com/kccarlos/herdr-sheepdog/internal/ctxcap"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/lang"
@@ -31,10 +32,11 @@ type StateResponse struct {
 	// Questions are every open question, oldest first: one per blocked
 	// agent whose prompt was read, the voice's pending_action among
 	// them. Each has its options for POST /api/pending/answer.
-	Questions []PendingView     `json:"questions"`
-	Session   state.Session     `json:"session"`
-	Voice     VoiceInfo         `json:"voice"`
-	Settings  *SettingsResponse `json:"settings,omitempty"`
+	Questions []PendingView         `json:"questions"`
+	Factory   []factory.ProjectHead `json:"factory,omitempty"`
+	Session   state.Session         `json:"session"`
+	Voice     VoiceInfo             `json:"voice"`
+	Settings  *SettingsResponse     `json:"settings,omitempty"`
 	// Brain is the orchestrator's provider and current model; omitted
 	// when the orchestrator is off.
 	Brain   *BrainInfo `json:"brain,omitempty"`
@@ -176,6 +178,10 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		herdrBackends = s.deps.HerdrBackends(r.Context())
 	}
 	qs, pending := s.questionViews(), s.pendingView(snap.PendingAction)
+	var heads []factory.ProjectHead
+	if f, ok := s.deps.Factory.(interface{ ProjectHeads() []factory.ProjectHead }); ok {
+		heads = f.ProjectHeads()
+	}
 	if pending == nil {
 		if i := slices.IndexFunc(qs, func(q PendingView) bool { return strings.HasPrefix(q.ID, "fask-") }); i >= 0 {
 			pending = &qs[i]
@@ -187,6 +193,7 @@ func (s *Server) handleState(w http.ResponseWriter, r *http.Request) {
 		SpaceMutes:            mutes,
 		PendingAction:         pending,
 		Questions:             qs,
+		Factory:               heads,
 		Session:               snap.Session,
 		Voice:                 s.voiceInfo(hs),
 		Settings:              s.settings(),
@@ -384,8 +391,8 @@ func (s *Server) pendingView(p *state.PendingAction) *PendingView {
 	v := &PendingView{PendingAction: *p, Summary: p.SpokenSummary, Options: supervisor.PendingOptions(*p)}
 	if row, ok := s.deps.Store.Get(p.PaneID); ok {
 		v.Agent = row.Alias
-	} else if proj, ok := strings.CutPrefix(p.PaneID, "factory:"); ok && proj != "" {
-		v.Agent = proj + " factory"
+	} else if p.Factory != nil {
+		v.Agent = p.Factory.ProjectName
 	}
 	return v
 }

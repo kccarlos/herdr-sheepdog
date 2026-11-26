@@ -425,6 +425,9 @@ func (s *Supervisor) recordResult(paneID, spoken, stopReason string) {
 // and — when the agent is really asking — creates the pending action and
 // announces it.
 func (s *Supervisor) onBlocked(ctx context.Context, row state.Agent) {
+	if name := s.coordinatorName(row); name != "" {
+		row.Alias, row.Spoken = name, "the "+name+" factory"
+	}
 	alias := aliasOr(state.Say(row))
 	s.touch(row.PaneID)
 	read, err := s.herdr.Read(ctx, row.PaneID, herdr.SourceRecentUnwrapped, s.cfg.ReadLines)
@@ -511,11 +514,16 @@ func (s *Supervisor) forgetPrompt(paneID string) {
 // aliasOf returns the alias of a pane, or "another agent" when unknown
 // (never a pane id: decision D9).
 func (s *Supervisor) aliasOf(paneID string) string {
-	if a, ok := s.store.Get(paneID); ok && a.Alias != "" {
-		return a.Alias
+	if a, ok := s.store.Get(paneID); ok {
+		if name := s.coordinatorName(a); name != "" {
+			return name
+		}
+		if a.Alias != "" {
+			return a.Alias
+		}
 	}
 	if proj, ok := strings.CutPrefix(paneID, factoryPanePrefix); ok && proj != "" {
-		return proj + " factory"
+		return s.factoryProjectName(proj)
 	}
 	return "another agent"
 }
