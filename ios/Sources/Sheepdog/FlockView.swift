@@ -3,8 +3,7 @@ import SwiftUI
 
 private struct FlockInputs: Equatable {
     var factory = FactoryAgentsList(agents: [], heads: [], questions: [])
-    var approval: ApprovalFlow.Card?
-    var askCard: (PendingAction, String?) -> ApprovalFlow.Card = { ask, _ in .init(pending: ask) }
+    var approvals: (model: SessionViewModel, current: ApprovalFlow.Card?)?
     var computers: [ComputerSnapshot] = []
     var currentName = ""
     var voiceQuestionID: String?
@@ -20,7 +19,7 @@ private struct FlockInputs: Equatable {
 
     static func == (lhs: FlockInputs, rhs: FlockInputs) -> Bool {
         lhs.factory == rhs.factory
-            && lhs.approval == rhs.approval
+            && lhs.approvals?.current == rhs.approvals?.current
             && lhs.computers == rhs.computers
             && lhs.currentName == rhs.currentName
             && lhs.voiceQuestionID == rhs.voiceQuestionID
@@ -48,8 +47,7 @@ private extension EnvironmentValues {
 struct FlockView: View {
     let flock: Flock
     var factory: FactoryAgentsList?
-    var approval: ApprovalFlow.Card?
-    var askCard: (PendingAction, String?) -> ApprovalFlow.Card = { ask, _ in .init(pending: ask) }
+    var model: SessionViewModel?
     /// The question shown on an agent's card, if it has one open.
     let question: (String) -> ApprovalFlow.Card?
     /// A tap on an option: the question's id and the option's index.
@@ -78,15 +76,10 @@ struct FlockView: View {
     var toggleComputer: (String) -> Void = { _ in }
     var expandComputer: (String) -> Void = { _ in }
 
-    /// Closed by default: the running agents are what matters.
-    @State private var showNotRunning = false
-    @State private var openDone: Set<String> = []
-
     private var inputs: FlockInputs {
         FlockInputs(
             factory: factory ?? FactoryAgentsList(agents: flock.all, heads: [], questions: []),
-            approval: approval,
-            askCard: askCard,
+            approvals: model.map { ($0, $0.approval) },
             computers: computers,
             currentName: currentName,
             voiceQuestionID: voiceQuestionID,
@@ -107,9 +100,7 @@ struct FlockView: View {
             FlockScrollContent(
                 proxy: proxy,
                 expanded: $expanded,
-                focusedAgent: $focusedAgent,
-                showNotRunning: $showNotRunning,
-                openDone: $openDone
+                focusedAgent: $focusedAgent
             )
         }
         .environment(\.flockInputs, inputs)
@@ -121,8 +112,8 @@ private struct FlockScrollContent: View {
     let proxy: ScrollViewProxy
     @Binding var expanded: Set<String>
     @Binding var focusedAgent: AgentFocus?
-    @Binding var showNotRunning: Bool
-    @Binding var openDone: Set<String>
+    @State private var showNotRunning = false
+    @State private var openDone: Set<String> = []
     @Environment(\.flockInputs) private var inputs
 
     private var flock: Flock { inputs.factory.agents }
@@ -217,7 +208,7 @@ private struct FlockScrollContent: View {
 
     @ViewBuilder
     private func rows(_ list: FactoryAgentsList, id: String, computer: ComputerSnapshot? = nil) -> some View {
-        let settled = computer == nil ? inputs.approval.flatMap { card in
+        let settled = computer == nil ? inputs.approvals?.current.flatMap { card in
             card.pending.factory != nil && card.isSettled && !list.factoryAsks.contains { $0.id == card.pending.id }
                 ? card.pending : nil
         } : nil
@@ -227,34 +218,23 @@ private struct FlockScrollContent: View {
             let heads = group == .needsYou ? list.needsYouHeads : group == .working ? list.workingHeads : list.finishedHeads
             let count = agents.count + heads.count + (group == .needsYou ? asks.count : 0)
             if group == .done && list.hasStoppedSection {
-                AgentSectionHeader(group: .working, count: list.stoppedHeads.count, title: "Stopped", identifier: "stopped")
+                AgentSectionHeader(group: .working, count: list.stoppedHeads.count, title: "Stopped")
                 ForEach(list.stoppedHeads) { head($0, computer: computer) }
             }
             if count > 0 {
                 let folded = group == .done && !heads.isEmpty
                 if folded {
-                    Button {
-                        withAnimation(Theme.ease) {
-                            if openDone.contains(id) { openDone.remove(id) } else { openDone.insert(id) }
-                        }
-                    } label: {
-                        Label("Done (\(count))", systemImage: openDone.contains(id) ? "chevron.down" : "chevron.right")
-                            .font(.subheadline.weight(.medium))
-                            .foregroundStyle(Theme.muted)
-                            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
-                            .contentShape(Rectangle())
+                    foldRow("Done (\(count))", expanded: openDone.contains(id), identifier: "flock.section.done") {
+                        if openDone.contains(id) { openDone.remove(id) } else { openDone.insert(id) }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityValue(openDone.contains(id) ? "Shown" : "Hidden")
-                    .accessibilityIdentifier("flock.section.done")
-                } else if computer == nil || !heads.isEmpty || !asks.isEmpty {
+                } else if computer == nil || list.hasFactoryContent {
                     AgentSectionHeader(group: group, count: count)
                 }
                 if !folded || openDone.contains(id) {
                     if group == .needsYou {
                         ForEach(asks, id: \.id) { ask in
-                            let card = inputs.askCard(ask, computer?.id)
-                            ApprovalCardView(card: card, primary: ask.id == asks.first?.id,
+                            let card = askCard(ask, computer: computer)
+                            ApprovalCardView(card: card, primary: computer == nil && ask.id == asks.first?.id,
                                              idPrefix: "factoryAsk.\(ask.id)") { answer(card.pending.id, $0) }
                         }
                     }
@@ -265,8 +245,15 @@ private struct FlockScrollContent: View {
         }
     }
 
+    private func askCard(_ ask: PendingAction, computer: ComputerSnapshot?) -> ApprovalFlow.Card {
+        guard let computer else { return .init(pending: ask, phase: inputs.approvals?.model.questionPhase(ask.id) ?? .open(error: nil)) }
+        var pending = ask
+        pending.id = RemoteQuestion.id(computer: computer.id, question: ask.id)
+        return .init(pending: pending, phase: inputs.approvals?.model.session(computer.id)?.phase(ask.id) ?? .open(error: nil))
+    }
+
     private func head(_ item: FactoryAgentsList.Item, computer: ComputerSnapshot?) -> some View {
-        let dialog = item.coordinatorDialog.map { inputs.askCard($0, computer?.id) }
+        let dialog = item.coordinatorDialog.map { askCard($0, computer: computer) }
         return FactoryHeadCard(item: item, computer: computer, dialog: dialog, answer: answer)
     }
 
@@ -276,7 +263,7 @@ private struct FlockScrollContent: View {
         return AgentCard(
             agent: agent,
             question: prompt,
-            primary: primary ?? (computer == nil && inputs.factory.factoryAsks.isEmpty &&
+            primary: primary ?? (computer == nil && inputs.factory.factoryAsks.isEmpty && inputs.factory.needsYouHeads.isEmpty &&
                                  flock.running.first { question($0.paneID) != nil }?.paneID == agent.paneID),
             voiceQuestion: prompt?.pending.id == voiceQuestionID,
             computer: computer?.id,
@@ -333,14 +320,21 @@ private struct FlockScrollContent: View {
     }
 
     private var notRunningRow: some View {
+        foldRow("Not running (\(flock.notRunning.count))", expanded: showNotRunning, identifier: "flock.notRunning") {
+            showNotRunning.toggle()
+        }
+        .accessibilityHint("Agents whose pane closed or that herdr no longer reports")
+    }
+
+    private func foldRow(_ title: String, expanded: Bool, identifier: String, toggle: @escaping () -> Void) -> some View {
         Button {
-            withAnimation(Theme.ease) { showNotRunning.toggle() }
+            withAnimation(Theme.ease, toggle)
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.right")
                     .font(.footnote.weight(.semibold))
-                    .rotationEffect(.degrees(showNotRunning ? 90 : 0))
-                Text("Not running (\(flock.notRunning.count))")
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
+                Text(title)
                     .font(.subheadline.weight(.medium))
                 Spacer()
             }
@@ -349,9 +343,8 @@ private struct FlockScrollContent: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityValue(showNotRunning ? "Shown" : "Hidden")
-        .accessibilityHint("Agents whose pane closed or that herdr no longer reports")
-        .accessibilityIdentifier("flock.notRunning")
+        .accessibilityValue(expanded ? "Shown" : "Hidden")
+        .accessibilityIdentifier(identifier)
     }
 
     private var renderedFocusToken: [String] {
@@ -407,7 +400,6 @@ struct AgentSectionHeader: View {
     let group: AgentGroup
     let count: Int
     var title: String?
-    var identifier: String?
 
     var body: some View {
         HStack(spacing: 6) {
@@ -424,7 +416,7 @@ struct AgentSectionHeader: View {
         .padding(.leading, 4)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
-        .accessibilityIdentifier("flock.section.\(identifier ?? group.rawValue)")
+        .accessibilityIdentifier("flock.section.\(title?.lowercased() ?? group.rawValue)")
     }
 }
 
@@ -997,6 +989,7 @@ private struct FactoryHeadCard: View {
     let answer: (String, Int) -> Void
 
     @EnvironmentObject private var model: SessionViewModel
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var resuming = false
     @State private var resumeError: String?
 
@@ -1004,34 +997,29 @@ private struct FactoryHeadCard: View {
         switch item.head.state {
         case .running: return Theme.color(for: .working)
         case .finished: return Theme.done
-        default: return Theme.muted
+        default: return Theme.idle
         }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             VStack(alignment: .leading, spacing: 4) {
+                let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 6))
                 ViewThatFits(in: .horizontal) {
-                    HStack { name; Spacer(minLength: 8); state }
-                    VStack(alignment: .leading, spacing: 4) { name; state }
+                    HStack { layout { name; kind }.fixedSize(); Spacer(minLength: 8); state.fixedSize() }
+                    VStack(alignment: .leading, spacing: 4) { layout { name; kind }; state }
                 }
                 Text(item.head.goal).font(.subheadline)
                 Text(counts).font(.footnote).foregroundStyle(Theme.muted)
-                if let folder = item.head.folder {
-                    Text([folder, computer?.name].compactMap { $0 }.joined(separator: " · "))
-                        .font(.caption.monospaced()).foregroundStyle(Theme.muted)
-                }
+                Text([item.head.folder, computer?.name].compactMap { $0 }.joined(separator: " · "))
+                    .font(.caption.monospaced()).foregroundStyle(Theme.muted)
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(item.accessibilityLabel)
+            .accessibilityLabel([item.accessibilitySummary, computer?.name].compactMap { $0 }.joined(separator: ", "))
             .accessibilityIdentifier("flock.factory.\(item.id)")
-            if let alert = item.alertLine {
-                Text(alert).font(.subheadline.weight(.semibold))
-            }
-            if let fix = item.alertFixLine {
-                Text(fix).font(.footnote).foregroundStyle(Theme.muted)
-            }
-            if item.head.state == .stopped, let folder = item.head.folder {
+            item.alertLine.map { Text($0).font(.subheadline.weight(.semibold)) }
+            item.alertFixLine.map { Text($0).font(.footnote).foregroundStyle(Theme.muted) }
+            if let folder = item.resumableFolder {
                 Button(resuming ? "Resuming…" : "Resume") { resume(folder: folder) }
                     .buttonStyle(.bordered)
                     .tint(Theme.ink)
@@ -1041,11 +1029,15 @@ private struct FactoryHeadCard: View {
                 if let resumeError { Text(resumeError).font(.footnote).foregroundStyle(Theme.danger) }
             }
             if item.coordinatorBlocked {
-                Text(item.stuckHeading).font(.subheadline.weight(.semibold))
-                if let dialog {
-                    ApprovalCardView(card: dialog, embedded: true, idPrefix: "question.\(item.head.name)",
-                                     coordinatorHint: item.stuckNoHint) { answer(dialog.pending.id, $0) }
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.stuckHeading).font(.subheadline.weight(.semibold)).padding(12)
+                    if let dialog {
+                        ApprovalCardView(card: dialog, embedded: true, idPrefix: "question.\(item.id)",
+                                         coordinatorHint: item.stuckNoHint) { answer(dialog.pending.id, $0) }
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.Radius.card))
             }
         }
         .fixedSize(horizontal: false, vertical: true)
@@ -1077,10 +1069,12 @@ private struct FactoryHeadCard: View {
         Task {
             defer { resuming = false }
             do {
-                try await session.request(as: DaemonClient.self) { try await $0.resumeFactory(folder: folder, goal: goal) }
+                try await session.actions.run("resume:\(item.id)", .init(timeout: 60, keyed: true), as: DaemonClient.self) {
+                    try await $0.resumeFactory(folder: folder, goal: goal)
+                }
                 await session.refresh()
             } catch {
-                resumeError = (error as? DaemonError)?.message ?? "Couldn't resume. Check the connection and try again."
+                resumeError = FactoryAgentsList.resumeErrorMessage(error, computerName: session.name)
             }
         }
     }
@@ -1088,16 +1082,16 @@ private struct FactoryHeadCard: View {
     private var name: some View {
         HStack(spacing: 6) {
             Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(tint)
-            Text(item.head.name).font(.body.weight(.semibold))
-            Text(item.kindWord).font(.footnote).foregroundStyle(Theme.muted)
+            Text(item.head.name).font(.body.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
         }
     }
 
+    private var kind: some View { Text(item.kindWord).font(.footnote).foregroundStyle(Theme.muted) }
+
     private var state: some View {
-        Label {
-            Text(item.stateWord)
-        } icon: {
+        HStack(spacing: 5) {
             Circle().fill(tint).frame(width: 7, height: 7)
+            Text(item.stateWord)
         }
         .font(.caption.weight(.semibold))
         .padding(.horizontal, 8)

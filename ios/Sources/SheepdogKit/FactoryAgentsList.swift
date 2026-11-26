@@ -5,19 +5,25 @@ public struct FactoryAgentsList: Equatable, Sendable {
         public let head: FactoryProjectHead
         public let coordinatorDialog: PendingAction?
         public let coordinatorBlocked: Bool
+        let openAsks: Int
 
         public var id: String { head.id }
         public var kindWord: String { "factory" }
         public var stateWord: String { head.state.rawValue }
-        public var waitingOnYouCount: Int { head.counts["owner_answer", default: 0] }
+        public var waitingOnYouCount: Int {
+            max(openAsks, head.counts["owner_answer", default: 0] + head.counts["owner_gate", default: 0])
+        }
+        public var resumableFolder: String? {
+            guard head.state == .stopped, let folder = head.folder?.trimmed, !folder.isEmpty else { return nil }
+            return folder
+        }
         public var countsLine: String {
             let total = head.counts.values.reduce(0, +)
-            guard total > 0 else { return "no tasks yet" }
             let working = head.counts["working", default: 0]
             return [
                 working > 0 ? "\(working) working" : nil,
                 waitingOnYouCount > 0 ? "\(waitingOnYouCount) waiting on you" : nil,
-                "\(head.counts["done", default: 0]) of \(total) done"
+                total > 0 ? "\(head.counts["done", default: 0]) of \(total) done" : "no tasks yet"
             ].compactMap { $0 }.joined(separator: " · ")
         }
 
@@ -30,8 +36,11 @@ public struct FactoryAgentsList: Equatable, Sendable {
         public var stuckNoHint: String {
             "To say what to do instead, use the box on the \(head.name) page. The coordinator gets it when it is next free."
         }
+        public var accessibilitySummary: String {
+            ["\(head.name) \(kindWord)", head.goal, stateWord, countsLine].joined(separator: ", ")
+        }
         public var accessibilityLabel: String {
-            ["\(head.name) \(kindWord)", head.goal, stateWord, countsLine, alertLine, alertFixLine,
+            [accessibilitySummary, alertLine, alertFixLine,
              coordinatorBlocked ? "the coordinator is stuck on a prompt" : nil]
                 .compactMap { $0 }.joined(separator: ", ")
         }
@@ -42,15 +51,16 @@ public struct FactoryAgentsList: Equatable, Sendable {
     public let factoryAsks: [PendingAction]
 
     public init(agents: [Agent], heads: [FactoryProjectHead], questions: [PendingAction]) {
-        let coordinators = Set(heads.compactMap(\.coordinatorPane))
+        let coordinators = Set(heads.compactMap(\.coordinatorPane).filter { !$0.isEmpty })
         let blocked = Set(agents.filter { $0.state == .blocked }.map(\.paneID))
         self.agents = Flock(agents.filter { !$0.isFactoryAgent && !coordinators.contains($0.paneID) })
         factoryAsks = questions.filter { $0.factory != nil }
+        let asksByProject = Dictionary(grouping: factoryAsks) { $0.factory?.project }
         items = heads.map { head in
-            let pane = head.coordinatorPane
+            let pane = head.coordinatorPane.flatMap { $0.isEmpty ? nil : $0 }
             let dialog = questions.first { $0.paneID == pane && $0.factory == nil }
             let stuck = head.state == .running && (dialog != nil || pane.map(blocked.contains) == true)
-            return Item(head: head, coordinatorDialog: stuck ? dialog : nil, coordinatorBlocked: stuck)
+            return Item(head: head, coordinatorDialog: stuck ? dialog : nil, coordinatorBlocked: stuck, openAsks: asksByProject[head.id]?.count ?? 0)
         }
     }
 
@@ -64,17 +74,26 @@ public struct FactoryAgentsList: Equatable, Sendable {
     public var waitingCount: Int { agents.waitingCount + needsYouHeads.count + factoryAsks.count }
     public var hasFactoryContent: Bool { !items.isEmpty || !factoryAsks.isEmpty }
     public var isEmpty: Bool { agents.isEmpty && !hasFactoryContent }
+
+    public static func resumeErrorMessage(_ error: Error, computerName: String) -> String {
+        if case .rejected(status: 403, message: "proof_required") = error as? DaemonError {
+            return "\(computerName) no longer knows this phone. Pair this phone again in Settings ▸ \(computerName), then press Resume again."
+        }
+        return RequestFailure(error, linkUsable: true, name: computerName).message
+    }
 }
 
 public struct FactoryAskCardPresentation: Equatable, Sendable {
     public let headerLine: String
     public let overrideFooter: String?
+    public let command: String?
     public let accessibilityLabel: String
 
     public init?(_ pending: PendingAction) {
         guard let factory = pending.factory else { return nil }
-        let name = pending.agent ?? factory.project
-        var heading = [name] + [factory.task].compactMap { $0 }
+        let agent = pending.agent?.trimmed ?? ""
+        let name = agent.isEmpty ? factory.project : agent
+        var heading = [name] + [factory.task?.trimmed].compactMap { $0 }.filter { !$0.isEmpty }
         var spoken = heading
         switch factory.kind {
         case "delete", "release": heading.append("the coordinator asks")
@@ -84,8 +103,15 @@ public struct FactoryAskCardPresentation: Equatable, Sendable {
         }
         headerLine = heading.joined(separator: " · ")
         accessibilityLabel = spoken.count == 1 ? "\(name) needs your answer" : (spoken + ["needs your answer"]).joined(separator: ", ")
+        let targets = pending.command?.trimmed ?? ""
+        command = factory.kind == "override" && !targets.isEmpty ? targets : nil
         overrideFooter = factory.kind == "override"
             ? "Only you can answer this. A conflict, or a commit newer than this card, is not merged."
             : nil
+    }
+
+    public func optionAccessibilityLabel(_ option: PendingOption) -> String {
+        let recommended = option.isRecommended ? " (Recommended)" : ""
+        return option.displayLabel + recommended + (option.displayDetail.map { ". \($0)" } ?? "")
     }
 }

@@ -62,7 +62,8 @@ struct ApprovalCardView: View {
                     .accessibilityAddTraits(.isHeader)
             } else if !embedded { header }
             question
-            if let command = pending.command?.trimmingCharacters(in: .whitespacesAndNewlines), !command.isEmpty {
+            if let command = factory == nil ? pending.command?.trimmingCharacters(in: .whitespacesAndNewlines) : factory?.command,
+               !command.isEmpty {
                 // Up to three lines, never cut in the middle (where the
                 // dangerous part of a command usually is); a tap shows all.
                 Button {
@@ -108,7 +109,7 @@ struct ApprovalCardView: View {
             }
         }
         .accessibilityElement(children: .contain)
-        .accessibilityLabel(factory?.accessibilityLabel ?? "")
+        .accessibilityLabel(Text(factory?.accessibilityLabel ?? ""), isEnabled: factory != nil)
         .accessibilityIdentifier("\(idPrefix).card")
     }
 
@@ -292,7 +293,7 @@ struct ApprovalCardView: View {
                     sending: sending?.index == option.index,
                     enabled: sending == nil,
                     identifier: "\(idPrefix).option.\(option.index)",
-                    emphasized: factory != nil && option.isRecommended
+                    factory: factory
                 ) {
                     answer(option.index)
                 }
@@ -310,7 +311,7 @@ private struct OptionRow: View {
     let sending: Bool
     let enabled: Bool
     let identifier: String
-    var emphasized = false
+    let factory: FactoryAskCardPresentation?
     let action: () -> Void
 
     var body: some View {
@@ -334,10 +335,10 @@ private struct OptionRow: View {
             .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
             .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card, style: .continuous))
         }
-        .buttonStyle(OptionRowStyle(sending: sending, emphasized: emphasized))
+        .buttonStyle(OptionRowStyle(sending: sending, emphasized: factory != nil && option.isRecommended))
         .opacity(enabled || sending ? 1 : 0.5)
         .disabled(!enabled)
-        .accessibilityLabel(option.accessibilityLabel)
+        .accessibilityLabel(factory?.optionAccessibilityLabel(option) ?? option.accessibilityLabel)
         .accessibilityHint(sending ? "Sending" : "")
         .accessibilityIdentifier(identifier)
     }
@@ -364,7 +365,7 @@ private struct OptionRow: View {
     private var label: some View {
         Text(option.displayLabel)
             .font(.body.weight(.semibold))
-            .foregroundStyle(option.isNegative ? Theme.danger : Theme.ink)
+            .foregroundStyle(factory == nil && option.isNegative ? Theme.danger : Theme.ink)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -379,7 +380,7 @@ private struct RecommendedTag: View {
             .padding(.horizontal, 7)
             .padding(.vertical, 2)
             .background(Capsule().fill(Theme.accentSoft))
-            .fixedSize()
+            .fixedSize(horizontal: false, vertical: true)
             .accessibilityHidden(true)
     }
 }

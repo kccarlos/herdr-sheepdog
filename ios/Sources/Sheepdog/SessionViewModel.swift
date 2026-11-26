@@ -2256,6 +2256,7 @@ final class SessionViewModel: ObservableObject {
     func computersChanged() {
         computerCount = settings.computers.count
         syncFleet()
+        if fleet.current == nil { fleet.makeCurrent(settings.computers.currentID) }
         // A second computer puts names in the status copy.
         presentLink()
         // Every computer gets this phone's push token, and the extension

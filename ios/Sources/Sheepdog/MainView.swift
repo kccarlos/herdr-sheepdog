@@ -161,20 +161,10 @@ struct PhoneRootView: View {
                         FlockUnavailableView(state: paneState)
                     case .flock:
                         let ownerID = model.currentComputerID
-                        let factory = model.agentsModel.factoryList
                         FlockView(
-                            flock: factory.agents,
-                            factory: factory,
-                            approval: model.approval,
-                            askCard: { ask, computer in
-                                if let computer {
-                                    var pending = ask
-                                    pending.id = RemoteQuestion.id(computer: computer, question: ask.id)
-                                    let phase = model.session(computer)?.phase(ask.id) ?? .open(error: nil)
-                                    return ApprovalFlow.Card(pending: pending, phase: phase)
-                                }
-                                return ApprovalFlow.Card(pending: ask, phase: model.questionPhase(ask.id))
-                            },
+                            flock: model.flock,
+                            factory: model.agentsModel.factoryList,
+                            model: model,
                             question: { model.questionCard(for: $0) },
                             answer: { model.answer(question: $0, option: $1, on: ownerID) },
                             expanded: Bindable(model.agentsModel).expandedAgents,
@@ -193,13 +183,9 @@ struct PhoneRootView: View {
                     }
                 }
                 .frame(maxHeight: .infinity)
-                if model.navigation.pane == .flock { bottomStack }
+                bottomStack
             }
             .background(Theme.surface)
-            // Conversation scrolls under the floating questions and capsule.
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if model.navigation.pane != .flock { bottomStack }
-            }
             // The whole screen above the keyboard, outside the floating
             // stack: what the questions decide inline or compact against.
             .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded() } action: { questionArea = $0 }

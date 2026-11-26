@@ -210,7 +210,7 @@ public struct Agent: Codable, Equatable, Identifiable, Sendable {
     public var attention: AgentAttention?
     public var labels: [String: String]?
 
-    public var isFactoryAgent: Bool { labels?["sheepdog.project"] != nil }
+    public var isFactoryAgent: Bool { !(labels?["sheepdog.project"]?.trimmed.isEmpty ?? true) }
 
     public var id: String { paneID }
 
