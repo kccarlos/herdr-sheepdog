@@ -346,6 +346,13 @@ Mac panel.
     it says so. "herdr is not running"
     means sheepdog cannot reach the backend: start it on your computer, then
     tap Try again.
+- **Factory coordinator.** Open a project in **Agents** and tap
+  **Coordinator** while it is running to see its terminal and type a
+  question. Typing there is for questions, not answering asks; when an ask
+  is waiting, tap the reminder to return to its card and choose an answer.
+  It keeps Esc, Control-C and raw typing, and leaves out the agent menu,
+  **Stop** and **Attach**. If the coordinator goes away while the window is
+  open, the window shows the project's status and a button back to its page.
 - **Cards.** Ask for a list or the details ("show me the failing tests",
   "show me what auth is asking") while the app is open on the conversation,
   and the orchestrator puts them on your screen: a card with a table, a

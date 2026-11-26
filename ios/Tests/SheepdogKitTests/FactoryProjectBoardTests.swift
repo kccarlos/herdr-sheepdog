@@ -160,6 +160,99 @@ final class FactoryProjectBoardTests: XCTestCase {
         XCTAssertEqual(fail.retryLabel, "Try again")
     }
 
+    /// Coordinator window header, VoiceOver, ask reminder strip, off states, blocked refusal.
+    func testCoordinatorWindowLiveAskStripOffStatesAndBlockedRefusal() throws {
+        let askT10 = PendingAction(id: "f1", paneID: "factory:proj-1", kind: "answer_prompt", question: "Delete?", options: [], agent: "notes", factory: FactoryAskMeta(project: "proj-1", task: "T10", kind: "delete"))
+        let askProj = PendingAction(id: "f2", paneID: "factory:proj-1", kind: "answer_prompt", question: "Tag?", options: [], agent: "notes", factory: FactoryAskMeta(project: "proj-1", task: nil, kind: "release"))
+
+        let live = FactoryCoordinatorWindow(head: try head(state: .running, coordinatorPane: "coord-notes-1"), openAsks: [askT10])
+        XCTAssertTrue(live.isLive)
+        XCTAssertEqual(live.coordinatorPane, "coord-notes-1")
+        XCTAssertEqual(live.title, "notes · Coordinator")
+        XCTAssertEqual(live.headerAccessibilityLabel, "notes coordinator, running")
+        XCTAssertEqual(live.promptPlaceholder, "Ask the notes coordinator…")
+        XCTAssertEqual(live.promptAccessibilityLabel, "Message to the notes coordinator")
+        XCTAssertEqual(live.backButtonLabel, "Back to notes")
+        XCTAssertEqual(live.askStrip, "T10 is waiting on your answer. Answer it on its card; typing here is not an answer.")
+        XCTAssertNil(live.offState)
+
+        XCTAssertEqual(FactoryCoordinatorWindow(head: try head(), openAsks: [askProj]).askStrip, "An ask is waiting on your answer. Answer it on its card; typing here is not an answer.")
+        XCTAssertEqual(FactoryCoordinatorWindow(head: try head(), openAsks: [askT10, askProj]).askStrip, "2 asks are waiting on your answer. Answer them on their cards; typing here is not an answer.")
+        XCTAssertNil(FactoryCoordinatorWindow(head: try head(), openAsks: []).askStrip)
+
+        let offAlert = FactoryCoordinatorWindow(head: try head(state: .running, coordinatorPane: nil, alert: FactoryProjectAlert(kind: "agents_down", cause: "claude coordinator is signed out", fix: "sign in to claude at this Mac")))
+        XCTAssertFalse(offAlert.isLive)
+        XCTAssertEqual(offAlert.headerAccessibilityLabel, "notes coordinator, not running")
+        XCTAssertEqual(offAlert.offState?.heading, "The notes coordinator is not running")
+        XCTAssertEqual(offAlert.offState?.alertCause, "claude coordinator is signed out")
+        XCTAssertEqual(offAlert.offState?.alertFix, "Fix: sign in to claude at this Mac")
+        XCTAssertEqual(offAlert.offState?.body, "This window comes back when a coordinator runs again. To tell it something meanwhile, use the box on the notes page; it gets it when it is back.")
+        XCTAssertNil(FactoryCoordinatorWindow(head: try head(state: .running, coordinatorPane: nil)).offState?.alertCause)
+
+        let stopped = FactoryCoordinatorWindow(head: try head(state: .stopped, coordinatorPane: nil))
+        XCTAssertEqual(stopped.offState?.heading, "notes is stopped")
+        XCTAssertEqual(stopped.offState?.body, "Resume notes on its page; it goes on with the same goal.")
+
+        let finished = FactoryCoordinatorWindow(head: try head(state: .finished, coordinatorPane: nil))
+        XCTAssertEqual(finished.offState?.heading, "notes is finished")
+        XCTAssertEqual(finished.offState?.body, "To go on, reopen notes with a new goal on its page.")
+
+        XCTAssertEqual(FactoryCoordinatorWindow.inputErrorMessage(DaemonError.rejected(status: 409, message: "notes is waiting at a prompt; answer it first"), projectName: "notes", computerName: "Work Mac"), "Not sent: the notes coordinator is waiting at its own prompt. Answer it with the keys, or on its card in Agents.")
+    }
+
+    /// D10 edge cases: blank coordinator pane, non-running states ignoring stale panes,
+    /// alerts without a fix, blank task refs on asks, and non-blocked input errors.
+    func testCoordinatorWindowEdgeCasesAndNonBlockedInputErrors() throws {
+        let blankPane = FactoryCoordinatorWindow(head: try head(state: .running, coordinatorPane: "   "))
+        XCTAssertFalse(blankPane.isLive)
+        XCTAssertNil(blankPane.coordinatorPane)
+        XCTAssertEqual(blankPane.headerAccessibilityLabel, "notes coordinator, not running")
+        XCTAssertEqual(blankPane.offState?.heading, "The notes coordinator is not running")
+        XCTAssertNil(blankPane.offState?.alertCause)
+        XCTAssertNil(blankPane.offState?.alertFix)
+
+        let alertNoFix = FactoryCoordinatorWindow(head: try head(state: .running, coordinatorPane: nil, alert: FactoryProjectAlert(kind: "agents_down", cause: "disk is full", fix: nil)))
+        XCTAssertEqual(alertNoFix.offState?.alertCause, "disk is full")
+        XCTAssertNil(alertNoFix.offState?.alertFix)
+
+        let stoppedStalePane = FactoryCoordinatorWindow(head: try head(state: .stopped, coordinatorPane: "coord-stale"))
+        XCTAssertFalse(stoppedStalePane.isLive)
+        XCTAssertNil(stoppedStalePane.coordinatorPane)
+        XCTAssertEqual(stoppedStalePane.headerAccessibilityLabel, "notes coordinator, not running")
+        XCTAssertEqual(stoppedStalePane.offState?.heading, "notes is stopped")
+        XCTAssertNil(stoppedStalePane.offState?.alertCause)
+        XCTAssertNil(stoppedStalePane.offState?.alertFix)
+
+        let finishedStalePane = FactoryCoordinatorWindow(head: try head(state: .finished, coordinatorPane: "coord-stale"))
+        XCTAssertFalse(finishedStalePane.isLive)
+        XCTAssertNil(finishedStalePane.coordinatorPane)
+        XCTAssertEqual(finishedStalePane.headerAccessibilityLabel, "notes coordinator, not running")
+        XCTAssertEqual(finishedStalePane.offState?.heading, "notes is finished")
+        XCTAssertNil(finishedStalePane.offState?.alertCause)
+        XCTAssertNil(finishedStalePane.offState?.alertFix)
+
+        let blankTaskAsk = PendingAction(id: "f3", paneID: "factory:proj-1", kind: "answer_prompt", question: "Continue?", options: [], agent: "notes", factory: FactoryAskMeta(project: "proj-1", task: "   ", kind: "release"))
+        XCTAssertEqual(
+            FactoryCoordinatorWindow(head: try head(), openAsks: [blankTaskAsk]).askStrip,
+            "An ask is waiting on your answer. Answer it on its card; typing here is not an answer."
+        )
+
+        let wrappedBlocked = FactoryCoordinatorWindow.inputErrorMessage(
+            DaemonError.rejected(status: 409, message: "the notes factory is waiting at a prompt; answer it first (agent is blocked)"),
+            projectName: "notes",
+            computerName: "Work Mac"
+        )
+        XCTAssertEqual(wrappedBlocked, "Not sent: the notes coordinator is waiting at its own prompt. Answer it with the keys, or on its card in Agents.")
+
+        let nonBlocked = FactoryCoordinatorWindow.inputErrorMessage(
+            DaemonError.rejected(status: 500, message: "herdr did not answer"),
+            projectName: "notes",
+            computerName: "Work Mac"
+        )
+        XCTAssertFalse(nonBlocked.isEmpty)
+        XCTAssertFalse(nonBlocked.contains("waiting at its own prompt"), nonBlocked)
+    }
+
     /// `DaemonClient.sayFactory` and `DaemonClient.stopFactory` wire shapes & refusals.
     func testFactorySayAndStopClientRoutes() async throws {
         StubProtocol.seen = []
@@ -223,4 +316,377 @@ final class FactoryProjectBoardTests: XCTestCase {
             )
         }
     }
+
+    /// PR 9b fix-round: whitespace-only `coordinator_pane` values must be treated
+    /// like no pane across `FactoryProjectBoard` (`showsCoordinatorButton`, `sayBox`)
+    /// and `FactoryCoordinatorWindow` (`isLive`).
+    func testWhitespaceCoordinatorPaneTreatedAsNotRunningOnBoardAndSayBox() throws {
+        for rawPane in ["", "   ", " \n\t "] {
+            let blankHead = try head(state: .running, coordinatorPane: rawPane)
+            let board = FactoryProjectBoard(head: blankHead, tasks: [], now: now)
+            let window = FactoryCoordinatorWindow(head: blankHead)
+
+            XCTAssertFalse(window.isLive, "window.isLive for \(rawPane.debugDescription)")
+            XCTAssertFalse(board.showsCoordinatorButton, "showsCoordinatorButton must be false for whitespace pane \(rawPane.debugDescription)")
+            XCTAssertEqual(board.showsCoordinatorButton, window.isLive)
+
+            let box = board.sayBox(text: "Wait on T11")
+            XCTAssertFalse(box.hasCoordinator, "sayBox.hasCoordinator must be false for whitespace pane \(rawPane.debugDescription)")
+            XCTAssertEqual(box.defaultNote, "The notes coordinator is not running. It gets this when it is back.")
+            XCTAssertEqual(box.sentStatus, "The notes coordinator is not running. It gets this when it is back.")
+        }
+
+        let paddedHead = try head(state: .running, coordinatorPane: "  coord-notes-1  ")
+        let paddedBoard = FactoryProjectBoard(head: paddedHead, tasks: [], now: now)
+        XCTAssertTrue(paddedBoard.showsCoordinatorButton)
+        XCTAssertEqual(FactoryCoordinatorWindow(head: paddedHead).coordinatorPane, "coord-notes-1")
+        XCTAssertEqual(paddedBoard.sayBox(text: "Wait on T11").sentStatus, "Told the notes factory.")
+    }
 }
+
+#if os(iOS)
+import SwiftUI
+import UIKit
+@testable import Sheepdog
+
+/// PR 9b fix-round 2 (R3): when `/term` closes before `/api/state` refreshes,
+/// coordinator mode must not surface ordinary-agent closed copy, must request
+/// a `/api/state` refresh on the originating computer without waiting for
+/// `/events`, and must move `FactoryCoordinatorView` to its coordinator
+/// not-running state once that refresh completes.
+@MainActor
+final class FactoryCoordinatorWindowEndedTests: XCTestCase {
+    private var suiteName: String!
+    private var defaults: UserDefaults!
+    private var cacheDir: URL!
+
+    private static let runningStateJSON = #"""
+    {
+      "agents": [],
+      "questions": [],
+      "factory": [{
+        "id": "proj-1",
+        "name": "notes",
+        "goal": "A notes page with search",
+        "state": "running",
+        "counts": {"working": 1},
+        "folder": "~/code/notes",
+        "coordinator_pane": "coord-notes-1"
+      }],
+      "voice": {"mode": "off", "status": "closed", "muted": false, "stalled": false, "client_connected": false}
+    }
+    """#
+
+    private static let notRunningStateJSON = #"""
+    {
+      "agents": [],
+      "questions": [],
+      "factory": [{
+        "id": "proj-1",
+        "name": "notes",
+        "goal": "A notes page with search",
+        "state": "running",
+        "counts": {"working": 1},
+        "folder": "~/code/notes",
+        "alert": {
+          "kind": "agents_down",
+          "cause": "claude coordinator is signed out",
+          "fix": "sign in to claude at this Mac"
+        }
+      }],
+      "voice": {"mode": "off", "status": "closed", "muted": false, "stalled": false, "client_connected": false}
+    }
+    """#
+
+    override func setUp() async throws {
+        try await super.setUp()
+        suiteName = "sheepdog.tests.pr9b-r3-\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suiteName)!
+        defaults.removePersistentDomain(forName: suiteName)
+        cacheDir = FileManager.default.temporaryDirectory.appendingPathComponent("sheepdog-pr9b-r3-\(UUID().uuidString)", isDirectory: true)
+        CoordinatorRefreshStub.reset()
+    }
+
+    override func tearDown() async throws {
+        CoordinatorRefreshStub.reset()
+        defaults.removePersistentDomain(forName: suiteName)
+        try? FileManager.default.removeItem(at: cacheDir)
+        try await super.tearDown()
+    }
+
+    func testCoordinatorWindowTermCloseRequestsRefreshAndMovesToNotRunning() async throws {
+        try await verifyEndedTransition(closeReason: "gone", drawFrameFirst: true)
+        CoordinatorRefreshStub.reset()
+        try await verifyEndedTransition(closeReason: "refused:not_tracked", drawFrameFirst: false)
+    }
+
+    private func verifyEndedTransition(closeReason: String, drawFrameFirst: Bool) async throws {
+        let initialState = try DaemonClient.decoder.decode(DaemonState.self, from: Data(Self.runningStateJSON.utf8))
+        let runningHead = try XCTUnwrap(initialState.factory?.first)
+        CoordinatorRefreshStub.stateJSON = Self.notRunningStateJSON
+        CoordinatorRefreshStub.hangState = true
+
+        let store = ComputerStore(defaults: defaults, secrets: InMemorySecretStore())
+        let settings = SettingsStore(defaults: defaults, computers: store)
+        settings.address = "127.0.0.1:7799"
+        settings.hasBeenConfigured = true
+        let session = SessionViewModel(settings: settings, cache: ConversationCache(directory: cacheDir))
+
+        let endpoint = DaemonEndpoint(host: "127.0.0.1", port: 7777)
+        let connection = ComputerConnection(computerID: "work-mac", address: endpoint.display) { _ in
+            let config = URLSessionConfiguration.ephemeral
+            config.protocolClasses = [CoordinatorRefreshStub.self]
+            return DaemonClient(endpoint: endpoint, session: URLSession(configuration: config))
+        }
+        let workMac = ComputerModel(
+            id: "work-mac",
+            name: "Work Mac",
+            addresses: [endpoint.display],
+            certExpires: nil,
+            connection: connection,
+            scheduler: ManualLinkClock(),
+            demand: LinkDemand(isCurrent: false)
+        )
+        workMac.accept(initialState)
+        workMac.features = ["term"]
+        session.fleet.set([workMac])
+
+        var transports: [CoordinatorTermTransport] = []
+        let hub = TermHub(endpoint: endpoint) { request in
+            let t = CoordinatorTermTransport(request: request)
+            transports.append(t)
+            return t
+        }
+        session.remoteHubs["work-mac"] = hub
+
+        let root = NavigationStack {
+            FactoryCoordinatorView(initialHead: runningHead, computerID: "work-mac", onAsks: {})
+        }
+        .environmentObject(session)
+
+        let host = UIHostingController(rootView: root)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.layoutIfNeeded()
+        defer {
+            hub.disconnect()
+            workMac.stop()
+            session.fleet.set([])
+            window.isHidden = true
+            window.rootViewController = nil
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+
+        try await pumpUntil { (try? transports.last?.messages().contains { $0.type == .hello }) == true }
+        let transport = try XCTUnwrap(transports.last)
+        transport.text(#"{"type":"term-ready","protocol":1,"limits":{"channels":4},"shell":false}"#)
+        try await pumpUntil { (try? transport.messages().contains { $0.type == .open }) == true }
+
+        let openMsg = try XCTUnwrap(try transport.messages().first { $0.type == .open })
+        let ch = try XCTUnwrap(openMsg.ch)
+        let cols = openMsg.cols ?? 58
+        let rows = openMsg.rows ?? 30
+        XCTAssertEqual(openMsg.target, .pane("coord-notes-1"))
+        XCTAssertNotNil(findView(accessibilityID: "agentScreen.terminal", in: host.view))
+        XCTAssertEqual(CoordinatorRefreshStub.stateRequests, 0)
+
+        if drawFrameFirst {
+            transport.text(#"{"type":"term-opened","ch":\#(ch),"pane_id":"coord-notes-1","mode":"control","cols":\#(cols),"rows":\#(rows),"kind":"agent"}"#)
+            transport.binary(TermFrame(ch: ch, seq: 1, cols: cols, rows: rows, full: true, bytes: Array("● coordinator ready\r\n".utf8)).encode())
+            try await pumpUntil {
+                (self.findView(accessibilityID: "agentScreen.terminal", in: host.view)?.accessibilityValue ?? "").contains("coordinator ready")
+            }
+        }
+
+        // `/term` closes before any `/events` push or poll refreshes `/api/state`.
+        transport.text(#"{"type":"term-closed","ch":\#(ch),"reason":"\#(closeReason)"}"#)
+
+        let requestedRefresh = await waitBriefly { CoordinatorRefreshStub.stateRequests >= 1 }
+        XCTAssertTrue(
+            requestedRefresh,
+            "closing the coordinator /term channel (\(closeReason)) must immediately request a /api/state refresh on the originating computer"
+        )
+
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        let interimLabels = collectAccessibilityLabels(in: host.view)
+        for forbidden in ["This agent closed.", "sheepdog no longer tracks this agent.", "Its pane closed, or sheepdog no longer tracks it.", "Back to agents"] {
+            XCTAssertFalse(
+                interimLabels.contains { $0.contains(forbidden) },
+                "coordinator window must not show ordinary-agent copy \(forbidden.debugDescription) on \(closeReason), got: \(interimLabels)"
+            )
+        }
+
+        // Complete the triggered `/api/state` refresh (still without any `/events` push).
+        CoordinatorRefreshStub.releaseState()
+        let movedToOff = await waitBriefly { workMac.factoryHeads.first?.coordinatorPane == nil }
+        XCTAssertTrue(movedToOff, "refresh triggered by /term close (\(closeReason)) must update the project head on the originating computer")
+
+        host.view.setNeedsLayout()
+        host.view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+
+        let refreshedHead = try XCTUnwrap(workMac.factoryHeads.first)
+        let coordinatorWindow = FactoryCoordinatorWindow(head: refreshedHead)
+        XCTAssertFalse(coordinatorWindow.isLive)
+        XCTAssertEqual(coordinatorWindow.offState?.heading, "The notes coordinator is not running")
+        XCTAssertEqual(coordinatorWindow.offState?.alertCause, "claude coordinator is signed out")
+        XCTAssertEqual(coordinatorWindow.backButtonLabel, "Back to notes")
+        XCTAssertNil(
+            findView(accessibilityID: "agentScreen.terminal", in: host.view),
+            "FactoryCoordinatorView must replace the live terminal with its coordinator not-running screen once /api/state refreshes (\(closeReason))"
+        )
+    }
+
+    private func findView(accessibilityID: String, in view: UIView) -> UIView? {
+        if view.accessibilityIdentifier == accessibilityID { return view }
+        for subview in view.subviews {
+            if let found = findView(accessibilityID: accessibilityID, in: subview) { return found }
+        }
+        return nil
+    }
+
+    private func collectAccessibilityLabels(in root: Any) -> [String] {
+        guard let obj = root as? NSObject else { return [] }
+        var out: [String] = []
+        if let label = obj.accessibilityLabel, !label.isEmpty { out.append(label) }
+        if let uiLabel = obj as? UILabel, let text = uiLabel.text, !text.isEmpty { out.append(text) }
+        if let elements = obj.accessibilityElements {
+            for element in elements { out.append(contentsOf: collectAccessibilityLabels(in: element)) }
+        }
+        if let view = obj as? UIView {
+            for subview in view.subviews { out.append(contentsOf: collectAccessibilityLabels(in: subview)) }
+        }
+        return out
+    }
+
+    private func pumpUntil(timeout: TimeInterval = 2.0, _ condition: () -> Bool) async throws {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            if Date() > deadline { throw URLError(.timedOut) }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            try await Task.sleep(nanoseconds: 10_000_000)
+        }
+    }
+
+    private func waitBriefly(timeout: TimeInterval = 0.8, _ condition: () -> Bool) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while !condition() {
+            if Date() > deadline { return false }
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            try? await Task.sleep(nanoseconds: 10_000_000)
+        }
+        return true
+    }
+}
+
+@MainActor
+private final class CoordinatorTermTransport: TermTransport {
+    var onEvent: ((TermTransportEvent) -> Void)?
+    let request: URLRequest
+    var texts: [String] = []
+    var binary: [Data] = []
+    var isClosed = false
+
+    init(request: URLRequest) { self.request = request }
+
+    func messages() throws -> [TermMessage] {
+        try texts.map { try TermMessage.decode(Data($0.utf8)) }
+    }
+
+    func start() {}
+    func send(text: String) { texts.append(text) }
+    func send(data: Data) { binary.append(data) }
+    func ping(_ completion: @escaping (Bool) -> Void) { completion(true) }
+    func close() { isClosed = true }
+
+    func text(_ s: String) { onEvent?(.text(s)) }
+    func binary(_ d: Data) { onEvent?(.data(d)) }
+}
+
+private final class CoordinatorRefreshStub: URLProtocol {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var state = (
+        stateJSON: "{}",
+        hangState: false,
+        stateRequests: 0,
+        waiting: [UUID: () -> Void]()
+    )
+
+    private var pendingID: UUID?
+
+    static var stateJSON: String {
+        get { lock.withLock { state.stateJSON } }
+        set { lock.withLock { state.stateJSON = newValue } }
+    }
+
+    static var hangState: Bool {
+        get { lock.withLock { state.hangState } }
+        set { lock.withLock { state.hangState = newValue } }
+    }
+
+    static var stateRequests: Int {
+        lock.withLock { state.stateRequests }
+    }
+
+    static func reset() {
+        lock.withLock {
+            state = (stateJSON: "{}", hangState: false, stateRequests: 0, waiting: [:])
+        }
+    }
+
+    static func releaseState() {
+        let callbacks = lock.withLock { () -> [() -> Void] in
+            state.hangState = false
+            let all = Array(state.waiting.values)
+            state.waiting.removeAll()
+            return all
+        }
+        for cb in callbacks { cb() }
+    }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        let url = request.url ?? URL(string: "http://127.0.0.1:7777")!
+        if url.path == "/api/state" {
+            let shouldHang = Self.lock.withLock { () -> Bool in
+                Self.state.stateRequests += 1
+                return Self.state.hangState
+            }
+            if shouldHang {
+                let id = UUID()
+                pendingID = id
+                Self.lock.withLock {
+                    Self.state.waiting[id] = { [weak self] in self?.finishState(url: url) }
+                }
+                return
+            }
+            finishState(url: url)
+            return
+        }
+        finish(url: url, status: 404, body: Data(#"{"error":"not found"}"#.utf8))
+    }
+
+    override func stopLoading() {
+        if let id = pendingID {
+            _ = Self.lock.withLock { Self.state.waiting.removeValue(forKey: id) }
+            pendingID = nil
+        }
+    }
+
+    private func finishState(url: URL) {
+        let json = Self.lock.withLock { Self.state.stateJSON }
+        finish(url: url, status: 200, body: Data(json.utf8))
+    }
+
+    private func finish(url: URL, status: Int, body: Data) {
+        guard let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1", headerFields: ["Content-Type": "application/json"]) else { return }
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: body)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+#endif

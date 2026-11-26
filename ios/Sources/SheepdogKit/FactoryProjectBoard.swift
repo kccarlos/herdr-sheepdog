@@ -70,7 +70,7 @@ public struct FactoryProjectBoard {
     public var doneFoldLabel: String { "done \(doneTasks.count)" }
     public var alertHeading: String? { summary.alertLine }
     public var alertFix: String? { summary.alertFixLine }
-    public var showsCoordinatorButton: Bool { head.state == .running && head.coordinatorPane?.nonEmpty != nil }
+    public var showsCoordinatorButton: Bool { FactoryCoordinatorWindow(head: head).isLive }
     public var coordinatorAccessibilityLabel: String { "Open the \(head.name) coordinator's window" }
     public var canStop: Bool { head.state == .running || (head.state == .finished && live) }
     public var canResume: Bool { summary.resumableFolder != nil }
