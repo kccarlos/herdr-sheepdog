@@ -67,7 +67,10 @@ is re-exported after every change.
   and `FactoryStatesDark`. On 2026-11-25 `FactoryWindow` was redrawn
   from a read-only snapshot to the live window (D10), `FactoryWindowStates`
   was added, the unused `gone` state left `FactoryProject`, and the window's
-  strings in [slice14-wording.md](slice14-wording.md) were replaced. Their PNGs
+  strings in [slice14-wording.md](slice14-wording.md) were replaced. After
+  design review D10-1 the window got a largest-text cell and a finished
+  state, and `FactoryWindowStates` has a second, dark PNG
+  (`png_dark` in `boards.json`). Their PNGs
   were rendered from
   the board sources in headless Chrome with the canvas runtime, not
   exported from the canvas.

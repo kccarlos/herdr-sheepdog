@@ -851,11 +851,12 @@
   },
   {
    "id": "FactoryWindowStates",
-   "title": "Factory — the coordinator's window: not running, stopped, and dark",
+   "title": "Factory — the coordinator's window: not running, stopped (finished alike), dark, and largest text",
    "file": "FactoryWindowStates.dc.html",
    "png": "png/FactoryWindowStates.png",
-   "w": 1330,
-   "h": 962
+   "w": 1760,
+   "h": 1558,
+   "png_dark": "png/FactoryWindowStates-dark.png"
   },
   {
    "id": "FactoryVoice",

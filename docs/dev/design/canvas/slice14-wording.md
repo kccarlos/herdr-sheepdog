@@ -326,15 +326,18 @@ lowercase.
 | `app.pair.stop` | refusal | Not stopped: Work Mac no longer knows this phone. Pair this phone again in Settings ▸ Work Mac, then press Stop again. | a project action without a paired-device identity; the computer's own name |
 | `app.pair.say` | refusal | Not sent: Work Mac no longer knows this phone. Pair this phone again in Settings ▸ Work Mac, then send again. | the text box without a paired-device identity |
 | `app.coord.btn` | button | Coordinator | opens the coordinator's live window (D10); shown only while a coordinator runs |
-| `app.coord.off` | heading | The coordinator is not running: claude coordinator is signed out | the alert's cause as the daemon writes it; without an alert the heading ends at "not running" and no fix follows |
+| `app.coord.off` | heading | The notes coordinator is not running: claude coordinator is signed out | the one not-running heading. On the project page the alert's cause follows the colon; in the coordinator's window the heading stops at "not running" and the cause and `app.coord.fix` follow in a box. Without an alert, no cause and no fix |
 | `app.coord.fix` | sentence | Fix: sign in to claude at this Mac (Work Mac). Running tasks go on. | the alert's fix |
 | `app.win.title` | heading | notes · Coordinator | the coordinator's window header; no model or effort |
 | `app.win.ph` | placeholder | Ask the notes coordinator… | the window's prompt box; screen-reader label "Message to the notes coordinator" |
-| `app.win.ask` | link | T10 is waiting on your answer. Answer it on its card; typing here is not an answer. | above the key bar while the project has an open ask; opens the project at the card |
-| `app.win.off` | heading | The notes coordinator is not running | in place of the terminal, key bar and box when the coordinator goes while the window is open; the alert's cause and `app.coord.fix` follow when an alert is open |
-| `app.win.off.body` | sentence | This window comes back when a coordinator runs again. To tell it something meanwhile, use the box on the notes page; it gets it when it is back. | under `app.win.off` |
+| `app.win.ask` | link | T10 is waiting on your answer. Answer it on its card; typing here is not an answer. | above the key bar while the project has an open ask; opens the project at its asks. One open ask names its task; an ask with no task: "An ask is waiting on your answer. Answer it on its card; typing here is not an answer."; two or more: "2 asks are waiting on your answer. Answer them on their cards; typing here is not an answer." The screen-reader label is the visible text |
+| `app.win.off.body` | sentence | This window comes back when a coordinator runs again. To tell it something meanwhile, use the box on the notes page; it gets it when it is back. | under `app.coord.off` in the window, in place of the terminal, key bar and box, when the coordinator goes while the window is open |
 | `app.win.stopped` | heading | notes is stopped | in place of the terminal, key bar and box while the project is stopped |
-| `app.win.stopped.body` | sentence | No coordinator runs while a project is stopped, so there is nothing to type into. Resume notes on its page; it goes on with the same goal. | under `app.win.stopped` |
+| `app.win.stopped.body` | sentence | Resume notes on its page; it goes on with the same goal. | under `app.win.stopped` |
+| `app.win.finished` | heading | notes is finished | in place of the terminal, key bar and box when the project finishes while the window is open |
+| `app.win.finished.body` | sentence | To go on, reopen notes with a new goal on its page. | under `app.win.finished` |
+| `app.win.blocked` | refusal | Not sent: the notes coordinator is waiting at its own prompt. Answer it with the keys, or on its card in Agents. | under the box when Send hits a coordinator blocked on its own CLI dialog (`WindowPrompt` refuses a blocked pane); the text stays in the box |
+| `app.win.keys` | rule | (no text) | the window's key bar is the ordinary one; More keys has no Interrupt row and the box has no Stop button. Esc and the Ctrl latch stay, because dialogs need them, so Esc or Ctrl, c still interrupts the coordinator's turn |
 | `app.win.back` | button | Back to notes | under either |
 | `app.task.last` | heading | Last decision | the task view: the last coordinator or owner decision and its why |
 | `app.run` | row text | worker · codex · 31 min | one run line under a task: role, CLI, time since it started |
