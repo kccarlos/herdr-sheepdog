@@ -488,7 +488,12 @@ ceiling, and its result comes back as an event turn that pushes
 the explanation at the next pause, tagged to the request. Follow-ups
 resume the same CLI session (the harness persists it); the orchestrator keeps
 an investigation ledger `recall` can search. One live investigation per
-agent; stop cancels it.
+agent or project. Stop cancels it.
+
+For a factory project, the default investigation runs in the project's
+folder with its board and log path. It can explain the record of a running,
+stopped, or finished project without waking the coordinator. See
+[Project questions](design/app-factory.md#65-questions-two-layers-d6).
 
 **Worker history.** A screen is the worker's working notes; what it
 wrote for a human is in its own session transcript, which herdr names

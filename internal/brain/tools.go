@@ -382,7 +382,11 @@ func (b *Brain) execTool(ctx context.Context, t *turn, call *genai.FunctionCall)
 		// The job is running whatever happens to the rest of this turn,
 		// so the fallback path must say so rather than report the roster
 		// as if nothing were under way.
-		out.acted = "Looking into " + aliasOr(row.Alias) + " now; the answer comes on its own."
+		name := aliasOr(row.Alias)
+		if row.Project && row.Spoken != "" {
+			name = row.Spoken
+		}
+		out.acted = "Looking into " + name + " now; the answer comes on its own."
 	case ToolPrompt:
 		text := arg("text")
 		if text == "" {

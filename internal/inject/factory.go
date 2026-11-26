@@ -138,6 +138,9 @@ func (f *Factory) Graph(id string) (factory.GraphView, error) {
 	return factory.GraphView{}, factory.ErrProjectNotFound
 }
 
+// ProjectLogPath names a virtual log in the simulator.
+func (f *Factory) ProjectLogPath(id string) string { return (factory.Paths{}).Log(id) }
+
 // LogLines returns the matching tail of the project's scripted log.
 func (f *Factory) LogLines(id string, n int, task string, observations bool) ([]factory.LogEntry, error) {
 	f.mu.Lock()

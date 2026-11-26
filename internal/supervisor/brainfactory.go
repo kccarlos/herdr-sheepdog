@@ -68,12 +68,8 @@ func (h brainHost) roster() brainRoster {
 		})
 	})
 	for _, p := range heads {
-		pane := factoryPanePrefix + p.ID
-		name := cmp.Or(p.Name, factory.ProjectName(p.ID, p.Folder))
-		// Keep the entire id suffix so projects with the same name and
-		// first few hex digits still have stable, different aliases.
-		alias := state.Slug(name+"-factory") + "-" + state.Slug(strings.TrimPrefix(p.ID, "proj-"))
-		row := state.Agent{PaneID: pane, Alias: alias, Title: name, Spoken: "the " + name + " factory", Kind: "factory"}
+		row := projectRow(p)
+		pane := row.PaneID
 		r.heads[pane] = p
 		if p.State == "finished" {
 			r.finished = append(r.finished, row)
@@ -85,6 +81,13 @@ func (h brainHost) roster() brainRoster {
 		r.listed = append(r.listed, row)
 	}
 	return r
+}
+
+func projectRow(p factory.ProjectHead) state.Agent {
+	name := cmp.Or(p.Name, factory.ProjectName(p.ID, p.Folder))
+	// The full suffix keeps aliases distinct for projects with the same name.
+	alias := state.Slug(name+"-factory") + "-" + state.Slug(strings.TrimPrefix(p.ID, "proj-"))
+	return state.Agent{PaneID: factoryPanePrefix + p.ID, Alias: alias, Title: name, Spoken: "the " + name + " factory", Kind: "factory"}
 }
 
 func blockedCoordinator(p factory.ProjectHead, row state.Agent) bool {
@@ -155,10 +158,19 @@ func projectCounts(p factory.ProjectHead, openAsks int) string {
 
 func (h brainHost) readBoard(id string) (string, error) {
 	p := h.projectHead(id)
+	text, err := h.projectBoard(p)
+	if err == nil {
+		h.s.setSubject(factoryPanePrefix + id)
+	}
+	return text, err
+}
+
+func (h brainHost) projectBoard(p factory.ProjectHead) (string, error) {
 	f, ok := h.s.cfg.Factory.(factoryBoard)
 	if p.ID == "" || !ok {
 		return "", factory.ErrProjectNotFound
 	}
+	id := p.ID
 	graph, err := f.Graph(id)
 	if err != nil {
 		return "", err
@@ -201,7 +213,6 @@ func (h brainHost) readBoard(id string) (string, error) {
 	if omitted := len(graph.Tasks) - shown; omitted > 0 {
 		fmt.Fprintf(&b, "… (%d more tasks omitted)\n", omitted)
 	}
-	h.s.setSubject(factoryPanePrefix + id)
 	return strings.TrimSpace(b.String()), nil
 }
 

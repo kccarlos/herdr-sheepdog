@@ -230,6 +230,9 @@ func (s *Supervisor) sayOf(paneID string) string {
 // be gone (a promise, an investigation): the pane's current spoken name
 // while it exists, else that alias.
 func (s *Supervisor) sayPane(paneID, alias string) string {
+	if strings.HasPrefix(paneID, factoryPanePrefix) {
+		return s.sayOf(paneID)
+	}
 	if a, ok := s.store.Get(paneID); ok {
 		if n := state.Say(a); n != "" {
 			return n

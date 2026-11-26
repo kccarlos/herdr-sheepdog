@@ -435,6 +435,9 @@ func (e *Engine) Graph(project string) (GraphView, error) {
 	return GraphViewOf(s, logs), nil
 }
 
+// ProjectLogPath locates the log for a known project ID.
+func (e *Engine) ProjectLogPath(id string) string { return e.Paths.Log(id) }
+
 func (e *Engine) LogLines(project string, n int, task string, observations bool) ([]LogEntry, error) {
 	_, logs, err := e.loadProjectCopy(project)
 	if err != nil {
