@@ -883,17 +883,25 @@ func TestPR5b8R2_NonJ5AgentsDownAndMultiSlotIsolation(t *testing.T) {
 				t.Fatalf("expected 1 agents_down log on 2nd J9 stop, got %d", got)
 			}
 
-			// J7 starts c3; after c3 is alive and takes a turn (completing the wake turn), agents_down clears.
+			// J7 starts c3; J12 delivers the wake. While the batch is still in flight, agents_down@j9 stays active.
 			w.pass()
 			c3 := w.makeCoordinatorIdle()
+			sent := lastSendTo(t, w.srv.Requests(), c3)
 			w.srv.SetStatus(c3, &hc.Status{App: "claude-code", State: "working"})
 			w.advance(5 * time.Second)
 			w.pass()
+			if _, active := statusAlert(t, w.paths, w.repo, "agents_down"); !active {
+				t.Fatal("agents_down@j9 cleared while c3's wake batch was still in flight")
+			}
+			// Once c3 completes the wake turn with matching evidence, agents_down clears.
+			w.srv.SetScreen(c3, completedWakeScreen("claude", sent, "Retried T1."))
 			w.srv.SetStatus(c3, &hc.Status{App: "claude-code", State: "idle"})
+			w.advance(5 * time.Second)
+			w.pass()
 			w.advance(25 * time.Second)
 			w.pass()
 			if ts, active := statusAlert(t, w.paths, w.repo, "agents_down"); active {
-				t.Fatalf("agents_down did not clear after c3 completed a turn: %+v", ts)
+				t.Fatalf("agents_down did not clear after c3 completed its wake turn: %+v", ts)
 			}
 		})
 	})

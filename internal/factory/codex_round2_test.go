@@ -230,9 +230,10 @@ func TestWakeSurvivesCoordinatorDeathForEveryCLI(t *testing.T) {
 		if got := logRules(t, c.paths.Log(c.id), "J8"); len(got) < 2 {
 			t.Skipf("scenario did not reach the J8 stop (%d J8 lines)", len(got))
 		}
-		// The wake's turn ended (with an error): J8's stop does not requeue it.
-		if r := c.replacementSends(co, true); anyContains(r, "worker_failed") {
-			t.Fatalf("a wake whose turn ended was delivered again after J8: %q", r)
+		// Under PR 2b (design.md §10): an unconfirmed error turn requeues the wake once
+		// before J8 stops the coordinator, so the replacement receives worker_failed once.
+		if r := c.replacementSends(co, true); !anyContains(r, "worker_failed") {
+			t.Fatalf("after J8 stop on an unconfirmed error turn, replacement sends = %q, want requeued worker_failed", r)
 		}
 	})
 	t.Run("codex killed", func(t *testing.T) {
@@ -255,15 +256,18 @@ func TestWakeSurvivesCoordinatorDeathForEveryCLI(t *testing.T) {
 	})
 }
 
-// TestFinishedWakeTurnIsNotRequeued: a wake whose turn finished before the
-// coordinator died is never delivered again, for either CLI.
+// TestFinishedWakeTurnIsNotRequeued: a wake whose turn finished with matching
+// confirmation evidence before the coordinator died is never delivered again,
+// for either CLI.
 func TestFinishedWakeTurnIsNotRequeued(t *testing.T) {
 	t.Run("claude", func(t *testing.T) {
 		c, co := claudeCoordWithWake(t)
+		send1 := lastSendTo(t, c.srv.Requests(), co)
 		c.claudeStatus(co, "working", 1)
 		c.pass()
 		*c.now = c.now.Add(30 * time.Second)
-		c.claudeStatus(co, "idle", 2) // the wake's turn ended
+		c.srv.SetScreen(co, completedWakeScreen("claude", send1, "Handled worker_failed."))
+		c.claudeStatus(co, "idle", 2) // the wake's turn ended with matching evidence
 		c.pass()
 		*c.now = c.now.Add(30 * time.Second)
 		c.pass()
@@ -280,9 +284,10 @@ func TestFinishedWakeTurnIsNotRequeued(t *testing.T) {
 		c.turnEnds()
 		c.addWake("worker_failed")
 		c.turnEnds()
+		send1 := lastSendTo(t, c.srv.Requests(), co)
 		c.srv.SetScreen(co, codexWorkingScreen("Wake: 1 item(s) need you."))
 		c.turnEnds()
-		c.srv.SetScreen(co, codexIdleScreen("Wake: 1 item(s) need you.", 17))
+		c.srv.SetScreen(co, completedWakeScreen("codex", send1, "Handled worker_failed."))
 		c.turnEnds()
 		c.srv.Finish(co, "killed")
 		if s := c.replacementSends(co, false); anyContains(s, "worker_failed") {
@@ -291,9 +296,9 @@ func TestFinishedWakeTurnIsNotRequeued(t *testing.T) {
 	})
 }
 
-// TestInFlightWakesMergeNeverOverwrite: a second batch typed while the first
-// batch's turn has not ended keeps the first in flight, so a death requeues
-// both.
+// TestInFlightWakesMergeNeverOverwrite: while batch 1 is still in flight on
+// the delivery turn, J12 holds batch 2 in Wakes (design.md §10) so a death
+// prepends batch 1 ahead of batch 2 and the replacement receives both in order.
 func TestInFlightWakesMergeNeverOverwrite(t *testing.T) {
 	c, co := claudeCoordWithWake(t)
 	c.claudeStatus(co, "idle", 1) // no new turn since the first wake
@@ -301,9 +306,9 @@ func TestInFlightWakesMergeNeverOverwrite(t *testing.T) {
 	*c.now = c.now.Add(30 * time.Second)
 	c.pass()
 	c.addWake("main_red")
-	c.pass() // J12 delivers the second batch
-	if sends := sendsTo(t, c.srv.Requests(), co); len(sends) != 2 || !strings.Contains(sends[1], "main_red") {
-		t.Fatalf("second batch not delivered: %q", sends)
+	c.pass() // J12 holds main_red while worker_failed is in flight
+	if sends := sendsTo(t, c.srv.Requests(), co); len(sends) != 1 {
+		t.Fatalf("J12 delivered a second batch while batch 1 was in flight: %q", sends)
 	}
 	c.srv.Finish(co, "killed")
 	s := c.replacementSends(co, true)

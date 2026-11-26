@@ -118,15 +118,16 @@ func TestAgyCoordinatorRealEscWakeRecovery(t *testing.T) {
 
 	t.Run("real_esc_screen_requeues_once_and_redelivers", func(t *testing.T) {
 		r, coord := startAgyDeliveredWake(t)
+		send1 := lastSendTo(t, r.srv.Requests(), coord)
 
 		// Active wake with owner question queued behind it (esc-confirm-active-screen.jsonl).
-		agyStepWorking(r, coord, activeScreen)
+		agyStepWorking(r, coord, bindAgyCaptureWake(activeScreen, send1))
 
 		// Esc interrupts the wake; agy shows real esc-verified-screen.jsonl and goes idle (Turn 3).
 		if _, err := r.cl.Keys(ctx, coord, "esc"); err != nil {
 			t.Fatal(err)
 		}
-		agyStepIdle(r, coord, "idle", interruptedScreen)
+		agyStepIdle(r, coord, "idle", bindAgyCaptureWake(interruptedScreen, send1))
 
 		st := r.state()
 		if got := prClosedWakeSends(t, r.srv.Requests()); got != 2 {
@@ -138,28 +139,43 @@ func TestAgyCoordinatorRealEscWakeRecovery(t *testing.T) {
 				st.Project.RunID, st.Project.CoordWakeRetried, len(st.Project.CoordWakesInFlight), len(st.Project.Wakes))
 		}
 
-		// A second Esc on the redelivered wake must not requeue again on the same coordinator;
-		// instead the batch stays in flight and arms J9 replacement.
-		agyStepWorking(r, coord, activeScreen)
+		// A second Esc on the redelivered wake produces two sends total, logs the
+		// unconfirmed exhaustion via J12, releases the batch, and triggers no J9 replacement.
+		send2 := lastSendTo(t, r.srv.Requests(), coord)
+		agyStepWorking(r, coord, bindAgyCaptureWake(activeScreen, send2))
 		if _, err := r.cl.Keys(ctx, coord, "esc"); err != nil {
 			t.Fatal(err)
 		}
-		agyStepIdle(r, coord, "idle", interruptedScreen)
+		agyStepIdle(r, coord, "idle", bindAgyCaptureWake(interruptedScreen, send2))
 
 		st2 := r.state()
 		if got := prClosedWakeSends(t, r.srv.Requests()); got != 2 {
-			t.Fatalf("second Esc on same agy coordinator redelivered again: sends = %d, want 2 (requeue once per coordinator)", got)
+			t.Fatalf("second Esc on same agy coordinator redelivered again: sends = %d, want 2", got)
 		}
-		if len(st2.Project.CoordWakesInFlight) != 1 || len(st2.Project.Wakes) != 0 || !st2.Project.CoordWakeRetried || st2.Project.CoordWakeAt.IsZero() {
-			t.Skip("needs the engine wake-evidence PR (app-factory §10)")
+		if len(st2.Project.CoordWakesInFlight) != 0 || len(st2.Project.Wakes) != 0 || !st2.Project.CoordWakeAt.IsZero() || st2.Project.CoordSilentStops != 0 {
+			t.Fatalf("after second Esc exhaustion: inFlight=%d wakes=%d wakeAt=%v silentStops=%d, want all clear/0",
+				len(st2.Project.CoordWakesInFlight), len(st2.Project.Wakes), st2.Project.CoordWakeAt, st2.Project.CoordSilentStops)
+		}
+		j12 := logRules(t, r.paths.Log(r.id), "J12")
+		if len(j12) == 0 || !hasJ12LogFor(j12[len(j12)-1:], "T1:pr_closed", "") || strings.Contains(j12[len(j12)-1].Decision, "delivered") {
+			t.Fatalf("second Esc missing J12 unconfirmed exhaustion log for T1:pr_closed: %+v", j12)
+		}
+		// Advancing past coordinator_silent_minutes must not fire J9 replacement for a completed later idle turn.
+		*r.now = r.now.Add(time.Duration(st2.Settings.CoordinatorSilentMinutes+5) * time.Minute)
+		r.pass()
+		if r.state().Project.RunID != coord || len(logRules(t, r.paths.Log(r.id), "J9")) != 0 {
+			t.Fatalf("second Esc falsely triggered J9 replacement: runID=%q j9=%+v", r.state().Project.RunID, logRules(t, r.paths.Log(r.id), "J9"))
 		}
 	})
 
 	t.Run("owner_question_queued_behind_wake_submitted_after_esc_redelivers", func(t *testing.T) {
 		r, coord := startAgyDeliveredWake(t)
+		send1 := lastSendTo(t, r.srv.Requests(), coord)
+		boundActive := bindAgyCaptureWake(activeScreen, send1)
+		boundInterrupted := bindAgyCaptureWake(interruptedScreen, send1)
 
 		// Active wake with owner question queued behind it, then Esc interrupts the wake.
-		agyStepWorking(r, coord, activeScreen)
+		agyStepWorking(r, coord, boundActive)
 		if _, err := r.cl.Send(ctx, coord, "What are you doing next? Answer in one line.", false); err != nil {
 			t.Fatal(err)
 		}
@@ -170,15 +186,15 @@ func TestAgyCoordinatorRealEscWakeRecovery(t *testing.T) {
 		// The queued owner question that Esc placed in the composer is submitted and answered
 		// before the idle grace period finishes; the transcript still carries the interrupted
 		// wake above the submitted owner prompt and its one-line answer.
-		boxStart := strings.Index(interruptedScreen, "\n────────────────────────────────────────────────────────────────────────────────")
+		boxStart := strings.Index(boundInterrupted, "\n────────────────────────────────────────────────────────────────────────────────")
 		if boxStart < 0 {
 			t.Fatal("real fixture missing bottom input box rule")
 		}
-		submittedAfterEsc := interruptedScreen[:boxStart] + "\n\n" +
+		submittedAfterEsc := boundInterrupted[:boxStart] + "\n\n" +
 			"────────────────────────────────────────────────────────────\n" +
 			"> What are you doing next? Answer in one line.\n\n" +
 			"  Waiting for your go-ahead before retrying T1 after PR #171 was closed.\n" +
-			strings.Replace(interruptedScreen[boxStart+1:], "> What are you doing next? Answer in one line.", ">", 1)
+			strings.Replace(boundInterrupted[boxStart+1:], "> What are you doing next? Answer in one line.", ">", 1)
 
 		agyStepIdle(r, coord, "done", submittedAfterEsc)
 
@@ -192,15 +208,15 @@ func TestAgyCoordinatorRealEscWakeRecovery(t *testing.T) {
 				st.Project.CoordWakeRetried, len(st.Project.CoordWakesInFlight))
 		}
 
-		// Once the coordinator handles the redelivered wake normally, the newer wake prompt
-		// supersedes the older interruption and does not loop.
-		handledRedelivery := interruptedScreen[:boxStart] + "\n\n" +
+		// Once the coordinator handles the redelivered wake normally, the newer numbered wake
+		// prompt with reply supersedes the older interruption and does not loop.
+		send2 := lastSendTo(t, r.srv.Requests(), coord)
+		handledRedelivery := boundInterrupted[:boxStart] + "\n\n" +
 			"────────────────────────────────────────────────────────────\n" +
-			"> Wake: 1 task wake(s) wait on you.\n" +
-			"  - T1: N4: the PR was closed without merging.\n\n" +
+			formatPromptEcho(">", send2) + "\n" +
 			"  Retried T1 after reviewing the closed PR.\n" +
-			strings.Replace(interruptedScreen[boxStart+1:], "> What are you doing next? Answer in one line.", ">", 1)
-		agyStepWorking(r, coord, activeScreen)
+			strings.Replace(boundInterrupted[boxStart+1:], "> What are you doing next? Answer in one line.", ">", 1)
+		agyStepWorking(r, coord, bindAgyCaptureWake(activeScreen, send2))
 		agyStepIdle(r, coord, "done", handledRedelivery)
 		*r.now = r.now.Add(time.Minute)
 		r.pass()

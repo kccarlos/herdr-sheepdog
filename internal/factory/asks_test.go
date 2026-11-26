@@ -1884,7 +1884,7 @@ func TestSayBeforeFinishReachesNextCoordinator(t *testing.T) {
 		}
 
 		// After handling Say, coordinator goes idle and J4 stops it and finishes.
-		h.setCoordWorking(coord1)
+		h.completeWakeTurn(coord1)
 		h.coordIdleWithStatus(coord1, "idle")
 		h.now = h.now.Add(15 * time.Second)
 		h.pass()

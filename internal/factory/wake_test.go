@@ -97,7 +97,7 @@ func TestJ12HeldWakesOneBatchWhenIdle(t *testing.T) {
 	if len(sends) != 1 {
 		t.Fatalf("sends = %q, want one batch", sends)
 	}
-	for _, want := range []string{"Wake: 2", "T1: N23:", "worker_failed", `title "feat: x"; H c1; PR #7, checks green`, "T2: N43", "differ from their default: worker_restarts 1."} {
+	for _, want := range []string{"Wake: #2 2 task wake(s)", "T1: N23:", "worker_failed", `title "feat: x"; H c1; PR #7, checks green`, "T2: N43", "differ from their default: worker_restarts 1."} {
 		if !strings.Contains(sends[0], want) {
 			t.Errorf("wake message missing %q:\n%s", want, sends[0])
 		}
@@ -288,13 +288,14 @@ func TestWakeMessageBounded(t *testing.T) {
 		t.Fatalf("title not cut to 120 characters: %s", f)
 	}
 	var s flow.State
+	s.Seq = 41
 	s.Settings = flow.DefaultSettings()
 	for i := range 25 {
 		s.Project.Wakes = append(s.Project.Wakes, flow.Wake{Key: fmt.Sprintf("k%d", i), Task: fmt.Sprintf("T%d", i)})
 	}
 	msg := wakeMessage(s)
-	if n := strings.Count(msg, "\n- T"); n != 20 || !strings.Contains(msg, "and 5 more") || !strings.HasPrefix(msg, "Wake: 25 ") {
-		t.Fatalf("listed %d wakes, want 20 then \"and 5 more\":\n%s", n, msg)
+	if n := strings.Count(msg, "\n- T"); n != 20 || !strings.Contains(msg, "and 5 more") || !strings.HasPrefix(msg, "Wake: #42 25 ") {
+		t.Fatalf("listed %d wakes, want 20 then \"and 5 more\" with numbered header:\n%s", n, msg)
 	}
 }
 
