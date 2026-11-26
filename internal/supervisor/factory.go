@@ -16,9 +16,8 @@ import (
 
 const factoryAskPrefix, factoryPanePrefix, factoryVoiceDeviceID = "fask-", "factory:", "voice-session"
 
-// Factory is the subset of *factory.Engine the Supervisor needs for the ask
-// bridge and owner voice start/stop commands (design.md 12.3).
-type Factory interface {
+// factoryControl is the ask bridge and owner voice start/stop contract.
+type factoryControl interface {
 	Projects() []factory.ProjectView
 	Asks(open bool) []flow.Ask
 	MintProof(askID, option, inputKind, deviceID string) (factory.AnswerProof, error)
@@ -26,6 +25,14 @@ type Factory interface {
 	Start(folder, goal string, maxRunning int) error
 	Stop(project string) error
 	Changes() <-chan factory.Change
+}
+
+// Factory adds the views the orchestrator reads for project contacts.
+type Factory interface {
+	factoryControl
+	ProjectHeads() []factory.ProjectHead
+	Graph(project string) (factory.GraphView, error)
+	LogLines(project string, n int, task string, observations bool) ([]factory.LogEntry, error)
 }
 
 var _ Factory = (*factory.Engine)(nil)

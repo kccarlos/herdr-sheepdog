@@ -547,26 +547,38 @@ func (s *Supervisor) answerKeys(ctx context.Context, p state.PendingAction, keys
 // findAlias matches an alias exactly, then by slug, then by prefix or
 // containment when that is unambiguous.
 func findAlias(rows []state.Agent, name string) (state.Agent, bool) {
+	hit, ok, _ := matchAlias(rows, name, nil)
+	return hit, ok
+}
+
+func matchAlias(rows []state.Agent, name string, alternate map[string]string) (state.Agent, bool, bool) {
 	lname := strings.ToLower(name)
 	slug := state.Slug(name)
 	for _, r := range rows {
-		if strings.ToLower(r.Alias) == lname || (slug != "" && r.Alias == slug) {
-			return r, true
+		if strings.ToLower(r.Alias) == lname || (slug != "" && (r.Alias == slug || alternate[r.PaneID] == slug)) {
+			return r, true, false
 		}
 	}
 	// The spoken name ("README Claude"), then the session title alone
 	// ("the README one"), when exactly one agent has it.
+	ambiguous := false
 	for _, key := range []func(state.Agent) string{state.Say, func(a state.Agent) string { return a.Title }} {
 		var hit state.Agent
 		hits := 0
+		project := false
 		for _, r := range rows {
 			if k := key(r); k != "" && (strings.EqualFold(k, strings.TrimSpace(name)) || (slug != "" && state.Slug(k) == slug)) {
 				hit, hits = r, hits+1
+				project = project || strings.HasPrefix(r.PaneID, factoryPanePrefix)
 			}
 		}
 		if hits == 1 {
-			return hit, true
+			return hit, true, false
 		}
+		if hits > 1 && project {
+			return state.Agent{}, false, true
+		}
+		ambiguous = ambiguous || hits > 1
 	}
 	var hit state.Agent
 	hits := 0
@@ -576,7 +588,7 @@ func findAlias(rows []state.Agent, name string) (state.Agent, bool) {
 		}
 	}
 	if hits == 1 {
-		return hit, true
+		return hit, true, false
 	}
-	return state.Agent{}, false
+	return state.Agent{}, false, ambiguous || hits > 1
 }
