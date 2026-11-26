@@ -237,13 +237,21 @@ public struct FactoryStartCheck: Decodable, Equatable, Sendable {
         self.name = name; self.status = status; self.detail = detail; self.fix = fix
     }
     public var statusWord: String { ["ok": "pass", "warn": "warning", "skip": "skipped"][status] ?? status }
+    public var commandFix: (command: String, rest: String?)? {
+        guard let raw = fix?.trimmed.nonEmpty, raw.hasPrefix("run:") else { return nil }
+        let body = String(raw.dropFirst(4)).trimmed, cut = [body.range(of: " (")?.lowerBound, body.range(of: ", then ")?.lowerBound].compactMap { $0 }.min() ?? body.endIndex
+        guard let command = String(body[..<cut]).trimmed.nonEmpty else { return nil }
+        let tail = String(body[cut...]).trimmed
+        return (command, (tail.hasPrefix(",") ? String(tail.dropFirst()).trimmed : tail).nonEmpty)
+    }
 }
 
 /// A 400 start refusal carrying the daemon's start-check results.
-public struct FactoryStartChecksError: Error, Equatable, Sendable {
+public struct FactoryStartChecksError: LocalizedError, Equatable, Sendable {
     public let message: String
     public let results: [FactoryStartCheck]
     public init(message: String, results: [FactoryStartCheck]) { self.message = message; self.results = results }
+    public var errorDescription: String? { message }
 }
 
 private struct FactoryStartChecksReply: Decodable { let error: String?; let results: [FactoryStartCheck] }

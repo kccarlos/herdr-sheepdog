@@ -79,8 +79,20 @@ public struct FactoryAgentsList: Equatable, Sendable {
     public var isEmpty: Bool { agents.isEmpty && !hasFactoryContent }
 
     public static func resumeErrorMessage(_ error: Error, computerName: String, linkUsable: Bool = true) -> String {
-        factoryActionError(error, computerName: computerName, linkUsable: linkUsable, retry: "press Resume again")
+        factoryStartError(error, action: "Resume", computerName: computerName, linkUsable: linkUsable)
     }
+}
+
+func factoryStartError(_ error: Error, action: String, computerName: String, linkUsable: Bool) -> String {
+    if let checks = error as? FactoryStartChecksError, !checks.results.isEmpty {
+        return "Not started: a start check failed. Fix it, then press \(action) again."
+    }
+    if FactoryProjectBoard.isProjectGone(error) { return "This project is gone." }
+    if case let .rejected(status, message) = error as? DaemonError {
+        if status == 409 { return message.trimmed.isEmpty || message == "already_closed" ? "This project is finished. Give it a new goal." : message }
+        if status == 400, !message.trimmed.isEmpty { return message }
+    }
+    return factoryActionError(error, computerName: computerName, linkUsable: linkUsable, prefix: "Not started: ", retry: "press \(action) again")
 }
 
 func factoryActionError(_ error: Error, computerName: String, linkUsable: Bool, prefix: String = "", retry: String) -> String {

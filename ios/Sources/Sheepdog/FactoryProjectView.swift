@@ -84,11 +84,8 @@ struct FactoryProjectView: View {
                     }
                     if !board.doneTasks.isEmpty {
                         Button { showDone.toggle() } label: {
-                            HStack(spacing: 6) {
-                                Text(board.doneFoldLabel).font(.subheadline.weight(.semibold))
-                                Spacer()
-                                Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).rotationEffect(.degrees(showDone ? 90 : 0)).accessibilityHidden(true)
-                            }.foregroundStyle(Theme.muted).frame(minHeight: 44).contentShape(Rectangle())
+                            HStack(spacing: 6) { Text(board.doneFoldLabel).font(.subheadline.weight(.semibold)); Spacer(); Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).rotationEffect(.degrees(showDone ? 90 : 0)).accessibilityHidden(true) }
+                                .foregroundStyle(Theme.muted).frame(minHeight: 44).contentShape(Rectangle())
                         }.buttonStyle(.plain).accessibilityValue(showDone ? "Shown" : "Hidden").accessibilityIdentifier("factoryProject.doneFold")
                         if showDone { ForEach(board.doneTasks, content: row) }
                     }
@@ -101,14 +98,14 @@ struct FactoryProjectView: View {
         }
         .background(Theme.surface).navigationTitle(head.name)
         .navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar)
-        .task(id: "\(computer?.factoryChanges[head.id] ?? 0):\(head.state.rawValue)") { await load() }
+        .task(id: "\(computer?.factoryChanges[head.id] ?? 0):\(head.state.rawValue):\(head.goal)") { await load() }
         .onChange(of: head.state) { feedback = nil }
     }
 
     private func row(_ row: FactoryProjectBoard.Row) -> some View {
         HStack(spacing: 8) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("\(row.ref) \(row.task.title)").fontWeight(.semibold).accessibilityAddTraits(.isButton).accessibilityHint("Opens task details")
+                Text("\(row.ref) \(row.task.title)").fontWeight(.semibold).accessibilityAddTraits(.isButton).accessibilityHint("Opens task details").accessibilityAction { selectedTask = row.task }
                 Text(row.stepSummary).accessibilityValue(row.stepPosition ?? "")
                 if let why = row.whyWaiting { Text(why).foregroundStyle(Theme.muted) }
                 if let run = row.runLine { Text(run).foregroundStyle(Theme.muted) }
@@ -122,7 +119,6 @@ struct FactoryProjectView: View {
         .contentShape(Rectangle())
         .onTapGesture { selectedTask = row.task }
         .accessibilityElement(children: .contain)
-        .accessibilityAction { selectedTask = row.task }
         .accessibilityIdentifier("factoryProject.task.\(row.ref)")
     }
 

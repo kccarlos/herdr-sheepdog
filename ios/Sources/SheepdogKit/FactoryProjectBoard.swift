@@ -60,14 +60,11 @@ public struct FactoryProjectBoard {
     }
 
     private static let stageOrder = [
-        ("owner_gate", "needs your approval", true), ("owner_answer", "waiting on you", true),
-        ("blocked_or_failed", "blocked", true), ("ci", "waiting on CI", false), ("working", "working", false),
-        ("waiting_on_dep", "waiting on others", false), ("queued", "queued", false),
-    ]
+        ("owner_gate", "needs your approval", true), ("owner_answer", "waiting on you", true), ("blocked_or_failed", "blocked", true),
+        ("ci", "waiting on CI", false), ("working", "working", false), ("waiting_on_dep", "waiting on others", false), ("queued", "queued", false)]
 
     public static func stageLabel(for stage: String) -> String {
-        if stage == "done" { return "done" }
-        return stageOrder.first { $0.0 == stage }?.1 ?? stage.replacingOccurrences(of: "_", with: " ")
+        stage == "done" ? "done" : stageOrder.first { $0.0 == stage }?.1 ?? stage.replacingOccurrences(of: "_", with: " ")
     }
 
     public var head: FactoryProjectHead { summary.head }
@@ -82,8 +79,7 @@ public struct FactoryProjectBoard {
     public var coordinatorAccessibilityLabel: String { "Open the \(head.name) coordinator's window" }
     public var canStop: Bool { head.state == .running || (head.state == .finished && live) }
     public var canResume: Bool { summary.resumableFolder != nil }
-    public var goalFolder: String? { head.folder?.trimmed.nonEmpty }
-    public var canChangeGoal: Bool { goalFolder != nil }
+    public var canChangeGoal: Bool { head.folder?.trimmed.nonEmpty != nil }
     public var goalActionLabel: String { head.state == .finished ? "Reopen with a new goal" : "New goal" }
     public func goalForm(draft: String) -> FactoryGoalForm { .init(state: head.state, hasFolder: canChangeGoal, draft: draft) }
     public var stopAccessibilityLabel: String { "Stop this project" }
@@ -149,32 +145,20 @@ public struct FactoryGoalForm: Equatable, Sendable {
     public let state: FactoryProjectState
     public let hasFolder: Bool
     public let draft: String
-
-    public init(state: FactoryProjectState, hasFolder: Bool, draft: String) {
-        self.state = state; self.hasFolder = hasFolder; self.draft = draft
-    }
+    public init(state: FactoryProjectState, hasFolder: Bool, draft: String) { self.state = state; self.hasFolder = hasFolder; self.draft = draft }
 
     public var isReopen: Bool { state == .finished }
     public var canSubmit: Bool { hasFolder && !draft.trimmed.isEmpty }
     public var title: String { isReopen ? "Reopen with a new goal" : "New goal" }
     public var fieldLabel: String { "New goal" }
-    public var hint: String {
-        "The folder and the settings stay as they are. " + (isReopen ? "To change a model first, use settings." : "The coordinator plans the new goal.")
-    }
+    public var hint: String { "The folder and the settings stay as they are. " + (isReopen ? "To change a model first, use settings." : "The coordinator plans the new goal.") }
     public var quotaHint: String { "Starting runs agents on your model accounts. They use your quota." }
     public var submitLabel: String { state == .stopped ? "Start with this goal" : state == .finished ? "Reopen with this goal" : "Give it this goal" }
     public var cancelLabel: String { "Cancel" }
     public var emptyValidationMessage: String { "Write a goal first." }
 
     public static func errorMessage(_ error: Error, state: FactoryProjectState, computerName: String, linkUsable: Bool = true) -> String {
-        let action = state == .finished ? "Reopen" : "New goal"
-        if error is FactoryStartChecksError { return "Not started: a start check failed. Fix it, then press \(action) again." }
-        if FactoryProjectBoard.isProjectGone(error) { return "This project is gone." }
-        if case let .rejected(status, message) = error as? DaemonError {
-            if status == 409 { return message.trimmed.isEmpty || message == "already_closed" ? "This project is finished. Give it a new goal." : message }
-            if status == 400, !message.trimmed.isEmpty { return message }
-        }
-        return factoryActionError(error, computerName: computerName, linkUsable: linkUsable, prefix: "Not started: ", retry: "press \(action) again")
+        factoryStartError(error, action: state == .finished ? "Reopen" : "New goal", computerName: computerName, linkUsable: linkUsable)
     }
 }
 
@@ -196,7 +180,7 @@ public struct FactoryTaskDetail: Equatable, Sendable {
     }
 
     public let task: FactoryTask
-    public let projectName, stageLabel: String
+    public let stageLabel: String
     public let afterLine, runLine, runAccessibilityLabel, roundsLine, brief: String?
     public let steps: [Step]
     public let lastDecision: LastDecision?
@@ -204,17 +188,15 @@ public struct FactoryTaskDetail: Equatable, Sendable {
     public var isEmptySteps: Bool { steps.isEmpty }
     public var emptyStepsMessage: String { "No steps recorded yet." }
 
-    public init(task: FactoryTask, projectName: String, projectState: FactoryProjectState, now: Date = .now) {
-        self.task = task; self.projectName = projectName
+    public init(task: FactoryTask, projectName _: String = "", projectState: FactoryProjectState, now: Date = .now) {
+        self.task = task
         stageLabel = FactoryProjectBoard.stageLabel(for: task.stage)
         afterLine = task.after.isEmpty ? nil : "after \(task.after.joined(separator: ", "))"
         roundsLine = task.rounds <= 0 ? nil : "\(task.rounds) review \(task.rounds == 1 ? "round" : "rounds")"
         brief = task.brief?.trimmed.nonEmpty
         steps = task.steps.enumerated().map { Step(id: $0.offset, name: $0.element.name, state: $0.element.state, text: $0.element.text?.trimmed.nonEmpty) }
-        lastDecision = task.lastActorDecision.flatMap { entry in
-            entry.decision?.trimmed.nonEmpty.map {
-                LastDecision(actorLabel: entry.by == "owner" ? "you" : entry.by, decision: $0, whyLine: entry.why?.trimmed.nonEmpty.map { "Why: \($0)" }, at: entry.at)
-            }
+        lastDecision = task.lastActorDecision.flatMap { e in
+            e.decision?.trimmed.nonEmpty.map { LastDecision(actorLabel: e.by == "owner" ? "you" : e.by, decision: $0, whyLine: e.why?.trimmed.nonEmpty.map { "Why: \($0)" }, at: e.at) }
         }
         let role = task.runRole?.trimmed.nonEmpty, cli = task.runCLI?.trimmed.nonEmpty
         if projectState == .running, role != nil || cli != nil || task.runStartedAt != nil {
@@ -223,8 +205,6 @@ public struct FactoryTaskDetail: Equatable, Sendable {
             let started = mins.map { "started \($0) \($0 == 1 ? "minute" : "minutes") ago" }
             let spoken = [role, cli, model, started].compactMap { $0 }.joined(separator: ", ")
             runAccessibilityLabel = spoken.isEmpty ? nil : "Running now: \(spoken)"
-        } else {
-            runLine = nil; runAccessibilityLabel = nil
-        }
+        } else { runLine = nil; runAccessibilityLabel = nil }
     }
 }

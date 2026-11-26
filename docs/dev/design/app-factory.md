@@ -940,8 +940,8 @@ tools run only in the owner's turn.
 - Model and effort on a run's row; an idle or working word for the
   coordinator; "stopped by" and a finished time on the head.
 - Projects in the Agents badge count and in the Live Activity.
-- The project log screen on the phone; the task graph on the iPhone (the
-  iPad gets list and graph).
+- The project log screen on the phone and the task view's own log card
+  (later); the task graph on the iPhone (the iPad gets list and graph).
 - The space-page factory section of Part 3 (`FactoryPage` and its
   states), which predates `/factory`. The flat-list boards
   (`FactoryAgents`, `FactoryIPad`, `FactoryIPadSidebar`) were redrawn

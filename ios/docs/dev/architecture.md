@@ -349,8 +349,9 @@ accessibility text sizes. The voice capsule stays in place.
   route. On iPhone, tapping a head opens `FactoryProjectView` on that
   computer. `FactoryProjectBoard`, `FactorySayBox`, `FactoryGoalForm` and
   `FactoryTaskDetail` present the tasks, open asks, instruction status,
-  Stop/Resume/New goal/Reopen controls (`FactoryGoalSheet`) and the read-only
-  task view (`FactoryTaskView`, without worker/reviewer windows in v1). When a
+  Stop/Resume/New goal/Reopen controls (`FactoryGoalSheet`, shared
+  `FactoryStartCheckRow`) and the read-only task view (`FactoryTaskView`,
+  without worker/reviewer windows in v1). When a
   running head has a coordinator pane, `FactoryCoordinatorView` and
   `FactoryCoordinatorWindow` open its live terminal through
   `AgentScreenView` (without the agent menu, Stop or Attach) and show the

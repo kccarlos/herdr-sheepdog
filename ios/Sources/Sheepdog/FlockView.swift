@@ -995,6 +995,7 @@ struct FactoryHeadCard: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var confirmingStop = false
     @State private var actionError: String?
+    @State private var actionChecks: [FactoryStartCheck] = []
 
     private var session: ComputerModel? { model.fleet.model(computer?.id ?? model.currentComputerID) }
 
@@ -1020,33 +1021,36 @@ struct FactoryHeadCard: View {
             }
             item.alertLine.map { Text($0).font(.subheadline.weight(.semibold)) }
             item.alertFixLine.map { Text($0).font(.footnote).foregroundStyle(Theme.muted) }
-            let actionLayout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8)) : AnyLayout(HStackLayout(spacing: 8))
-            actionLayout {
-                if let project, project.canStop {
-                    let confirm = project.stopConfirm
-                    Button("Stop") { confirmingStop = true }
-                        .disabled(session?.actions.isInFlight("stop:\(item.id)") == true)
-                        .accessibilityLabel(project.stopAccessibilityLabel).accessibilityIdentifier("factoryProject.stop")
-                        .alert(confirm.title, isPresented: $confirmingStop) {
-                            Button(confirm.keepLabel, role: .cancel) {}
-                            Button(confirm.confirmLabel, role: .destructive) {
-                                changeProject("stop") { [id = item.id] in try await $0.stopFactory(projectID: id) }
-                            }
-                        } message: { Text(confirm.message) }
-                } else if let folder = item.resumableFolder {
-                    let resuming = session?.actions.isInFlight("resume:\(item.id)") == true
-                    Button(resuming ? "Resuming…" : "Resume") {
-                        changeProject("resume") { [goal = item.head.goal] in try await $0.resumeFactory(folder: folder, goal: goal) }
+            let canStop = project?.canStop == true, folder = canStop ? nil : item.resumableFolder, canGoal = project?.canChangeGoal == true && onGoal != nil
+            if canStop || folder != nil || canGoal {
+                OptionFlow(spacing: 8) {
+                    if let project, canStop {
+                        let confirm = project.stopConfirm
+                        Button("Stop") { confirmingStop = true }
+                            .disabled(session?.actions.isInFlight("stop:\(item.id)") == true)
+                            .accessibilityLabel(project.stopAccessibilityLabel).accessibilityIdentifier("factoryProject.stop")
+                            .alert(confirm.title, isPresented: $confirmingStop) {
+                                Button(confirm.keepLabel, role: .cancel) {}
+                                Button(confirm.confirmLabel, role: .destructive) {
+                                    changeProject("stop") { [id = item.id] in try await $0.stopFactory(projectID: id) }
+                                }
+                            } message: { Text(confirm.message) }
+                    } else if let folder {
+                        let resuming = session?.actions.isInFlight("resume:\(item.id)") == true
+                        Button(resuming ? "Resuming…" : "Resume") {
+                            changeProject("resume") { [goal = item.head.goal] in try await $0.resumeFactory(folder: folder, goal: goal) }
+                        }
+                        .disabled(resuming).accessibilityLabel(resuming ? "Resuming \(item.head.name)" : project?.resumeAccessibilityLabel ?? "Resume \(item.head.name)")
+                        .accessibilityIdentifier(project == nil ? "" : "factoryProject.resume")
                     }
-                    .disabled(resuming).accessibilityLabel(resuming ? "Resuming \(item.head.name)" : project?.resumeAccessibilityLabel ?? "Resume \(item.head.name)")
-                    .accessibilityIdentifier(project == nil ? "" : "factoryProject.resume")
-                }
-                if let project, project.canChangeGoal, let onGoal {
-                    Button(project.goalActionLabel, action: onGoal)
-                        .accessibilityIdentifier(item.head.state == .finished ? "factoryProject.reopen" : "factoryProject.newGoal")
-                }
-            }.buttonStyle(.bordered).tint(Theme.ink).controlSize(.large)
+                    if let project, canGoal, let onGoal {
+                        Button(project.goalActionLabel, action: onGoal)
+                            .accessibilityIdentifier(item.head.state == .finished ? "factoryProject.reopen" : "factoryProject.newGoal")
+                    }
+                }.buttonStyle(.bordered).tint(Theme.ink).controlSize(.large)
+            }
             actionError.map { Text($0).font(.footnote).foregroundStyle(Theme.danger) }
+            ForEach(actionChecks.indices, id: \.self) { FactoryStartCheckRow(check: actionChecks[$0], computerName: computer?.name) }
             project?.barNote.map { Text($0).font(.footnote).foregroundStyle(Theme.muted) }
             if item.coordinatorBlocked {
                 VStack(alignment: .leading, spacing: 4) {
@@ -1068,6 +1072,7 @@ struct FactoryHeadCard: View {
                     in: RoundedRectangle(cornerRadius: Theme.Radius.card))
         .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card).strokeBorder(item.coordinatorBlocked ? Theme.blocked : Theme.line))
         .onChange(of: actionError) { if let actionError { AccessibilityNotification.Announcement(actionError).post() } }
+        .onChange(of: item.head.state) { actionError = nil; actionChecks = [] }
     }
 
     private var counts: AttributedString {
@@ -1084,13 +1089,14 @@ struct FactoryHeadCard: View {
             actionError = "Check the computer's connection, then try again."
             return
         }
-        actionError = nil
+        actionError = nil; actionChecks = []
         Task {
             do {
                 try await session.actions.run("\(action):\(item.id)", .init(timeout: 60, keyed: true), as: DaemonClient.self, operation)
                 await session.refresh()
             } catch {
-                if action == "stop", FactoryProjectBoard.isProjectGone(error), let onGone { onGone(); return }
+                if FactoryProjectBoard.isProjectGone(error), let onGone { onGone(); return }
+                actionChecks = action == "resume" ? (error as? FactoryStartChecksError)?.results ?? [] : []
                 actionError = action == "stop"
                     ? FactoryProjectBoard.stopErrorMessage(error, computerName: session.name, linkUsable: session.link.isUsable)
                     : FactoryAgentsList.resumeErrorMessage(error, computerName: session.name, linkUsable: session.link.isUsable)
