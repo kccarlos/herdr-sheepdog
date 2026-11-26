@@ -150,6 +150,7 @@ func TestInvestigateProjectLifecycleAndGuardrails(t *testing.T) {
 	f := &fakeInvestigator{answer: "ok", gate: make(chan struct{})}
 	m := braintest.NewModel()
 	h := newBrainHarness(t, m, func(c *Config) { c.Factory = factory.New(paths, nil) })
+	m.EventDefault = nil
 	h.sup.investigator = f
 	host := brainHost{h.sup}
 
