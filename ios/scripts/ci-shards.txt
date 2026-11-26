@@ -64,6 +64,7 @@ shard-4  SheepdogUITests/CardLabelUITests
 shard-4  SheepdogUITests/ComputersUITests
 shard-4  SheepdogUITests/FactoryAgentsUITests
 shard-4  SheepdogUITests/FactoryProjectBoardUITests
+shard-4  SheepdogUITests/FactoryTaskAndGoalUITests
 shard-4  SheepdogUITests/RemoteAgentWindowUITests
 shard-4  SheepdogUITests/LinkStatusUITests
 shard-4  SheepdogUITests/ConversationPaneSwitchUITests

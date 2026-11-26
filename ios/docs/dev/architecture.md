@@ -179,8 +179,10 @@ card and reads `PendingAction.factory` as nil. The factory routes return
 `factory.changed` re-reads `/api/state`
 (`AttentionEvents.refreshesState`). `ComputerModel.factoryChanges` also
 tracks these events by project so an open board can reload its graph.
-`DaemonClient.sayFactory` and `stopFactory` send paired-device requests
-through the originating computer's action runner.
+`DaemonClient.sayFactory`, `stopFactory` and `startFactory` send paired-device
+requests through the originating computer's action runner; `startFactory`
+decodes HTTP 400 start-check refusals into `FactoryStartChecksError`
+(`FactoryStartCheck`) while preserving plain 400/403/409 `.rejected` errors.
 
 ## Events
 
@@ -345,8 +347,11 @@ accessibility text sizes. The voice capsule stays in place.
   Factory asks use the same answer route and tap phases as ordinary
   questions. Resume sends the existing goal to the paired-device start
   route. On iPhone, tapping a head opens `FactoryProjectView` on that
-  computer. `FactoryProjectBoard` and `FactorySayBox` present the tasks,
-  open asks, instruction status and Stop or Resume controls. When a
+  computer. `FactoryProjectBoard`, `FactorySayBox`, `FactoryGoalForm` and
+  `FactoryTaskDetail` present the tasks, open asks, instruction status,
+  Stop/Resume/New goal/Reopen controls (`FactoryGoalSheet`, shared
+  `FactoryStartCheckRow`) and the read-only task view (`FactoryTaskView`,
+  without worker/reviewer windows in v1). When a
   running head has a coordinator pane, `FactoryCoordinatorView` and
   `FactoryCoordinatorWindow` open its live terminal through
   `AgentScreenView` (without the agent menu, Stop or Attach) and show the
