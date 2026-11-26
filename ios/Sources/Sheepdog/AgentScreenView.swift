@@ -571,6 +571,7 @@ private struct AgentWindowContent: View, Equatable {
         .padding(.bottom, 6)
         .background(Color(.systemBackground).opacity(0.001))
         .overlay(alignment: .top) { Divider() }
+        .onChange(of: window.inputError) { if let error = window.inputError { AccessibilityNotification.Announcement(error).post() } }
     }
 
     private var canSendPrompt: Bool { window.canOperate && AgentScreenModel.canSend(prompt) }

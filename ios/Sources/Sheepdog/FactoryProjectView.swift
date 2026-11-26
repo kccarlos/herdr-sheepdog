@@ -44,10 +44,10 @@ struct FactoryProjectView: View {
                 let board = FactoryProjectBoard(head: head, tasks: tasks, asks: computer.questions, computerName: name, live: live)
                 VStack(alignment: .leading, spacing: 12) {
                     FactoryHeadCard(item: board.summary, computer: computer.snapshot, dialog: nil, answer: { _, _ in }, project: board, onGone: projectGone)
-                    if FactoryCoordinatorWindow(head: head).isLive {
+                    if board.showsCoordinatorButton {
                         Button("Coordinator") { showsCoordinator = true }
                             .buttonStyle(.bordered).controlSize(.large)
-                            .accessibilityLabel("Open the \(head.name) coordinator's window")
+                            .accessibilityLabel(board.coordinatorAccessibilityLabel)
                             .accessibilityIdentifier("factoryProject.coordinator")
                     }
                     composer(board, on: computer)
