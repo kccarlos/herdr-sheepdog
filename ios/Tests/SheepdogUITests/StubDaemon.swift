@@ -28,7 +28,7 @@ final class StubDaemon {
         /// (`voice.tool_result` from `to_supervisor` in `/api/events`), half
         /// a minute after the first line; every line typed
         /// (`POST /api/turn`) is then added to the conversation.
-        case computer(name: String, agents: String, questions: String, history: Int = 1, idBase: Int = 0, reply: (spoken: String, options: [String])? = nil)
+        case computer(name: String, agents: String, questions: String, history: Int = 1, idBase: Int = 0, reply: (spoken: String, options: [String])? = nil, factory: String? = nil, pendingAction: String? = nil)
     }
 
     private let listener: NWListener
@@ -42,6 +42,8 @@ final class StubDaemon {
     private var seen: [String] = []
     /// The lines typed so far (`POST /api/turn`'s `text`).
     private var typed: [String] = []
+    /// Raw JSON bodies sent to `POST /api/pending/answer`.
+    private var answers: [String] = []
     /// Terminal screen snapshots by pane id (`GET /api/agents/<pane>/screen`).
     var screens: [String: String] = [:]
 
@@ -49,6 +51,8 @@ final class StubDaemon {
     func requests(_ prefix: String) -> Int {
         lock.withLock { seen.filter { $0.hasPrefix(prefix) }.count }
     }
+
+    func answerBodies() -> [String] { lock.withLock { answers } }
 
     init(_ mode: Mode) throws {
         self.mode = mode
@@ -109,6 +113,9 @@ final class StubDaemon {
         lock.withLock {
             seen.append("\(method) \(path)")
             if method == "POST", path.hasPrefix("/api/turn") { typed.append(Self.typedText(request)) }
+            if method == "POST", path.hasPrefix("/api/pending/answer"), let range = request.range(of: "\r\n\r\n") {
+                answers.append(String(request[range.upperBound...]))
+            }
         }
         let reply = response(for: path)
         let delay = method == "POST" ? postDelay : 0
@@ -136,13 +143,15 @@ final class StubDaemon {
                 return http(200, "application/json", #"{"agents":[],"# + voice + #","version":"v0.1.4""# + tail + "}")
             }
             return http(404, "application/json", #"{"error":"not found"}"#)
-        case let .computer(name, agents, questions, history, idBase, reply):
+        case let .computer(name, agents, questions, history, idBase, reply, factory, pendingAction):
             if path.hasPrefix("/api/hello") {
                 return http(200, "application/json", #"{"name":"sheepdog","version":"v0.1.4","auth":"token","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"computer":{"id":"stub","name":""# + name + #""}}"#)
             }
             if path.hasPrefix("/api/state") {
                 let voice = #""voice":{"mode":"off","status":"off","muted":false,"stalled":false,"client_connected":false}"#
-                return http(200, "application/json", #"{"agents":"# + agents + #","questions":"# + questions + "," + voice + #","version":"v0.1.4"}"#)
+                let factoryPart = factory.map { #","factory":"# + $0 } ?? ""
+                let pendingPart = pendingAction.map { #","pending_action":"# + $0 } ?? ""
+                return http(200, "application/json", #"{"agents":"# + agents + #","questions":"# + questions + factoryPart + pendingPart + "," + voice + #","version":"v0.1.4"}"#)
             }
             if path.hasPrefix("/api/pending/answer") {
                 return http(200, "application/json", #"{"ok":true,"spoken":"Answered."}"#)

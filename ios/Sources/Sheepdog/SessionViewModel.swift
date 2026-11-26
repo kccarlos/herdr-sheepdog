@@ -985,9 +985,11 @@ final class SessionViewModel: ObservableObject {
     /// `link` itself is not observable, so the view re-renders on the
     /// presentation, which `presentLink` updates whenever the link's state
     /// moves; reading it here is what registers that dependency.
-    var flockPaneState: FlockPaneState {
+    var flockPaneState: FlockPaneState { flockPaneState(hasAgents: !flock.isEmpty) }
+
+    func flockPaneState(hasAgents: Bool) -> FlockPaneState {
         _ = linkModel.presentation
-        return FlockPaneState.resolve(link: link, hasAgents: !flock.isEmpty)
+        return FlockPaneState.resolve(link: link, hasAgents: hasAgents)
     }
 
     private func presentLink() {
@@ -2254,6 +2256,7 @@ final class SessionViewModel: ObservableObject {
     func computersChanged() {
         computerCount = settings.computers.count
         syncFleet()
+        if fleet.current == nil { fleet.makeCurrent(settings.computers.currentID) }
         // A second computer puts names in the status copy.
         presentLink()
         // Every computer gets this phone's push token, and the extension

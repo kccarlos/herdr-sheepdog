@@ -102,6 +102,9 @@ final class AgentsModel {
     /// The agents as the screen groups them: running (blocked, working, idle
     /// and done) and the rest.
     var flock: Flock { Flock(agents) }
+    var factoryList: FactoryAgentsList {
+        FactoryAgentsList(agents: agents, heads: current?.factoryHeads ?? [], questions: questions)
+    }
 
     func isComputerExpanded(_ id: String) -> Bool {
         !collapsedComputers.contains(id)
