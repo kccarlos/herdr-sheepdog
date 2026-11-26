@@ -298,7 +298,8 @@ strings; a test's expected string is the **Text** column
 
 Strings the iPhone and iPad app shows that `/factory` does not have. The
 boards are the Part 3 `Factory…` boards (`FactoryHead`, `FactoryProject`,
-`FactoryNewProject`, `FactoryModels`, `FactoryWindow`, `FactoryStates`).
+`FactoryNewProject`, `FactoryModels`, `FactoryWindow`, `FactoryWindowStates`,
+`FactoryStates`).
 Every other string on those boards is a string of the tables above. The app
 uses the web's words with the app's casing for screen titles and section
 labels ("Settings", "Tasks", "Asks for you"); state and stage words stay
@@ -324,11 +325,17 @@ lowercase.
 | `app.tell.gone` | status | This project is gone. | on Agents, after the project page closes (6.2) |
 | `app.pair.stop` | refusal | Not stopped: Work Mac no longer knows this phone. Pair this phone again in Settings ▸ Work Mac, then press Stop again. | a project action without a paired-device identity; the computer's own name |
 | `app.pair.say` | refusal | Not sent: Work Mac no longer knows this phone. Pair this phone again in Settings ▸ Work Mac, then send again. | the text box without a paired-device identity |
-| `app.coord.btn` | button | Coordinator | opens the read-only window; shown only while a coordinator runs |
+| `app.coord.btn` | button | Coordinator | opens the coordinator's live window (D10); shown only while a coordinator runs |
 | `app.coord.off` | heading | The coordinator is not running: claude coordinator is signed out | the alert's cause as the daemon writes it; without an alert the heading ends at "not running" and no fix follows |
 | `app.coord.fix` | sentence | Fix: sign in to claude at this Mac (Work Mac). Running tasks go on. | the alert's fix |
-| `app.win.note` | note | View only. To tell the coordinator something, use the box on the notes page. An ask is answered on its card. | the coordinator's window |
-| `app.win.updated` | status | Updated 2 s ago | the window's footer |
+| `app.win.title` | heading | notes · Coordinator | the coordinator's window header; no model or effort |
+| `app.win.ph` | placeholder | Ask the notes coordinator… | the window's prompt box; screen-reader label "Message to the notes coordinator" |
+| `app.win.ask` | link | T10 is waiting on your answer. Answer it on its card; typing here is not an answer. | above the key bar while the project has an open ask; opens the project at the card |
+| `app.win.off` | heading | The notes coordinator is not running | in place of the terminal, key bar and box when the coordinator goes while the window is open; the alert's cause and `app.coord.fix` follow when an alert is open |
+| `app.win.off.body` | sentence | This window comes back when a coordinator runs again. To tell it something meanwhile, use the box on the notes page; it gets it when it is back. | under `app.win.off` |
+| `app.win.stopped` | heading | notes is stopped | in place of the terminal, key bar and box while the project is stopped |
+| `app.win.stopped.body` | sentence | No coordinator runs while a project is stopped, so there is nothing to type into. Resume notes on its page; it goes on with the same goal. | under `app.win.stopped` |
+| `app.win.back` | button | Back to notes | under either |
 | `app.task.last` | heading | Last decision | the task view: the last coordinator or owner decision and its why |
 | `app.run` | row text | worker · codex · 31 min | one run line under a task: role, CLI, time since it started |
 | `app.np.folders` | label | folders sheepdog knows on Work Mac | the folder list in New project |

@@ -59,6 +59,12 @@ button{cursor:pointer}
     <main aria-label="{{ s.offTitle }}" style="flex-grow: 1; min-height: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 0 32px 80px; text-align: center">
       <svg width="40" height="40" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="{{c.ink2}}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"></rect><path d="M7 9l3 3-3 3M13 15h4"></path></svg>
       <h2 style="margin: 0; font-size: 20px; line-height: 25px; font-weight: 600">{{ s.offTitle }}</h2>
+      <sc-if value="{{ s.alert }}" hint-placeholder-val="{{ true }}">
+        <div role="status" style="align-self: stretch; padding: 10px 12px; border-radius: 12px; background: {{c.surface}}; border: 1px dashed {{c.dash}}; display: flex; flex-direction: column; gap: 3px; text-align: left; font-size: 14px; line-height: 19px">
+          <span style="font-weight: 600">claude coordinator is signed out</span>
+          <span><span style="font-weight: 600">Fix:</span> sign in to claude at this Mac (Work Mac). Running tasks go on.</span>
+        </div>
+      </sc-if>
       <p style="margin: 0; font-size: 15px; line-height: 21px; color: {{c.ink2}}">{{ s.offBody }}</p>
       <a href="FactoryProject.dc.html" style="margin-top: 4px; min-height: 44px; padding: 0 22px; border-radius: 22px; border: 1px solid {{c.line}}; background: {{c.surface}}; color: {{c.ink}}; font-size: 15px; font-weight: 600; display: flex; align-items: center">Back to notes</a>
     </main>
@@ -68,8 +74,8 @@ button{cursor:pointer}
 <script type="text/x-dc" data-dc-script data-props='{"dark": {"editor": "boolean", "default": false}, "state": {"editor": "enum", "options": ["running", "coordoff", "stopped"], "default": "running"}, "$preview": {"width": 390, "height": 844}}'>
 class Component extends DCLogic {
   renderVals() {
-    const light = {"bg": "#FAF8F3", "surface": "#FFFFFF", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7", "blue": "#1F5F9E", "green": "#1D6B46", "idle": "#5C6370", "blocked": "#D99417", "askBg": "#FDF1DC", "chevron": "#8E929A"};
-    const dark = {"bg": "#16181C", "surface": "#1F2126", "ink": "#F5F2EA", "ink2": "#A3A7AF", "line": "#2E3138", "blue": "#6AA8EB", "green": "#5CC792", "idle": "#9AA1AD", "blocked": "#F0A92A", "askBg": "#2E2615", "chevron": "#8E929A"};
+    const light = {"bg": "#FAF8F3", "surface": "#FFFFFF", "ink": "#1F1F22", "ink2": "#6B6E75", "line": "#E4E0D7", "blue": "#1F5F9E", "green": "#1D6B46", "idle": "#5C6370", "blocked": "#D99417", "askBg": "#FDF1DC", "chevron": "#8E929A", "dash": "#8E8A80"};
+    const dark = {"bg": "#16181C", "surface": "#1F2126", "ink": "#F5F2EA", "ink2": "#A3A7AF", "line": "#2E3138", "blue": "#6AA8EB", "green": "#5CC792", "idle": "#9AA1AD", "blocked": "#F0A92A", "askBg": "#2E2615", "chevron": "#8E929A", "dash": "#6B707A"};
     const d = !!this.props.dark;
     const c = d ? dark : light;
     const st = this.props.state ?? 'running';
@@ -97,13 +103,13 @@ class Component extends DCLogic {
     const lines = raw.map((l) => ({ t: l[0] === "" ? " " : l[0], color: col[l[1]], weight: l[2] }));
     const off = st !== 'running';
     const s = {
-      live: !off, off,
+      live: !off, off, alert: st === 'coordoff',
       dot: off ? c.idle : c.blue,
       titleAria: off ? "notes coordinator, not running" : "notes coordinator, running",
       offTitle: st === 'stopped' ? "notes is stopped" : "The notes coordinator is not running",
       offBody: st === 'stopped'
         ? "No coordinator runs while a project is stopped, so there is nothing to type into. Resume notes on its page; it goes on with the same goal."
-        : "The factory starts a new one on its next change, and this window comes back with it. To tell it something now, use the box on the notes page; it gets it when it is back."
+        : "This window comes back when a coordinator runs again. To tell it something meanwhile, use the box on the notes page; it gets it when it is back."
     };
     return { c, s, lines };
   }

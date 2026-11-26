@@ -66,7 +66,8 @@ is re-exported after every change.
   `FactoryNewProjectDark`, `FactoryIPadDark`; after review 2 `FactoryAsk`
   and `FactoryStatesDark`. On 2026-11-25 `FactoryWindow` was redrawn
   from a read-only snapshot to the live window (D10), `FactoryWindowStates`
-  was added, and the unused `gone` state left `FactoryProject`. Their PNGs
+  was added, the unused `gone` state left `FactoryProject`, and the window's
+  strings in [slice14-wording.md](slice14-wording.md) were replaced. Their PNGs
   were rendered from
   the board sources in headless Chrome with the canvas runtime, not
   exported from the canvas.
