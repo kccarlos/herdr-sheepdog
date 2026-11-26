@@ -190,6 +190,7 @@ final class FactorySettingsViewFixRoundTests: XCTestCase {
     private var suiteName: String!
     private var defaults: UserDefaults!
     private var cacheDir: URL!
+    private weak var activeWindow: UIWindow?
 
     private static let stateJSON = #"""
     {
@@ -271,18 +272,35 @@ final class FactorySettingsViewFixRoundTests: XCTestCase {
             .environment(\.dynamicTypeSize, dynamicType)
         )
         let host = UIHostingController(rootView: root)
-        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        let frame = CGRect(x: 0, y: 0, width: 390, height: 844)
+        let scene = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .first { $0.activationState == .foregroundActive }
+            ?? UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first
+        let window: UIWindow
+        if let scene {
+            window = UIWindow(windowScene: scene)
+            window.frame = frame
+        } else {
+            window = UIWindow(frame: frame)
+        }
+        activeWindow = window
         window.rootViewController = host
         window.makeKeyAndVisible()
-        host.view.layoutIfNeeded()
+        window.frame = frame
+        flushSubtreeLayout(window)
         return (session, workMac, host, window)
     }
 
     private func tearDownHarness(_ session: SessionViewModel, _ computer: ComputerModel, _ window: UIWindow) {
+        let previousKey = window.windowScene?.windows.first { $0 !== window && !$0.isHidden }
         computer.stop()
         session.fleet.set([])
         window.isHidden = true
         window.rootViewController = nil
+        window.windowScene = nil
+        previousKey?.makeKeyAndVisible()
+        if activeWindow === window { activeWindow = nil }
         pumpRunLoop(0.02)
     }
 
@@ -412,13 +430,21 @@ final class FactorySettingsViewFixRoundTests: XCTestCase {
         return scroll.contentSize.height
     }
 
+    private func flushSubtreeLayout(_ root: UIView) {
+        root.setNeedsLayout()
+        root.layoutIfNeeded()
+        for subview in root.subviews {
+            flushSubtreeLayout(subview)
+        }
+    }
+
     private func settleLayout(_ host: UIHostingController<AnyView>) async throws {
         for _ in 0 ..< 5 {
-            host.view.setNeedsLayout()
-            host.view.layoutIfNeeded()
+            flushSubtreeLayout(host.view.window ?? host.view)
             pumpRunLoop(0.02)
             try await Task.sleep(nanoseconds: 15_000_000)
         }
+        flushSubtreeLayout(host.view.window ?? host.view)
     }
 
     private func findSubviews<T: UIView>(ofType type: T.Type, in root: UIView) -> [T] {
@@ -432,10 +458,12 @@ final class FactorySettingsViewFixRoundTests: XCTestCase {
 
     private func pumpUntil(timeout: TimeInterval = 3.0, _ condition: () -> Bool) async throws {
         let deadline = Date().addingTimeInterval(timeout)
+        if let activeWindow { flushSubtreeLayout(activeWindow) }
         while !condition() {
             if Date() > deadline { throw URLError(.timedOut) }
             pumpRunLoop(0.01)
             try await Task.sleep(nanoseconds: 10_000_000)
+            if let activeWindow { flushSubtreeLayout(activeWindow) }
         }
     }
 }
