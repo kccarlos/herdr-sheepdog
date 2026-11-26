@@ -107,8 +107,8 @@ func TestInvariantProductionLogOnceAndWakeCoordinator(t *testing.T) {
 	if len(l.state().Project.Wakes) != 0 {
 		t.Fatalf("restarted daemon re-woke coordinator for already-woken invariant: %+v", l.state().Project.Wakes)
 	}
-	if restartLog.String() != "" {
-		t.Fatalf("restarted daemon re-logged active violations:\n%s", restartLog.String())
+	if withoutFactoryChanged(restartLog.String()) != "" {
+		t.Fatalf("restarted daemon re-logged active violations:\n%s", withoutFactoryChanged(restartLog.String()))
 	}
 
 	// Fix violations, pass cleanly, then break I4 with a different commit -> logs & wakes again.
@@ -297,8 +297,8 @@ func TestInvariantRestartNoRelogRecurrenceWakesAndErrorEvent(t *testing.T) {
 	eng2.Log = logging.NewJSONLLogger(&restartLog)
 	eng2.Now = func() time.Time { return now }
 	eng2.passProject(ctx, l.id, true)
-	if restartLog.String() != "" {
-		t.Errorf("restarted daemon re-logged unchanged violation:\n%s", restartLog.String())
+	if withoutFactoryChanged(restartLog.String()) != "" {
+		t.Errorf("restarted daemon re-logged unchanged violation:\n%s", withoutFactoryChanged(restartLog.String()))
 	}
 	if got := logRules(t, l.paths.Log(l.id), "I4"); len(got) != 1 {
 		t.Errorf("restarted daemon appended duplicate I4 project log line: len=%d, want 1", len(got))
@@ -602,8 +602,8 @@ func TestInvariantPerSubjectSkipAndRecurrence(t *testing.T) {
 	eng2.Log = logging.NewJSONLLogger(&restartLog)
 	eng2.Now = func() time.Time { return now }
 	eng2.passProject(ctx, l.id, true)
-	if restartLog.String() != "" || len(logRules(t, l.paths.Log(l.id), "I1")) != 2 || len(l.state().Project.Wakes) != 0 {
-		t.Fatalf("restart re-logged or re-woke: log=%q i1=%d wakes=%+v", restartLog.String(), len(logRules(t, l.paths.Log(l.id), "I1")), l.state().Project.Wakes)
+	if withoutFactoryChanged(restartLog.String()) != "" || len(logRules(t, l.paths.Log(l.id), "I1")) != 2 || len(l.state().Project.Wakes) != 0 {
+		t.Fatalf("restart re-logged or re-woke: log=%q i1=%d wakes=%+v", withoutFactoryChanged(restartLog.String()), len(logRules(t, l.paths.Log(l.id), "I1")), l.state().Project.Wakes)
 	}
 
 	// Fix T2 while T1 remains broken, then re-break T2 -> T2 wakes again!
@@ -938,4 +938,17 @@ func TestInvariantCleanupRetryWithStaleReviewerNotI1(t *testing.T) {
 	if rs, _ := termState(ctx, l.client, revID); rs != flow.RunGone {
 		t.Fatalf("reviewer after cleanup recovery = %s, want gone", rs)
 	}
+}
+
+// withoutFactoryChanged drops factory.changed lines: a restart pass that
+// changes a project's head entry announces it (app-factory.md §4); these
+// tests pin that violations are not re-logged.
+func withoutFactoryChanged(log string) string {
+	var keep []string
+	for _, l := range strings.SplitAfter(log, "\n") {
+		if l != "" && !strings.Contains(l, `"factory.changed"`) {
+			keep = append(keep, l)
+		}
+	}
+	return strings.Join(keep, "")
 }
