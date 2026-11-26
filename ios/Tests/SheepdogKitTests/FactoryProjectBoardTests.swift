@@ -202,4 +202,25 @@ final class FactoryProjectBoardTests: XCTestCase {
         XCTAssertTrue(board.activeGroups.allSatisfy(\.isAlert))
         XCTAssertEqual(board.activeGroups.flatMap(\.tasks).map(\.ref), ["T1", "T2", "T3"])
     }
+
+    /// Fix-round 2: `sayErrorMessage` maps the daemon's real HTTP 409
+    /// `already_closed` reply (`{"code":"already_closed","error":"<name> is finished. Give it a new goal."}`)
+    /// to `app.tell.fin` without leaking `"The daemon refused: "`.
+    func testSayErrorMessageMapsDaemonFinishedConflictWithoutRefusedPrefix() async throws {
+        StubProtocol.seen = []
+        defer { StubProtocol.seen = []; StubProtocol.handler = nil }
+
+        StubProtocol.handler = { _ in
+            (409, Data(#"{"code":"already_closed","error":"notes is finished. Give it a new goal."}"#.utf8))
+        }
+        do {
+            try await StubProtocol.client().sayFactory(projectID: "proj-1", text: "too late")
+            XCTFail("expected 409 already_closed")
+        } catch {
+            XCTAssertEqual(
+                FactoryProjectBoard.sayErrorMessage(error, projectName: "notes", computerName: "Work Mac"),
+                "notes is finished. Give it a new goal."
+            )
+        }
+    }
 }
