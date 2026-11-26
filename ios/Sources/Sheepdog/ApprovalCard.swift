@@ -42,6 +42,7 @@ struct ApprovalCardView: View {
 
     private var pending: PendingAction { card.pending }
     private var factory: FactoryAskCardPresentation? { FactoryAskCardPresentation(pending) }
+    private var usesParentSurface: Bool { embedded && coordinatorHint != nil }
     private var agent: String { pending.agent?.isEmpty == false ? pending.agent! : "An agent" }
     private var questionCut: Bool { questionLines != nil && !questionExpanded && questionFull > questionShown + 1 }
 
@@ -95,11 +96,11 @@ struct ApprovalCardView: View {
             }
         }
         .padding(.horizontal, embedded ? 12 : 14)
-        .padding(.top, 12)
+        .padding(.top, usesParentSurface ? 0 : 12)
         .padding(.bottom, embedded ? 12 : 14)
         .background(
             RoundedRectangle(cornerRadius: embedded ? 12 : Theme.Radius.large, style: .continuous)
-                .fill((embedded || factory != nil) ? Theme.accentSoft : Theme.card)
+                .fill(usesParentSurface ? Color.clear : (embedded || factory != nil ? Theme.accentSoft : Theme.card))
                 .shadow(color: .black.opacity(embedded ? 0 : 0.12), radius: 12, y: 8)
         )
         .overlay {

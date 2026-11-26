@@ -158,6 +158,22 @@ final class FactoryAgentsTests: XCTestCase {
         XCTAssertEqual(stuckItem.accessibilityLabel, "notes factory, A notes page with search, running, 3 working · 9 of 14 done, the coordinator is stuck on a prompt")
     }
 
+    func testHeadCaptionUsesOnlyNonblankFolderAndComputerName() throws {
+        let cases: [(folder: String?, computer: String?, caption: String?)] = [
+            (nil, nil, nil),
+            ("", "Home Mac", "Home Mac"),
+            (" \n ", "Home Mac", "Home Mac"),
+            ("~/code/notes", nil, "~/code/notes"),
+            (" ~/code/notes ", "Home Mac", "~/code/notes · Home Mac"),
+            (nil, " \n ", nil),
+        ]
+        for entry in cases {
+            let project = try head(id: "p1", name: "notes", folder: entry.folder)
+            let item = try XCTUnwrap(FactoryAgentsList(agents: [], heads: [project], questions: []).workingHeads.first)
+            XCTAssertEqual(item.caption(computerName: entry.computer), entry.caption)
+        }
+    }
+
     /// Pins FactoryAskCard, FactoryAskCardStates, app-factory.md §4, and
     /// slice14-wording.md (`rb.card.meta`): all four drawn kinds, fallback kind,
     /// override footer, and VoiceOver labels.

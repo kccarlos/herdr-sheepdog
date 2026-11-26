@@ -14,8 +14,7 @@ public struct FactoryAgentsList: Equatable, Sendable {
             max(openAsks, head.counts["owner_answer", default: 0] + head.counts["owner_gate", default: 0])
         }
         public var resumableFolder: String? {
-            guard head.state == .stopped, let folder = head.folder?.trimmed, !folder.isEmpty else { return nil }
-            return folder
+            head.state == .stopped ? head.folder?.trimmed.nonEmpty : nil
         }
         public var countsLine: String {
             let total = head.counts.values.reduce(0, +)
@@ -25,6 +24,10 @@ public struct FactoryAgentsList: Equatable, Sendable {
                 waitingOnYouCount > 0 ? "\(waitingOnYouCount) waiting on you" : nil,
                 total > 0 ? "\(head.counts["done", default: 0]) of \(total) done" : "no tasks yet"
             ].compactMap { $0 }.joined(separator: " · ")
+        }
+
+        public func caption(computerName: String?) -> String? {
+            [head.folder, computerName].compactMap { $0?.trimmed.nonEmpty }.joined(separator: " · ").nonEmpty
         }
 
         public var alertLine: String? {

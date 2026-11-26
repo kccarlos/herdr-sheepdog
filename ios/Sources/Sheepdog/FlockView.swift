@@ -1011,11 +1011,10 @@ private struct FactoryHeadCard: View {
                 }
                 Text(item.head.goal).font(.subheadline)
                 Text(counts).font(.footnote).foregroundStyle(Theme.muted)
-                Text([item.head.folder, computer?.name].compactMap { $0 }.joined(separator: " · "))
-                    .font(.caption.monospaced()).foregroundStyle(Theme.muted)
+                item.caption(computerName: computer?.name).map { Text($0).font(.caption.monospaced()).foregroundStyle(Theme.muted) }
             }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel([item.accessibilitySummary, computer?.name].compactMap { $0 }.joined(separator: ", "))
+            .accessibilityLabel([item.accessibilitySummary, computer?.name.trimmedOrNil].compactMap { $0 }.joined(separator: ", "))
             .accessibilityIdentifier("flock.factory.\(item.id)")
             item.alertLine.map { Text($0).font(.subheadline.weight(.semibold)) }
             item.alertFixLine.map { Text($0).font(.footnote).foregroundStyle(Theme.muted) }
@@ -1030,7 +1029,8 @@ private struct FactoryHeadCard: View {
             }
             if item.coordinatorBlocked {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(item.stuckHeading).font(.subheadline.weight(.semibold)).padding(12)
+                    Text(item.stuckHeading).font(.subheadline.weight(.semibold))
+                        .padding(EdgeInsets(top: 12, leading: 12, bottom: dialog == nil ? 12 : 0, trailing: 12))
                     if let dialog {
                         ApprovalCardView(card: dialog, embedded: true, idPrefix: "question.\(item.id)",
                                          coordinatorHint: item.stuckNoHint) { answer(dialog.pending.id, $0) }
@@ -1063,13 +1063,12 @@ private struct FactoryHeadCard: View {
             resumeError = "Check the computer's connection, then try again."
             return
         }
-        let goal = item.head.goal
         resuming = true
         resumeError = nil
         Task {
             defer { resuming = false }
             do {
-                try await session.actions.run("resume:\(item.id)", .init(timeout: 60, keyed: true), as: DaemonClient.self) {
+                try await session.actions.run("resume:\(item.id)", .init(timeout: 60, keyed: true), as: DaemonClient.self) { [goal = item.head.goal] in
                     try await $0.resumeFactory(folder: folder, goal: goal)
                 }
                 await session.refresh()
