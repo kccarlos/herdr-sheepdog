@@ -6,7 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 )
 
 // Simulated-user scenarios (`sheepdog eval sim`, after pipecat's
@@ -63,6 +66,9 @@ type SimScenario struct {
 	Workday *Workday `json:"workday,omitempty"`
 	// Agents are the workers, in roster order.
 	Agents []SimAgent `json:"agents"`
+	// Factory are fake factory projects (inject.Factory): an agents list
+	// may then be empty.
+	Factory []SimProject `json:"factory,omitempty"`
 	// Events change a worker on cue.
 	Events []SimEvent `json:"events,omitempty"`
 	// Notes seed the user notes (USER.md ledger).
@@ -104,6 +110,9 @@ type SimAgent struct {
 	// then ignored.
 	CLIHangs bool `json:"cli_hangs,omitempty"`
 }
+
+// SimProject is a scripted project in the simulator's factory.
+type SimProject = inject.FactoryProject
 
 // SimEvent changes a worker's screen and state when its trigger fires.
 // Exactly one trigger: AtMS, AfterTurn, AfterBeat, OnPromptTo, OnKeysTo
@@ -269,8 +278,15 @@ func (s SimScenario) validate() error {
 	if strings.TrimSpace(s.Goal) == "" {
 		return fmt.Errorf("no goal")
 	}
-	if len(s.Agents) == 0 {
-		return fmt.Errorf("no agents")
+	if len(s.Agents) == 0 && len(s.Factory) == 0 {
+		return fmt.Errorf("no agents and no factory projects")
+	}
+	projects := map[string]bool{}
+	for _, p := range s.Factory {
+		if p.ID == "" || projects[p.ID] || !slices.Contains([]string{"running", "stopped", "finished"}, p.State) || !validState(p.CoordinatorState) {
+			return fmt.Errorf("invalid or duplicate factory project %q (state %q, coordinator state %q)", p.ID, p.State, p.CoordinatorState)
+		}
+		projects[p.ID] = true
 	}
 	switch s.Language {
 	case "", "en", "zh":

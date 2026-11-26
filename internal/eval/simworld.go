@@ -1,7 +1,9 @@
 package eval
 
 import (
+	"cmp"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -12,6 +14,8 @@ import (
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/brain"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory"
+	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
 	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
@@ -41,6 +45,8 @@ type simWorld struct {
 	herd   *simHerdr
 	push   *simPusher
 	rec    *simRecorder
+	// factory is the fake factory of sc.Factory (nil: none).
+	factory *inject.Factory
 	// screen is the simulated phone screen (nil: none).
 	screen *simScreen
 
@@ -175,8 +181,20 @@ func newSimWorld(ctx context.Context, sc SimScenario, o simWorldOptions) (*simWo
 	w.brain = b
 	w.rec.model = b.Model()
 	empty := filepath.Join(dir, "none")
+	var fac supervisor.Factory
+	if len(sc.Factory) > 0 {
+		w.factory = inject.NewFactory(w.rec)
+		for _, p := range sc.Factory {
+			w.factory.SetProject(p)
+			if p.State == "running" && p.CoordinatorPane != "" {
+				alias := "factory:" + p.ID
+				w.panes[alias], w.aliasOf[p.CoordinatorPane], w.kinds[alias] = p.CoordinatorPane, alias, orDefault(p.CoordinatorKind, "claude")
+			}
+		}
+		fac = w.factory
+	}
 	sup, err := supervisor.New(store, w.herd, &simQuerier{w: w}, w.push, w.rec, supervisor.Config{
-		DataDir: dir, Brain: b, ReplyWait: -1,
+		DataDir: dir, Brain: b, ReplyWait: -1, Factory: fac,
 		// Never the real ~/.claude or ~/.codex.
 		WorkerLog: workerlog.New(workerlog.Options{ClaudeProjects: empty, CodexSessions: empty}),
 	})
@@ -199,9 +217,12 @@ func newSimWorld(ctx context.Context, sc SimScenario, o simWorldOptions) (*simWo
 		b.Noted(n)
 	}
 	for _, a := range sc.Agents {
-		screen := w.screenText(a.Screen)
-		st := herdr.State(orDefault(a.State, "idle"))
-		w.setWorker(ctx, a.Alias, screen, st, true)
+		w.setWorker(ctx, a.Alias, w.screenText(a.Screen), herdr.State(orDefault(a.State, "idle")), true)
+	}
+	for _, p := range sc.Factory {
+		if p.State == "running" && p.CoordinatorPane != "" {
+			w.setWorker(ctx, w.alias(p.CoordinatorPane), w.screenText(p.CoordinatorScreen), herdr.State(orDefault(p.CoordinatorState, "working")), true)
+		}
 	}
 	if len(sc.Transcript) > 0 {
 		seedTranscript(b, sc.Transcript)
@@ -231,7 +252,12 @@ func (w *simWorld) setWorker(ctx context.Context, alias, screen string, st herdr
 	w.mu.Unlock()
 	w.mock.SetScreen(pane, kind, screen, st)
 	if initial || from != st {
-		w.sup.HandleTransition(ctx, herdr.Transition{PaneID: pane, From: from, To: st, At: time.Now(), Agent: kind, WorkspaceID: "ws-" + alias, WorkspaceLabel: alias, Source: state.SourceInject})
+		t := herdr.Transition{PaneID: pane, From: from, To: st, At: time.Now(), Agent: kind, WorkspaceID: "ws-" + alias, WorkspaceLabel: alias, Source: state.SourceInject}
+		if i := slices.IndexFunc(w.sc.Factory, func(p SimProject) bool { return p.CoordinatorPane == pane && p.State == "running" }); i >= 0 {
+			t.WorkspaceID, t.WorkspaceLabel = "", ""
+			t.Labels = map[string]string{"sheepdog.project": w.sc.Factory[i].ID, "sheepdog.role": flow.RoleCoordinator}
+		}
+		w.sup.HandleTransition(ctx, t)
 	}
 }
 
@@ -435,14 +461,26 @@ func (w *simWorld) facts(initial map[string]string) string {
 	acts := w.rec.actions() // before w.mu: the recorder takes w.mu under its own lock
 	w.mu.Lock()
 	defer w.mu.Unlock()
-	ws := WorldState{Agents: w.sc.Agents, Kinds: map[string]string{}, States: map[string]string{}, Initial: initial, Screens: w.screens, Timeline: w.timeline, Actions: acts}
-	for k, v := range w.kinds {
-		ws.Kinds[k] = v
-	}
+	ws := WorldState{Agents: w.sc.Agents, Kinds: w.kinds, States: map[string]string{}, Initial: initial, Screens: w.screens, Timeline: w.timeline, Actions: acts}
 	for k, v := range w.states {
 		ws.States[k] = string(v)
 	}
-	return WorldFacts(ws)
+	facts := WorldFacts(ws)
+	if w.factory == nil {
+		return facts
+	}
+	var projects []SimProject
+	for _, h := range w.factory.ProjectHeads() {
+		g, _ := w.factory.Graph(h.ID)
+		p := SimProject{ProjectHead: h, Tasks: g.Tasks}
+		if i := slices.IndexFunc(w.sc.Factory, func(p SimProject) bool { return p.ID == h.ID }); i >= 0 {
+			p.Answer = w.sc.Factory[i].Answer
+		}
+		projects = append(projects, p)
+	}
+	projectFacts, _ := json.Marshal(projects)
+	askFacts, _ := json.Marshal(w.factory.Asks(true))
+	return fmt.Sprintf("%sFactory projects: %s\nOpen factory asks: %s\n", facts, projectFacts, askFacts)
 }
 
 // WorldState is a scripted world's state for the judge's facts.
@@ -526,6 +564,11 @@ func ResolveScreens(sc SimScenario, fixtureDir string) (map[string]string, error
 	for _, e := range sc.Events {
 		if e.Screen != "" {
 			names = append(names, e.Screen)
+		}
+	}
+	for _, p := range sc.Factory {
+		if p.CoordinatorScreen != "" {
+			names = append(names, p.CoordinatorScreen)
 		}
 	}
 	for _, n := range names {
@@ -672,6 +715,10 @@ func (p *simPusher) drain() []SimLine {
 type simQuerier struct{ w *simWorld }
 
 func (q *simQuerier) answerFor(workspace string) (SimAgent, bool) {
+	if i := slices.IndexFunc(q.w.sc.Factory, func(p SimProject) bool { return workspace != "" && workspace == p.Folder }); i >= 0 {
+		p := q.w.sc.Factory[i]
+		return SimAgent{Kind: orDefault(p.CoordinatorKind, "claude"), Answer: p.Answer}, p.Answer != ""
+	}
 	for _, a := range q.w.sc.Agents {
 		if workspace == "ws-"+a.Alias || strings.HasSuffix(workspace, "/"+a.Alias) || workspace == a.Alias {
 			return a, a.Answer != "" || a.CLIHangs
@@ -710,10 +757,7 @@ func (q *simQuerier) Investigate(ctx context.Context, iq supervisor.Investigatio
 		<-ctx.Done()
 		return supervisor.InvestigationResult{}, ctx.Err()
 	}
-	d := time.Duration(a.AnswerDelayMS) * time.Millisecond
-	if d == 0 {
-		d = 3 * time.Second
-	}
+	d := time.Duration(cmp.Or(a.AnswerDelayMS, 3000)) * time.Millisecond
 	select {
 	case <-time.After(d):
 	case <-ctx.Done():
@@ -770,6 +814,10 @@ func (r *simRecorder) Log(source, typ, pane string, payload any) {
 			}
 			r.acts = append(r.acts, SimLine{AtMS: at, Who: "action", Agent: alias, Kind: kind, Detail: keys, Text: "sheepdog " + fmt.Sprintf(verb, alias, keys)})
 		}
+	case "factory.say":
+		msg := payload.(factory.Change)
+		name, text := r.w.factory.ProjectName(msg.Project), msg.Text
+		r.acts = append(r.acts, SimLine{AtMS: at, Who: "action", Agent: name, Kind: ActionPrompt, Detail: text, Text: fmt.Sprintf("sheepdog told factory %s %q", name, text)})
 	case "brain.tool_call":
 		if name, _ := m["name"].(string); name != "" {
 			r.toolCalls = append(r.toolCalls, name)

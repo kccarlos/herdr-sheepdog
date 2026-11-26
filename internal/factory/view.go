@@ -49,6 +49,15 @@ type ProjectHead struct {
 	Alert           *ProjectAlert  `json:"alert,omitempty"`
 }
 
+// Clone returns a project head with its counts and alert copied.
+func (h ProjectHead) Clone() ProjectHead {
+	h.Counts = maps.Clone(h.Counts)
+	if h.Alert != nil {
+		h.Alert = new(*h.Alert)
+	}
+	return h
+}
+
 type ProjectAlert struct {
 	Kind  string `json:"kind"`
 	Cause string `json:"cause"`
@@ -343,13 +352,7 @@ func (e *Engine) ProjectHeads() []ProjectHead {
 	defer e.projectHeadsMu.RUnlock()
 	out := make([]ProjectHead, 0, len(e.projectHeads))
 	for _, id := range slices.Sorted(maps.Keys(e.projectHeads)) {
-		h := e.projectHeads[id]
-		h.Counts = maps.Clone(h.Counts)
-		if h.Alert != nil {
-			a := *h.Alert
-			h.Alert = &a
-		}
-		out = append(out, h)
+		out = append(out, e.projectHeads[id].Clone())
 	}
 	return out
 }
