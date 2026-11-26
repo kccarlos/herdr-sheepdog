@@ -447,9 +447,11 @@ public struct PendingAction: Codable, Equatable, Sendable {
     /// When the question opened (`created_at`): orders questions from several
     /// computers by age.
     public var createdAt: Date?
+    /// Set on a factory ask card (`fask-…`): its project, task and kind.
+    public var factory: FactoryAskMeta?
 
     enum CodingKeys: String, CodingKey {
-        case id, kind, question, options, agent, summary, command
+        case id, kind, question, options, agent, summary, command, factory
         case createdAt = "created_at"
         case paneID = "pane_id"
         case spokenSummary = "spoken_summary"
@@ -465,7 +467,8 @@ public struct PendingAction: Codable, Equatable, Sendable {
         agent: String? = nil,
         summary: String? = nil,
         command: String? = nil,
-        createdAt: Date? = nil
+        createdAt: Date? = nil,
+        factory: FactoryAskMeta? = nil
     ) {
         self.id = id
         self.paneID = paneID
@@ -477,10 +480,12 @@ public struct PendingAction: Codable, Equatable, Sendable {
         self.summary = summary
         self.command = command
         self.createdAt = createdAt
+        self.factory = factory
     }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
+        factory = try? c.decodeIfPresent(FactoryAskMeta.self, forKey: .factory)
         id = try c.decode(String.self, forKey: .id)
         paneID = try c.decodeIfPresent(String.self, forKey: .paneID) ?? ""
         kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? ""
@@ -729,9 +734,12 @@ public struct DaemonState: Codable, Equatable, Sendable {
     public var attentionCounts: AttentionCounts?
     /// The muted spaces (feature `space-mute`); nil from an older daemon.
     public var spaceMutes: [SpaceMute]?
+    /// One head per factory project; nil from a daemon with no projects
+    /// (or without the factory), `[]` when the key is an empty list.
+    public var factory: [FactoryProjectHead]?
 
     enum CodingKeys: String, CodingKey {
-        case agents, voice, herdr, version, brain, update, questions
+        case agents, voice, herdr, version, brain, update, questions, factory
         case herdrBackend = "herdr_backend"
         case herdrBackends = "herdr_backends"
         case herdrBackendOverride = "herdr_backend_override"
@@ -743,7 +751,8 @@ public struct DaemonState: Codable, Equatable, Sendable {
         case conversationStartedAt = "conversation_started_at"
     }
 
-    public init(agents: [Agent], pendingAction: PendingAction? = nil, questions: [PendingAction]? = nil, voice: VoiceInfo, herdr: String? = nil, herdrBackend: String? = nil, herdrBackends: [String]? = nil, herdrBackendOverride: String? = nil, version: String? = nil, brain: BrainInfo? = nil, voiceProvider: String? = nil, voiceModel: String? = nil, conversationStartedAt: Date? = nil, update: UpdateInfo? = nil, attentionCounts: AttentionCounts? = nil, spaceMutes: [SpaceMute]? = nil) {
+    public init(agents: [Agent], pendingAction: PendingAction? = nil, questions: [PendingAction]? = nil, voice: VoiceInfo, herdr: String? = nil, herdrBackend: String? = nil, herdrBackends: [String]? = nil, herdrBackendOverride: String? = nil, version: String? = nil, brain: BrainInfo? = nil, voiceProvider: String? = nil, voiceModel: String? = nil, conversationStartedAt: Date? = nil, update: UpdateInfo? = nil, attentionCounts: AttentionCounts? = nil, spaceMutes: [SpaceMute]? = nil, factory: [FactoryProjectHead]? = nil) {
+        self.factory = factory
         self.update = update
         self.attentionCounts = attentionCounts
         self.spaceMutes = spaceMutes
@@ -760,6 +769,34 @@ public struct DaemonState: Codable, Equatable, Sendable {
         self.voiceProvider = voiceProvider
         self.voiceModel = voiceModel
         self.conversationStartedAt = conversationStartedAt
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        agents = try c.decode([Agent].self, forKey: .agents)
+        pendingAction = try c.decodeIfPresent(PendingAction.self, forKey: .pendingAction)
+        questions = try c.decodeIfPresent([PendingAction].self, forKey: .questions)
+        voice = try c.decode(VoiceInfo.self, forKey: .voice)
+        herdr = try c.decodeIfPresent(String.self, forKey: .herdr)
+        herdrBackend = try c.decodeIfPresent(String.self, forKey: .herdrBackend)
+        herdrBackends = try c.decodeIfPresent([String].self, forKey: .herdrBackends)
+        herdrBackendOverride = try c.decodeIfPresent(String.self, forKey: .herdrBackendOverride)
+        version = try c.decodeIfPresent(String.self, forKey: .version)
+        brain = try c.decodeIfPresent(BrainInfo.self, forKey: .brain)
+        voiceProvider = try c.decodeIfPresent(String.self, forKey: .voiceProvider)
+        voiceModel = try c.decodeIfPresent(String.self, forKey: .voiceModel)
+        conversationStartedAt = try c.decodeIfPresent(Date.self, forKey: .conversationStartedAt)
+        update = try c.decodeIfPresent(UpdateInfo.self, forKey: .update)
+        attentionCounts = try c.decodeIfPresent(AttentionCounts.self, forKey: .attentionCounts)
+        spaceMutes = try c.decodeIfPresent([SpaceMute].self, forKey: .spaceMutes)
+        if var heads = try? c.nestedUnkeyedContainer(forKey: .factory) {
+            factory = []
+            while !heads.isAtEnd {
+                // Advance past this entry before trying to decode it.
+                let entry = try heads.superDecoder()
+                if let head = try? FactoryProjectHead(from: entry) { factory?.append(head) }
+            }
+        }
     }
 
     /// The open question of a pane: from `questions`, else the pending
