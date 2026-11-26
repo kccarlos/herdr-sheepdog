@@ -1286,6 +1286,7 @@ func TestPR2bRow6UnconfirmedBeforeFinish(t *testing.T) {
 		if err := h.eng.Say(h.repo, ownerWords); err != nil {
 			t.Fatalf("Say during final journal: %v", err)
 		}
+		sayKey := fmt.Sprintf("project:owner_say:%d", h.state().Seq)
 
 		// Final journal turn ends -> J12 delivers Say (not J4 stop).
 		h.coordIdleWithStatus(coord1, "idle")
@@ -1314,8 +1315,8 @@ func TestPR2bRow6UnconfirmedBeforeFinish(t *testing.T) {
 			t.Fatalf("project wedged after exhausted Say before finish: runID=%q finished=%v", h.state().Project.RunID, h.state().Project.Finished)
 		}
 		j12 := logRules(t, h.paths.Log(h.id), "J12")
-		if len(j12) == 0 || !hasJ12LogFor(j12[len(j12)-1:], "project:owner_say", "") || strings.Contains(j12[len(j12)-1].Decision, "delivered") {
-			t.Fatalf("second unconfirmed Say missing J12 exhaustion log: %+v", j12)
+		if len(j12) == 0 || !hasJ12LogFor(j12[len(j12)-1:], sayKey, "") || strings.Contains(j12[len(j12)-1].Decision, "delivered") {
+			t.Fatalf("second unconfirmed Say missing J12 exhaustion log for %s: %+v", sayKey, j12)
 		}
 		// Final journal request must stay single.
 		journalSends := 0

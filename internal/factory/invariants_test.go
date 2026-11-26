@@ -549,6 +549,9 @@ func TestInvariantPerSubjectSkipAndRecurrence(t *testing.T) {
 
 	deliverWakes := func() {
 		t.Helper()
+		if len(l.state().Project.CoordWakesInFlight) > 0 {
+			l.srv.SetScreen("coord-elsewhere", completedWakeScreen("claude", lastSendTo(t, l.srv.Requests(), "coord-elsewhere"), "Handled invariant wakes."))
+		}
 		l.srv.SetStatus("coord-elsewhere", &hc.Status{App: "claude-code", State: "idle"})
 		now = now.Add(5 * time.Second)
 		l.pass()

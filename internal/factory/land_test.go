@@ -538,6 +538,7 @@ func TestSection8EngineBackoffOutageN5AndRetry(t *testing.T) {
 	now = now.Add(time.Second)
 	setStatusAt(t, l, coord, "working", now)
 	l.pass()
+	l.srv.SetScreen(coord, completedWakeScreen("claude", sends[0], "Noted merge failure on T1."))
 	setStatusAt(t, l, coord, "idle", now.Add(time.Second))
 	now = now.Add(30 * time.Second)
 	l.pass()

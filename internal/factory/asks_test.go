@@ -727,6 +727,7 @@ func TestAskRestartAfterEveryStep(t *testing.T) {
 					if err := w.eng.Report(w.coordTok, "answer", json.RawMessage(fmt.Sprintf(`{"ask":%q,"option":"Plain JSON","why":"keep stdlib only"}`, askID))); err != nil {
 						w.t.Fatalf("coordinator answer: %v", err)
 					}
+					w.srv.SetScreen(cid, completedWakeScreen("claude", lastSendTo(w.t, w.srv.Requests(), cid), "Answered T1 decision ask with Plain JSON."))
 					w.waitIdle(cid)
 				}},
 				{"worker receives answer, commits and reports ready", func(w *restartWorld) {
@@ -784,6 +785,7 @@ func TestAskRestartAfterEveryStep(t *testing.T) {
 					if err := w.eng.Report(w.coordTok, "answer", json.RawMessage(fmt.Sprintf(`{"ask":%q,"option":"Plain JSON","why":"keep stdlib only"}`, askID))); err != nil {
 						w.t.Fatalf("coordinator answer: %v", err)
 					}
+					w.srv.SetScreen(cid, completedWakeScreen("claude", lastSendTo(w.t, w.srv.Requests(), cid), "Answered T1 decision ask with Plain JSON."))
 					w.waitIdle(cid)
 				}},
 				passStep("N23 resume worker with held answer", 65*time.Second),

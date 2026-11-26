@@ -53,9 +53,12 @@ func TestPlanReviewDropLastOpenTaskAcceptsBeforeFinishAndReopen(t *testing.T) {
 	if err := w.eng.Report(coordTok, "task", json.RawMessage(`{"action":"drop","task":"T1","why":"already covered by T0"}`)); err != nil {
 		t.Fatalf("task drop T1: %v", err)
 	}
-	for range 2 {
+	for i := range 2 {
 		w.srv.SetStatus("coord1", &hc.Status{App: "claude-code", State: "working"})
 		w.pass()
+		if i == 0 {
+			w.srv.SetScreen("coord1", completedWakeScreen("claude", lastSendTo(t, w.srv.Requests(), "coord1"), "Dropped T1 as covered by T0."))
+		}
 		setTerminalStatusAt(t, w.srv, w.client, "coord1", "idle", w.now.Add(30*time.Second))
 		w.advanceMinute()
 		w.pass()
