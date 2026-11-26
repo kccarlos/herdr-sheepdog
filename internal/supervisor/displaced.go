@@ -1510,11 +1510,11 @@ func (s *Supervisor) namedInLocked(text, pane string) bool {
 		return false
 	}
 	row, ok := s.store.Get(pane)
-	if !ok {
-		return false
+	if !ok && strings.HasPrefix(pane, factoryPanePrefix) {
+		row.Alias, row.Spoken = s.aliasOf(pane), s.sayOf(pane)
 	}
 	words := wordSet(nameTokens(text))
-	for _, n := range []string{row.Alias, state.Say(row), s.sayOf(pane)} {
+	for _, n := range []string{row.Alias, state.Say(row)} {
 		n = strings.ToLower(strings.TrimSpace(n))
 		if len([]rune(n)) >= 2 && strings.IndexFunc(n, func(r rune) bool { return !unicode.Is(unicode.Han, r) }) == -1 && strings.Contains(strings.ToLower(text), n) {
 			return true
@@ -1605,7 +1605,8 @@ func (s *Supervisor) displacedByLocked(p state.PendingAction, in *shepherdInput)
 		if !e.closedAt.IsZero() && now.Sub(e.closedAt) > s.cfg.AuthoriseWindow {
 			continue
 		}
-		if k2.pane == p.PaneID {
+		project, factoryAsk := strings.CutPrefix(k2.pane, factoryPanePrefix)
+		if k2.pane == p.PaneID || factoryAsk && (brainHost{s}).projectHead(project).CoordinatorPane == p.PaneID {
 			samePane = true
 		} else {
 			otherPanes[k2.pane] = true

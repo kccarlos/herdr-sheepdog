@@ -433,7 +433,7 @@ What the model reads for it, in the roster's existing shape:
 
 ```
 notes factory: running. Goal: "A notes page with search".
-3 working, 1 waiting on you, 9 of 14 done. Coordinator idle.
+3 working, 1 waiting on you, 9 of 14 done.
 Open ask: "Delete the old notes table in the migration?"
 ```
 

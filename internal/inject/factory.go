@@ -137,6 +137,27 @@ func (f *Factory) Graph(id string) (factory.GraphView, error) {
 	return factory.GraphView{}, factory.ErrProjectNotFound
 }
 
+// LogLines returns the matching tail of the project's scripted log.
+func (f *Factory) LogLines(id string, n int, task string, observations bool) ([]factory.LogEntry, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	p := f.projects[id]
+	if p == nil {
+		return nil, factory.ErrProjectNotFound
+	}
+	if n <= 0 {
+		n = factory.DefaultLogLimit
+	}
+	n = min(n, factory.MaxLogLimit)
+	var out []factory.LogEntry
+	for _, l := range p.Log {
+		if factory.MatchLogTask(task, l.Task, l.By) && (observations || l.Kind != "observation" && l.Decision != "") {
+			out = append(out, l)
+		}
+	}
+	return out[max(0, len(out)-n):], nil
+}
+
 // OpenAsk opens a validated ask on its scripted project.
 func (f *Factory) OpenAsk(a flow.Ask) {
 	var change factory.Change

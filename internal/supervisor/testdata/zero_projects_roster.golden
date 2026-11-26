@@ -1,0 +1,22 @@
+## Agents
+
+- auth (codex): blocked for 30 s; user last dealt with it 30 s ago; WAITING FOR AN ANSWER (asked 30 s ago): would you like to run the following command; options: 1 "Yes, proceed" -> keys [y], 2 "Yes, and don't ask…" -> keys [p], 3 "No, and tell Codex…" -> keys [esc]; yes -> [y], no -> [esc]
+- docs (claude): idle for 30 s
+
+## Ledger
+
+Notes from the user: keep migrations untouched
+
+## Investigations
+
+Nothing has been looked into yet.
+
+## Now
+
+Thu 2026-09-17 16:57:30 UTC
+Record: this conversation started at 16:55:00 and the transcript above is complete since then: nothing of it is missing.
+Screen: not visible (the Sheepdog app is in the background, locked or not open); show is refused, so speak.
+
+## Briefing
+
+Two agents: auth is asking would you like to run the following command and docs is idle. Auth is waiting for your answer.

@@ -28,10 +28,11 @@ var _ brain.Host = brainHost{}
 // Agents implements brain.Host.
 func (h brainHost) Agents() []brain.AgentInfo {
 	pending, has := h.s.store.Pending()
-	rows := h.s.store.List()
-	out := make([]brain.AgentInfo, 0, len(rows))
-	for _, a := range rows {
-		out = append(out, h.info(a, pending, has))
+	r := h.roster()
+	asks := h.openAsks(len(r.heads) > len(r.finished))
+	out := make([]brain.AgentInfo, 0, len(r.listed))
+	for _, a := range r.listed {
+		out = append(out, h.rosterInfo(r, a, asks, pending, has))
 	}
 	return out
 }
@@ -57,15 +58,7 @@ func (h brainHost) info(a state.Agent, pending state.PendingAction, has bool) br
 	if a.LastInteraction != nil {
 		info.LastInteraction = *a.LastInteraction
 	}
-	if !has || pending.PaneID != a.PaneID {
-		for _, q := range h.s.store.Questions() {
-			if q.PaneID == a.PaneID {
-				pending, has = q, true
-				break
-			}
-		}
-	}
-	if has && !pending.Held && !h.s.heldQuestion(pending.ID) && pending.Kind == state.PendingAnswerPrompt && pending.PaneID == a.PaneID {
+	if pending, ok := h.dialogFor(a.PaneID, pending, has); ok && !pending.Held && !h.s.heldQuestion(pending.ID) {
 		p := &brain.PendingPrompt{ID: pending.ID, Question: pending.Question, AskedAt: pending.CreatedAt, YesKeys: pending.YesKeys, NoKeys: pending.NoKeys}
 		for _, o := range pending.Options {
 			// Meta goes along as a fact: the orchestrator must know the
@@ -78,14 +71,30 @@ func (h brainHost) info(a state.Agent, pending state.PendingAction, has bool) br
 	return info
 }
 
+func (h brainHost) dialogFor(paneID string, pending state.PendingAction, has bool) (state.PendingAction, bool) {
+	if has && pending.Kind == state.PendingAnswerPrompt && pending.PaneID == paneID {
+		return pending, true
+	}
+	for _, q := range h.s.store.Questions() {
+		if q.Kind == state.PendingAnswerPrompt && q.PaneID == paneID {
+			return q, true
+		}
+	}
+	return state.PendingAction{}, false
+}
+
 // Resolve implements brain.Host.
 func (h brainHost) Resolve(name string) (brain.AgentInfo, bool) {
-	row, ok := findAlias(h.s.store.List(), name)
+	r := h.roster()
+	row, ok, ambiguous := matchAlias(r.listed, name, r.coordinators)
+	if !ok && !ambiguous {
+		row, ok = findAlias(r.finished, name)
+	}
 	if !ok {
 		return brain.AgentInfo{}, false
 	}
 	pending, has := h.s.store.Pending()
-	return h.info(row, pending, has), true
+	return h.rosterInfo(r, row, h.openAsks(r.heads[row.PaneID].ID != ""), pending, has), true
 }
 
 // LanguageLine implements brain.LanguageHost: the user's language
@@ -121,6 +130,9 @@ func (h brainHost) Rename(ctx context.Context, paneID, name string) (string, err
 // dealing with the agent and makes it the current subject (the fallback
 // path's "it").
 func (h brainHost) ReadScreen(ctx context.Context, paneID string, lines int) (string, error) {
+	if id, ok := strings.CutPrefix(paneID, factoryPanePrefix); ok {
+		return h.readBoard(id)
+	}
 	if lines <= 0 {
 		lines = h.s.cfg.ReadLines
 	}
@@ -255,6 +267,13 @@ func (h brainHost) Prompt(ctx context.Context, paneID, text string) (string, err
 // approved") — then the answer send path (answerKeys).
 func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []string) (string, error) {
 	s := h.s
+	project, isProject := strings.CutPrefix(paneID, factoryPanePrefix)
+	if isProject {
+		paneID = h.projectHead(project).CoordinatorPane
+		if paneID == "" {
+			return "", errNoCoordinatorDialog
+		}
+	}
 	ps := s.paneSend(paneID)
 	ps.Lock()
 	defer ps.Unlock()
@@ -267,7 +286,14 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 	var screen *paneScreen
 	defer s.pushReask()
 	s.mu.Lock()
-	for {
+	defer s.mu.Unlock()
+	if isProject {
+		row, _ := s.store.Get(paneID)
+		if !blockedCoordinator(h.projectHead(project), row) {
+			return "", errNoCoordinatorDialog
+		}
+	}
+	for !isProject {
 		p, has := s.store.Pending()
 		if has && p.Kind == state.PendingAnswerPrompt && p.PaneID == paneID || screen != nil {
 			break
@@ -282,12 +308,16 @@ func (h brainHost) AnswerPrompt(ctx context.Context, paneID string, keys []strin
 		s.mu.Lock()
 		current, ok := s.store.Get(paneID)
 		if !ok || current.State != row.State || current.StateSince != row.StateSince || s.lastPrompt[paneID] != sig {
-			s.mu.Unlock()
 			return "", fmt.Errorf("%w: the question changed while reading it; please ask again", brain.ErrNotPermitted)
 		}
 	}
-	defer s.mu.Unlock()
 	p, has := s.store.Pending()
+	if isProject {
+		p, has = h.dialogFor(paneID, p, has)
+		if !has {
+			return "", errNoCoordinatorDialog
+		}
+	}
 	reviving := false
 	for _, q := range s.store.Questions() {
 		if q.PaneID == paneID && (q.Held || s.heldQuestion(q.ID)) {
