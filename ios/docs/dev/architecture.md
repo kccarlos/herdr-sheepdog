@@ -346,7 +346,11 @@ accessibility text sizes. The voice capsule stays in place.
   questions. Resume sends the existing goal to the paired-device start
   route. On iPhone, tapping a head opens `FactoryProjectView` on that
   computer. `FactoryProjectBoard` and `FactorySayBox` present the tasks,
-  open asks, instruction status and Stop or Resume controls.
+  open asks, instruction status and Stop or Resume controls. When a
+  running head has a coordinator pane, `FactoryCoordinatorView` and
+  `FactoryCoordinatorWindow` open its live terminal through
+  `AgentScreenView` (without the agent menu, Stop or Attach) and show the
+  project's off-state recovery screen when the coordinator is not running.
 - **Agent window** (`AgentScreenView`). "Open window" on an Agents card
   (a `NavigationLink` to `AgentWindowRoute` on the main `NavigationStack`),
   or in the sheet behind a strip chip, pushes the agent's live terminal;

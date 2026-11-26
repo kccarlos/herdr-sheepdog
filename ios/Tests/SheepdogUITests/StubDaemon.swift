@@ -76,6 +76,8 @@ final class StubDaemon {
     var startHandler: ((String) -> (Int, String))?
     var proposeSettingHandler: ((String, String) -> (Int, String))?
     var answerHandler: ((String) -> (Int, String))?
+    /// Optional custom handler for `POST /api/agents/<pane>/input`.
+    var agentInputHandler: ((String, String) -> (Int, String))?
     /// Enable SSE `/events` streaming so tests can push `factory.changed`.
     var enableEvents = false
     private var eventClients: [NWConnection] = []
@@ -84,6 +86,7 @@ final class StubDaemon {
     private var stops: [String] = []
     private var starts: [String] = []
     private var proposals: [(project: String, body: String)] = []
+    private var agentInputs: [(pane: String, body: String)] = []
 
     /// How many requests started with `prefix` ("POST /api/turn").
     func requests(_ prefix: String) -> Int {
@@ -95,6 +98,7 @@ final class StubDaemon {
     func stopBodies() -> [String] { lock.withLock { stops } }
     func startBodies() -> [String] { lock.withLock { starts } }
     func proposeBodies() -> [(project: String, body: String)] { lock.withLock { proposals } }
+    func agentInputBodies() -> [(pane: String, body: String)] { lock.withLock { agentInputs } }
 
     /// Pushes a `factory.changed` SSE event to connected `/events` clients.
     func emitFactoryChanged(project: String) {
@@ -263,7 +267,9 @@ final class StubDaemon {
                     return http(200, "application/json", #"{"pane_id":"# + Self.json(pane) + #","alias":"agent","state":"working","text":"# + Self.json(text) + #","hash":"h1"}"#)
                 }
                 if path.contains("/input") {
-                    return http(200, "application/json", #"{"kind":"prompt","spoken":"Sent."}"#)
+                    lock.withLock { agentInputs.append((pane, body)) }
+                    let (status, json) = agentInputHandler?(pane, body) ?? (200, #"{"kind":"prompt","spoken":"Sent."}"#)
+                    return http(status, "application/json", json)
                 }
             }
             return http(404, "application/json", #"{"error":"not found"}"#)
