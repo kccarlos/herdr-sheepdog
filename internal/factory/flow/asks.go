@@ -76,6 +76,15 @@ type Ask struct {
 	DeviceID   string           `json:"device_id,omitempty"`
 }
 
+// Clone returns an ask with its options, targets and setting copied.
+func (a Ask) Clone() Ask {
+	a.Options, a.Targets = slices.Clone(a.Options), slices.Clone(a.Targets)
+	if a.Set != nil {
+		a.Set = new(*a.Set)
+	}
+	return a
+}
+
 // AskEvent is one input to the pure ask table A2–A5 (design.md 7.1).
 type AskEvent struct{ Kind, Answer, Why, By, ProofID, DeviceID string }
 

@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
@@ -25,23 +26,35 @@ type Change struct {
 	Seq     int64  `json:"seq,omitempty"`
 }
 
-// Changes returns a buffered stream emitting one Change per ask, answer or say.
-func (e *Engine) Changes() <-chan Change {
-	e.mu.Lock()
-	defer e.mu.Unlock()
+// ChangeStream delivers buffered factory changes to subscribers.
+type ChangeStream struct {
+	mu   sync.Mutex
+	subs []chan Change
+}
+
+func (s *ChangeStream) Changes() <-chan Change {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	ch := make(chan Change, 64)
-	e.changeSubs = append(e.changeSubs, ch)
+	s.subs = append(s.subs, ch)
 	return ch
 }
 
-func (e *Engine) notifyChangeLocked(id string, seq int64, c Change) {
-	c.Project, c.Seq = id, seq
-	for _, ch := range e.changeSubs {
+// PublishChange offers c to each subscriber without waiting for it to read.
+func PublishChange(s *ChangeStream, c Change) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, ch := range s.subs {
 		select {
 		case ch <- c:
 		default:
 		}
 	}
+}
+
+func (e *Engine) notifyChangeLocked(id string, seq int64, c Change) {
+	c.Project, c.Seq = id, seq
+	PublishChange(&e.ChangeStream, c)
 }
 
 func (e *Engine) commitChangeLocked(id string, s *flow.State, l LogLine, c Change) error {
@@ -52,26 +65,33 @@ func (e *Engine) commitChangeLocked(id string, s *flow.State, l LogLine, c Chang
 	return nil
 }
 
+// AppendAskViews appends copies of a project's asks with their view defaults.
+func AppendAskViews(out, asks []flow.Ask, id, folder string, open bool) []flow.Ask {
+	for _, a := range asks {
+		if !open || a.Status == flow.AskStatusOpen {
+			a.Project, a.Folder = cmp.Or(a.Project, id), cmp.Or(a.Folder, folder)
+			out = append(out, a.Clone())
+		}
+	}
+	return out
+}
+
+// SortAskViews orders ask views by creation time and project.
+func SortAskViews(out []flow.Ask) []flow.Ask {
+	slices.SortStableFunc(out, func(a, b flow.Ask) int { return cmp.Or(a.At.Compare(b.At), cmp.Compare(a.Project, b.Project)) })
+	return out
+}
+
 // Asks returns asks across projects (open only when open is true) in creation order.
 func (e *Engine) Asks(open bool) []flow.Ask {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	var out []flow.Ask
 	e.eachStateLocked(func(id string, s flow.State) bool {
-		for _, a := range s.Asks {
-			if !open || a.Status == flow.AskStatusOpen {
-				a.Project, a.Folder, a.Options, a.Targets = cmp.Or(a.Project, id), cmp.Or(a.Folder, s.Project.Folder), slices.Clone(a.Options), slices.Clone(a.Targets)
-				if a.Set != nil {
-					cp := *a.Set
-					a.Set = &cp
-				}
-				out = append(out, a)
-			}
-		}
+		out = AppendAskViews(out, s.Asks, id, s.Project.Folder, open)
 		return true
 	})
-	slices.SortStableFunc(out, func(a, b flow.Ask) int { return cmp.Or(a.At.Compare(b.At), cmp.Compare(a.Project, b.Project)) })
-	return out
+	return SortAskViews(out)
 }
 
 // Answer records an owner's answer to askID, requiring a verified AnswerProof on gated asks.
@@ -250,24 +270,33 @@ func (e *Engine) acceptAnswerLocked(id string, s *flow.State, role string, args 
 	}
 }
 
-func (e *Engine) answerAskLocked(id string, s *flow.State, ai int, option, why, by string, proof AnswerProof) error {
-	a, now := s.Asks[ai], e.now()
+// CheckAskAnswer resolves the option and verifies proof before an answer is applied.
+func CheckAskAnswer(a flow.Ask, option string, proof AnswerProof, load func() ([]AnswerProof, error)) (string, error) {
 	if a.Status != flow.AskStatusOpen {
-		return e.refuse(id, flow.RefuseClosed, fmt.Sprintf("Ask %q is already %s.", a.ID, a.Status))
+		return "", &Refusal{Code: flow.RefuseClosed, Why: fmt.Sprintf("Ask %q is already %s.", a.ID, a.Status)}
 	}
 	resolved, ok := option, slices.Contains(a.Options, option)
 	if a.Kind != flow.KindOverride {
 		resolved, ok = flow.ResolveAskOption(a.Options, option)
 	}
 	if a.Gated || proof != (AnswerProof{}) {
-		if code, msg, err := e.verifyProofLocked(a.ID, resolved, flow.CleanText(option), proof, now); err != nil {
-			return err
-		} else if code != "" {
-			return e.refuse(id, code, msg)
+		if err := verifyAnswerProof(a.ID, resolved, flow.CleanText(option), proof, load); err != nil {
+			return "", err
 		}
 	}
 	if !ok {
-		return e.refuse(id, "invalid_option", fmt.Sprintf("%q is not one of ask %q's options.", option, a.ID))
+		return "", &Refusal{Code: "invalid_option", Why: fmt.Sprintf("%q is not one of ask %q's options.", option, a.ID)}
+	}
+	return resolved, nil
+}
+
+func (e *Engine) answerAskLocked(id string, s *flow.State, ai int, option, why, by string, proof AnswerProof) error {
+	a, now := s.Asks[ai], e.now()
+	resolved, err := CheckAskAnswer(a, option, proof, func() ([]AnswerProof, error) { return e.loadProofsLocked(now) })
+	if r, ok := err.(*Refusal); ok {
+		return e.refuse(id, r.Code, r.Why)
+	} else if err != nil {
+		return err
 	}
 	decText := ""
 	if a.Set != nil && by != owner {

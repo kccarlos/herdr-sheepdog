@@ -9,8 +9,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/kccarlos/herdr-sheepdog/internal/factory"
-	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
+	"github.com/kccarlos/herdr-sheepdog/internal/inject"
 )
 
 // Simulated-user scenarios (`sheepdog eval sim`, after pipecat's
@@ -112,20 +111,8 @@ type SimAgent struct {
 	CLIHangs bool `json:"cli_hangs,omitempty"`
 }
 
-// SimProject is one fake factory project, in the real factory shapes. A
-// running project with a coordinator_pane gets a coordinator terminal
-// (labelled as the factory labels it) in that coordinator state.
-type SimProject struct {
-	factory.ProjectHead
-	CoordinatorKind   string             `json:"coordinator_kind,omitempty"`
-	CoordinatorState  string             `json:"coordinator_state,omitempty"`
-	CoordinatorScreen string             `json:"coordinator_screen,omitempty"`
-	Tasks             []factory.TaskView `json:"tasks,omitempty"`
-	Log               []factory.LogEntry `json:"log,omitempty"`
-	Asks              []flow.Ask         `json:"asks,omitempty"`
-	// Answer is what an investigation of the project's folder finds.
-	Answer string `json:"answer,omitempty"`
-}
+// SimProject is a scripted project in the simulator's factory.
+type SimProject = inject.FactoryProject
 
 // SimEvent changes a worker's screen and state when its trigger fires.
 // Exactly one trigger: AtMS, AfterTurn, AfterBeat, OnPromptTo, OnKeysTo
@@ -296,13 +283,10 @@ func (s SimScenario) validate() error {
 	}
 	projects := map[string]bool{}
 	for _, p := range s.Factory {
-		if p.ID == "" || projects[p.ID] {
-			return fmt.Errorf("factory project id %q empty or repeated", p.ID)
+		if p.ID == "" || projects[p.ID] || !slices.Contains([]string{"running", "stopped", "finished"}, p.State) || !validState(p.CoordinatorState) {
+			return fmt.Errorf("invalid or duplicate factory project %q (state %q, coordinator state %q)", p.ID, p.State, p.CoordinatorState)
 		}
 		projects[p.ID] = true
-		if !slices.Contains([]string{"running", "stopped", "finished"}, p.State) || !validState(p.CoordinatorState) {
-			return fmt.Errorf("factory project %s: state %q, coordinator state %q", p.ID, p.State, p.CoordinatorState)
-		}
 	}
 	switch s.Language {
 	case "", "en", "zh":
