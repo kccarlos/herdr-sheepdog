@@ -16,22 +16,41 @@ struct TerminalComposer<Leading: View>: View {
     let focused: FocusState<Bool>.Binding
     let onSend: () -> Void
     let onStop: () -> Void
+    var fieldAccessibilityLabel: String? = nil
     @ViewBuilder var leading: () -> Leading
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
     private var draft: String { text.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var showsStop: Bool { draft.isEmpty && canStop && enabled }
     private var canSend: Bool { enabled && AgentScreenModel.canSend(text) }
+    private var wrapsPrompt: Bool { fieldAccessibilityLabel != nil && dynamicTypeSize.isAccessibilitySize }
+    private var prompt: Text? {
+        guard fieldAccessibilityLabel != nil else { return nil }
+        return Text(placeholder).foregroundStyle(wrapsPrompt ? Color.clear : Theme.muted)
+    }
 
     var body: some View {
         HStack(alignment: .bottom, spacing: 8) {
             HStack(alignment: .bottom, spacing: 6) {
                 leading()
-                TextField(placeholder, text: $text, axis: .vertical)
-                    .lineLimit(focused.wrappedValue ? 1 ... 6 : 1 ... 1)
-                    .textInputAutocapitalization(.sentences)
-                    .focused(focused)
-                    .disabled(!enabled && !sending)
-                    .accessibilityIdentifier("agentScreen.field")
+                ZStack(alignment: .topLeading) {
+                    TextField(placeholder, text: $text, prompt: prompt, axis: .vertical)
+                        .lineLimit(focused.wrappedValue ? 1 ... 6 : 1 ... 1)
+                        .textInputAutocapitalization(.sentences)
+                        .focused(focused)
+                        .disabled(!enabled && !sending)
+                        .accessibilityLabel(fieldAccessibilityLabel ?? placeholder)
+                        .accessibilityIdentifier("agentScreen.field")
+                    if wrapsPrompt && text.isEmpty {
+                        Text(placeholder)
+                            .foregroundStyle(Theme.muted)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                            .onTapGesture { if enabled { focused.wrappedValue = true } }
+                            .accessibilityHidden(true)
+                    }
+                }
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 8)
