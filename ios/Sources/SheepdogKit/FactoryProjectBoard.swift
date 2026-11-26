@@ -97,7 +97,7 @@ public struct FactoryProjectBoard {
     public static func isProjectGone(_ error: Error) -> Bool { if case .rejected(404, _) = error as? DaemonError { true } else { false } }
     public static func sayErrorMessage(_ error: Error, projectName: String, computerName: String, linkUsable: Bool = true) -> String {
         if isProjectGone(error) { return "This project is gone." }
-        if case .rejected(status: 409, message: "already_closed") = error as? DaemonError { return FactorySayBox.finishedNote(projectName) }
+        if case let .rejected(409, message) = error as? DaemonError, message == "already_closed" || message.hasSuffix(" is finished. Give it a new goal.") { return FactorySayBox.finishedNote(projectName) }
         return factoryActionError(error, computerName: computerName, linkUsable: linkUsable, prefix: "Not sent: ", retry: "send again")
     }
     public static func stopErrorMessage(_ error: Error, computerName: String, linkUsable: Bool = true) -> String {
