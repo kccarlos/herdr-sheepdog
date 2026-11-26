@@ -160,6 +160,99 @@ final class FactoryProjectBoardTests: XCTestCase {
         XCTAssertEqual(fail.retryLabel, "Try again")
     }
 
+    /// Coordinator window header, VoiceOver, ask reminder strip, off states, blocked refusal.
+    func testCoordinatorWindowLiveAskStripOffStatesAndBlockedRefusal() throws {
+        let askT10 = PendingAction(id: "f1", paneID: "factory:proj-1", kind: "answer_prompt", question: "Delete?", options: [], agent: "notes", factory: FactoryAskMeta(project: "proj-1", task: "T10", kind: "delete"))
+        let askProj = PendingAction(id: "f2", paneID: "factory:proj-1", kind: "answer_prompt", question: "Tag?", options: [], agent: "notes", factory: FactoryAskMeta(project: "proj-1", task: nil, kind: "release"))
+
+        let live = FactoryCoordinatorWindow(head: try head(state: .running, coordinatorPane: "coord-notes-1"), openAsks: [askT10])
+        XCTAssertTrue(live.isLive)
+        XCTAssertEqual(live.coordinatorPane, "coord-notes-1")
+        XCTAssertEqual(live.title, "notes · Coordinator")
+        XCTAssertEqual(live.headerAccessibilityLabel, "notes coordinator, running")
+        XCTAssertEqual(live.promptPlaceholder, "Ask the notes coordinator…")
+        XCTAssertEqual(live.promptAccessibilityLabel, "Message to the notes coordinator")
+        XCTAssertEqual(live.backButtonLabel, "Back to notes")
+        XCTAssertEqual(live.askStrip, "T10 is waiting on your answer. Answer it on its card; typing here is not an answer.")
+        XCTAssertNil(live.offState)
+
+        XCTAssertEqual(FactoryCoordinatorWindow(head: try head(), openAsks: [askProj]).askStrip, "An ask is waiting on your answer. Answer it on its card; typing here is not an answer.")
+        XCTAssertEqual(FactoryCoordinatorWindow(head: try head(), openAsks: [askT10, askProj]).askStrip, "2 asks are waiting on your answer. Answer them on their cards; typing here is not an answer.")
+        XCTAssertNil(FactoryCoordinatorWindow(head: try head(), openAsks: []).askStrip)
+
+        let offAlert = FactoryCoordinatorWindow(head: try head(state: .running, coordinatorPane: nil, alert: FactoryProjectAlert(kind: "agents_down", cause: "claude coordinator is signed out", fix: "sign in to claude at this Mac")))
+        XCTAssertFalse(offAlert.isLive)
+        XCTAssertEqual(offAlert.headerAccessibilityLabel, "notes coordinator, not running")
+        XCTAssertEqual(offAlert.offState?.heading, "The notes coordinator is not running")
+        XCTAssertEqual(offAlert.offState?.alertCause, "claude coordinator is signed out")
+        XCTAssertEqual(offAlert.offState?.alertFix, "Fix: sign in to claude at this Mac")
+        XCTAssertEqual(offAlert.offState?.body, "This window comes back when a coordinator runs again. To tell it something meanwhile, use the box on the notes page; it gets it when it is back.")
+        XCTAssertNil(FactoryCoordinatorWindow(head: try head(state: .running, coordinatorPane: nil)).offState?.alertCause)
+
+        let stopped = FactoryCoordinatorWindow(head: try head(state: .stopped, coordinatorPane: nil))
+        XCTAssertEqual(stopped.offState?.heading, "notes is stopped")
+        XCTAssertEqual(stopped.offState?.body, "Resume notes on its page; it goes on with the same goal.")
+
+        let finished = FactoryCoordinatorWindow(head: try head(state: .finished, coordinatorPane: nil))
+        XCTAssertEqual(finished.offState?.heading, "notes is finished")
+        XCTAssertEqual(finished.offState?.body, "To go on, reopen notes with a new goal on its page.")
+
+        XCTAssertEqual(FactoryCoordinatorWindow.inputErrorMessage(DaemonError.rejected(status: 409, message: "notes is waiting at a prompt; answer it first"), projectName: "notes", computerName: "Work Mac"), "Not sent: the notes coordinator is waiting at its own prompt. Answer it with the keys, or on its card in Agents.")
+    }
+
+    /// D10 edge cases: blank coordinator pane, non-running states ignoring stale panes,
+    /// alerts without a fix, blank task refs on asks, and non-blocked input errors.
+    func testCoordinatorWindowEdgeCasesAndNonBlockedInputErrors() throws {
+        let blankPane = FactoryCoordinatorWindow(head: try head(state: .running, coordinatorPane: "   "))
+        XCTAssertFalse(blankPane.isLive)
+        XCTAssertNil(blankPane.coordinatorPane)
+        XCTAssertEqual(blankPane.headerAccessibilityLabel, "notes coordinator, not running")
+        XCTAssertEqual(blankPane.offState?.heading, "The notes coordinator is not running")
+        XCTAssertNil(blankPane.offState?.alertCause)
+        XCTAssertNil(blankPane.offState?.alertFix)
+
+        let alertNoFix = FactoryCoordinatorWindow(head: try head(state: .running, coordinatorPane: nil, alert: FactoryProjectAlert(kind: "agents_down", cause: "disk is full", fix: nil)))
+        XCTAssertEqual(alertNoFix.offState?.alertCause, "disk is full")
+        XCTAssertNil(alertNoFix.offState?.alertFix)
+
+        let stoppedStalePane = FactoryCoordinatorWindow(head: try head(state: .stopped, coordinatorPane: "coord-stale"))
+        XCTAssertFalse(stoppedStalePane.isLive)
+        XCTAssertNil(stoppedStalePane.coordinatorPane)
+        XCTAssertEqual(stoppedStalePane.headerAccessibilityLabel, "notes coordinator, not running")
+        XCTAssertEqual(stoppedStalePane.offState?.heading, "notes is stopped")
+        XCTAssertNil(stoppedStalePane.offState?.alertCause)
+        XCTAssertNil(stoppedStalePane.offState?.alertFix)
+
+        let finishedStalePane = FactoryCoordinatorWindow(head: try head(state: .finished, coordinatorPane: "coord-stale"))
+        XCTAssertFalse(finishedStalePane.isLive)
+        XCTAssertNil(finishedStalePane.coordinatorPane)
+        XCTAssertEqual(finishedStalePane.headerAccessibilityLabel, "notes coordinator, not running")
+        XCTAssertEqual(finishedStalePane.offState?.heading, "notes is finished")
+        XCTAssertNil(finishedStalePane.offState?.alertCause)
+        XCTAssertNil(finishedStalePane.offState?.alertFix)
+
+        let blankTaskAsk = PendingAction(id: "f3", paneID: "factory:proj-1", kind: "answer_prompt", question: "Continue?", options: [], agent: "notes", factory: FactoryAskMeta(project: "proj-1", task: "   ", kind: "release"))
+        XCTAssertEqual(
+            FactoryCoordinatorWindow(head: try head(), openAsks: [blankTaskAsk]).askStrip,
+            "An ask is waiting on your answer. Answer it on its card; typing here is not an answer."
+        )
+
+        let wrappedBlocked = FactoryCoordinatorWindow.inputErrorMessage(
+            DaemonError.rejected(status: 409, message: "the notes factory is waiting at a prompt; answer it first (agent is blocked)"),
+            projectName: "notes",
+            computerName: "Work Mac"
+        )
+        XCTAssertEqual(wrappedBlocked, "Not sent: the notes coordinator is waiting at its own prompt. Answer it with the keys, or on its card in Agents.")
+
+        let nonBlocked = FactoryCoordinatorWindow.inputErrorMessage(
+            DaemonError.rejected(status: 500, message: "herdr did not answer"),
+            projectName: "notes",
+            computerName: "Work Mac"
+        )
+        XCTAssertFalse(nonBlocked.isEmpty)
+        XCTAssertFalse(nonBlocked.contains("waiting at its own prompt"), nonBlocked)
+    }
+
     /// `DaemonClient.sayFactory` and `DaemonClient.stopFactory` wire shapes & refusals.
     func testFactorySayAndStopClientRoutes() async throws {
         StubProtocol.seen = []
