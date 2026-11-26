@@ -70,12 +70,14 @@ final class StubDaemon {
     var factorySettings: [String: String] = [:]
     var factorySettingsErrors: [String: (Int, String)] = [:]
     var factoryAsks: String = #"{"protocol":1,"asks":[]}"#
+    var factoryAsksError: (Int, String)?
     /// Optional custom handlers for factory and answer POST routes.
     var sayHandler: ((String, String) -> (Int, String))?
     var stopHandler: ((String) -> (Int, String))?
     var startHandler: ((String) -> (Int, String))?
     var proposeSettingHandler: ((String, String) -> (Int, String))?
     var answerHandler: ((String) -> (Int, String))?
+    var askAnswerHandler: ((String, String) -> (Int, String))?
     /// Optional custom handler for `POST /api/agents/<pane>/input`.
     var agentInputHandler: ((String, String) -> (Int, String))?
     /// Enable SSE `/events` streaming so tests can push `factory.changed`.
@@ -303,7 +305,15 @@ final class StubDaemon {
             return http(200, "application/json", #"{"protocol":1,"projects":"# + (factoryState ?? fallback ?? "[]") + "}")
         }
         if method == "GET", clean == "/api/factory/asks" {
+            if let err = lock.withLock({ factoryAsksError }) { return http(err.0, "application/json", err.1) }
             return http(200, "application/json", lock.withLock { factoryAsks })
+        }
+        if method == "POST", clean.hasPrefix("/api/factory/asks/"), clean.hasSuffix("/answer") {
+            let rawID = clean.dropFirst("/api/factory/asks/".count).dropLast("/answer".count)
+            let id = String(rawID).removingPercentEncoding ?? String(rawID)
+            lock.withLock { answers.append(#"{"id":"fask-\#(id)","raw":\#(Self.json(body))}"#) }
+            let (status, json) = askAnswerHandler?(id, body) ?? answerHandler?(body) ?? (200, #"{"ok":true,"ask_id":\#(Self.json(id))}"#)
+            return http(status, "application/json", json)
         }
         if method == "GET", clean == "/api/factory/settings" {
             if let err = lock.withLock({ factorySettingsErrors[""] }) { return http(err.0, "application/json", err.1) }
