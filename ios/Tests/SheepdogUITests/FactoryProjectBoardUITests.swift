@@ -64,58 +64,9 @@ final class FactoryProjectBoardUITests: XCTestCase {
         XCTAssertTrue(stub.stopBodies().contains { $0.contains("proj-1") })
 
         tapWhenTappable(resumeBtn, "Resume")
-        XCTAssertTrue(app.buttons["factoryProject.coordinator"].waitForExistence(timeout: 10))
+        // The coordinator button returning after Resume is pinned in PR 9b (coordinator window).
+        XCTAssertTrue(stopBtn.waitForExistence(timeout: 10))
         XCTAssertTrue(stub.startBodies().contains { $0.contains("~/code/notes") && $0.contains("A notes page with search") })
-    }
-
-    func testCoordinatorWindowLiveControlsRestrictionsAndOffStates() throws {
-        let stub = try StubDaemon(.computer(name: "Work Mac", agents: "[]", questions: "[\(Self.sampleAsk)]", factory: Self.runningNotes, pendingAction: Self.sampleAsk))
-        stub.enableEvents = true
-        stub.factoryGraphs["proj-1"] = Self.sampleGraph
-        stub.screens["coord-notes-1"] = "● factory ask T10 \"Delete the old notes table?\"\n> Ready\n"
-        let host = try stub.start(); defer { stub.stop() }
-
-        let app = launch(host: host)
-        showAgentsPane(app)
-        tapWhenTappable(scrollToVisible(app, app.descendants(matching: .any)["flock.factory.proj-1"].firstMatch), "notes head")
-        let coordBtn = app.buttons["factoryProject.coordinator"].firstMatch
-        XCTAssertTrue(coordBtn.waitForExistence(timeout: 15))
-        XCTAssertEqual(coordBtn.label, "Open the notes coordinator's window")
-        tapWhenTappable(coordBtn, "Coordinator")
-
-        let header = app.descendants(matching: .any)["agentScreen.header"].firstMatch
-        XCTAssertTrue(header.waitForExistence(timeout: 10))
-        XCTAssertTrue(header.label.contains("notes") && header.label.lowercased().contains("coordinator"), header.label)
-        let terminal = app.descendants(matching: .any)["agentScreen.terminal"].firstMatch
-        XCTAssertTrue(terminal.waitForExistence(timeout: 10))
-        expectation(for: NSPredicate(format: "value CONTAINS 'factory ask T10'"), evaluatedWith: terminal)
-        waitForExpectations(timeout: 15)
-
-        XCTAssertTrue(app.descendants(matching: .any)["coordinatorWindow.askStrip"].exists)
-        XCTAssertTrue(app.descendants(matching: .any)["agentScreen.keyBar"].exists)
-        let field = app.textFields["agentScreen.field"].firstMatch
-        XCTAssertTrue(field.exists && field.label == "Message to the notes coordinator")
-        for id in ["agentScreen.stop", "agentScreen.attach", "agentScreen.menu", "agentScreen.menu.rename", "agentScreen.menu.stop", "agentScreen.menu.close", "agentScreen.menu.files"] {
-            XCTAssertFalse(app.descendants(matching: .any)[id].exists, "\(id) must be absent in coordinator window")
-        }
-        tapWhenTappable(app.buttons["agentScreen.key.more"].firstMatch, "More keys")
-        XCTAssertTrue(app.buttons["moreKeys.done"].waitForExistence(timeout: 10))
-        XCTAssertFalse(app.buttons["moreKeys.ctrlC"].exists, "no Interrupt row in coordinator More keys")
-        tapWhenTappable(app.buttons["moreKeys.done"].firstMatch, "Done")
-
-        stub.factoryState = #"[{"id":"proj-1","name":"notes","goal":"A notes page with search","state":"running","counts":{"working":1},"folder":"~/code/notes","alert":{"kind":"agents_down","cause":"claude coordinator is signed out","fix":"sign in to claude at this Mac"}}]"#
-        stub.emitFactoryChanged(project: "proj-1")
-        XCTAssertTrue(app.staticTexts["The notes coordinator is not running"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["claude coordinator is signed out"].exists)
-        XCTAssertTrue(app.staticTexts["Fix: sign in to claude at this Mac"].exists)
-        XCTAssertFalse(app.descendants(matching: .any)["agentScreen.keyBar"].exists)
-        XCTAssertFalse(app.textFields["agentScreen.field"].exists)
-
-        stub.factoryState = Self.stoppedNotes
-        stub.emitFactoryChanged(project: "proj-1")
-        XCTAssertTrue(app.staticTexts["notes is stopped"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Resume notes on its page; it goes on with the same goal."].exists)
-        XCTAssertTrue(app.buttons["Back to notes"].exists)
     }
 
     func testBoardEmptyTasksAndLoadErrorStates() throws {
