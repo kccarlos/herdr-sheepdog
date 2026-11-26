@@ -982,16 +982,20 @@ struct SeenWhileVisible: ViewModifier {
     }
 }
 
-private struct FactoryHeadCard: View {
+struct FactoryHeadCard: View {
     let item: FactoryAgentsList.Item
     let computer: ComputerSnapshot?
     let dialog: ApprovalFlow.Card?
     let answer: (String, Int) -> Void
+    var project: FactoryProjectBoard?
+    var onGone: (() -> Void)?
 
     @EnvironmentObject private var model: SessionViewModel
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
-    @State private var resuming = false
-    @State private var resumeError: String?
+    @State private var confirmingStop = false
+    @State private var actionError: String?
+
+    private var session: ComputerModel? { model.fleet.model(computer?.id ?? model.currentComputerID) }
 
     private var tint: Color {
         switch item.head.state {
@@ -1003,30 +1007,41 @@ private struct FactoryHeadCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            VStack(alignment: .leading, spacing: 4) {
-                let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 6))
-                ViewThatFits(in: .horizontal) {
-                    HStack { layout { name; kind }.fixedSize(); Spacer(minLength: 8); state.fixedSize() }
-                    VStack(alignment: .leading, spacing: 4) { layout { name; kind }; state }
+            if project != nil {
+                summary
+            } else {
+                NavigationLink(destination: FactoryProjectView(initialHead: item.head, computerID: computer?.id ?? model.currentComputerID)) {
+                    summary.contentShape(Rectangle())
                 }
-                Text(item.head.goal).font(.subheadline)
-                Text(counts).font(.footnote).foregroundStyle(Theme.muted)
-                item.caption(computerName: computer?.name).map { Text($0).font(.caption.monospaced()).foregroundStyle(Theme.muted) }
+                .buttonStyle(.plain)
+                .accessibilityLabel([item.accessibilitySummary, computer?.name.trimmedOrNil].compactMap { $0 }.joined(separator: ", "))
+                .accessibilityIdentifier("flock.factory.\(item.id)")
             }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel([item.accessibilitySummary, computer?.name.trimmedOrNil].compactMap { $0 }.joined(separator: ", "))
-            .accessibilityIdentifier("flock.factory.\(item.id)")
             item.alertLine.map { Text($0).font(.subheadline.weight(.semibold)) }
             item.alertFixLine.map { Text($0).font(.footnote).foregroundStyle(Theme.muted) }
-            if let folder = item.resumableFolder {
-                Button(resuming ? "Resuming…" : "Resume") { resume(folder: folder) }
-                    .buttonStyle(.bordered)
-                    .tint(Theme.ink)
-                    .controlSize(.large)
-                    .disabled(resuming)
-                    .accessibilityLabel(resuming ? "Resuming \(item.head.name)" : "Resume \(item.head.name)")
-                if let resumeError { Text(resumeError).font(.footnote).foregroundStyle(Theme.danger) }
-            }
+            Group {
+                if let project, project.canStop {
+                    let confirm = project.stopConfirm
+                    Button("Stop") { confirmingStop = true }
+                        .disabled(session?.actions.isInFlight("stop:\(item.id)") == true)
+                        .accessibilityLabel(project.stopAccessibilityLabel).accessibilityIdentifier("factoryProject.stop")
+                        .alert(confirm.title, isPresented: $confirmingStop) {
+                            Button(confirm.keepLabel, role: .cancel) {}
+                            Button(confirm.confirmLabel, role: .destructive) {
+                                changeProject("stop") { [id = item.id] in try await $0.stopFactory(projectID: id) }
+                            }
+                        } message: { Text(confirm.message) }
+                } else if let folder = item.resumableFolder {
+                    let resuming = session?.actions.isInFlight("resume:\(item.id)") == true
+                    Button(resuming ? "Resuming…" : "Resume") {
+                        changeProject("resume") { [goal = item.head.goal] in try await $0.resumeFactory(folder: folder, goal: goal) }
+                    }
+                    .disabled(resuming).accessibilityLabel(resuming ? "Resuming \(item.head.name)" : project?.resumeAccessibilityLabel ?? "Resume \(item.head.name)")
+                    .accessibilityIdentifier(project == nil ? "" : "factoryProject.resume")
+                }
+            }.buttonStyle(.bordered).tint(Theme.ink).controlSize(.large)
+            actionError.map { Text($0).font(.footnote).foregroundStyle(Theme.danger) }
+            project?.barNote.map { Text($0).font(.footnote).foregroundStyle(Theme.muted) }
             if item.coordinatorBlocked {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(item.stuckHeading).font(.subheadline.weight(.semibold))
@@ -1045,8 +1060,8 @@ private struct FactoryHeadCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(item.coordinatorBlocked ? Theme.accentSoft : Theme.card,
                     in: RoundedRectangle(cornerRadius: Theme.Radius.card))
-        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card)
-            .strokeBorder(item.coordinatorBlocked ? Theme.blocked : Theme.line))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card).strokeBorder(item.coordinatorBlocked ? Theme.blocked : Theme.line))
+        .onChange(of: actionError) { if let actionError { AccessibilityNotification.Announcement(actionError).post() } }
     }
 
     private var counts: AttributedString {
@@ -1058,29 +1073,41 @@ private struct FactoryHeadCard: View {
         return text
     }
 
-    private func resume(folder: String) {
-        guard let session = computer.flatMap({ model.session($0.id) }) ?? (computer == nil ? model.fleet.current : nil) else {
-            resumeError = "Check the computer's connection, then try again."
+    private func changeProject(_ action: String, operation: @escaping @Sendable (DaemonClient) async throws -> Void) {
+        guard let session else {
+            actionError = "Check the computer's connection, then try again."
             return
         }
-        resuming = true
-        resumeError = nil
+        actionError = nil
         Task {
-            defer { resuming = false }
             do {
-                try await session.actions.run("resume:\(item.id)", .init(timeout: 60, keyed: true), as: DaemonClient.self) { [goal = item.head.goal] in
-                    try await $0.resumeFactory(folder: folder, goal: goal)
-                }
+                try await session.actions.run("\(action):\(item.id)", .init(timeout: 60, keyed: true), as: DaemonClient.self, operation)
                 await session.refresh()
             } catch {
-                resumeError = FactoryAgentsList.resumeErrorMessage(error, computerName: session.name)
+                if action == "stop", FactoryProjectBoard.isProjectGone(error), let onGone { onGone(); return }
+                actionError = action == "stop"
+                    ? FactoryProjectBoard.stopErrorMessage(error, computerName: session.name, linkUsable: session.link.isUsable)
+                    : FactoryAgentsList.resumeErrorMessage(error, computerName: session.name, linkUsable: session.link.isUsable)
             }
+        }
+    }
+
+    private var summary: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            let layout = dynamicTypeSize.isAccessibilitySize ? AnyLayout(VStackLayout(alignment: .leading, spacing: 4)) : AnyLayout(HStackLayout(spacing: 6))
+            ViewThatFits(in: .horizontal) {
+                HStack { layout { name; kind }.fixedSize(); Spacer(minLength: 8); state.fixedSize() }
+                VStack(alignment: .leading, spacing: 4) { layout { name; kind }; state }
+            }
+            Text(item.head.goal).font(.subheadline)
+            Text(counts).font(.footnote).foregroundStyle(Theme.muted)
+            item.caption(computerName: computer?.name).map { Text($0).font(.caption.monospaced()).foregroundStyle(Theme.muted) }
         }
     }
 
     private var name: some View {
         HStack(spacing: 6) {
-            Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(tint)
+            Image(systemName: "point.3.connected.trianglepath.dotted").foregroundStyle(tint).accessibilityRepresentation { EmptyView() }
             Text(item.head.name).font(.body.weight(.semibold)).fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -1089,7 +1116,7 @@ private struct FactoryHeadCard: View {
 
     private var state: some View {
         HStack(spacing: 5) {
-            Circle().fill(tint).frame(width: 7, height: 7)
+            Circle().fill(tint).frame(width: 7, height: 7).accessibilityRepresentation { EmptyView() }
             Text(item.stateWord)
         }
         .font(.caption.weight(.semibold))

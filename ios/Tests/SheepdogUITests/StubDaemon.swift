@@ -46,6 +46,27 @@ final class StubDaemon {
     private var answers: [String] = []
     /// Terminal screen snapshots by pane id (`GET /api/agents/<pane>/screen`).
     var screens: [String: String] = [:]
+    /// Dynamic override for `/api/state`'s `factory` JSON array (when set).
+    var factoryState: String? {
+        get { lock.withLock { _factoryState } }
+        set { lock.withLock { _factoryState = newValue } }
+    }
+    private var _factoryState: String?
+    /// Graph JSON by project id (`GET /api/factory/projects/<id>/graph`).
+    var factoryGraphs: [String: String] = [:]
+    /// Optional HTTP error `(status, json)` for graph requests by project id.
+    var factoryGraphErrors: [String: (Int, String)] = [:]
+    /// Optional custom handlers for factory POST routes.
+    var sayHandler: ((String, String) -> (Int, String))?
+    var stopHandler: ((String) -> (Int, String))?
+    var startHandler: ((String) -> (Int, String))?
+    /// Enable SSE `/events` streaming so tests can push `factory.changed`.
+    var enableEvents = false
+    private var eventClients: [NWConnection] = []
+    private var nextEventID: UInt64 = 1_795_550_000_000_001
+    private var says: [(project: String, body: String)] = []
+    private var stops: [String] = []
+    private var starts: [String] = []
 
     /// How many requests started with `prefix` ("POST /api/turn").
     func requests(_ prefix: String) -> Int {
@@ -53,6 +74,22 @@ final class StubDaemon {
     }
 
     func answerBodies() -> [String] { lock.withLock { answers } }
+    func sayBodies() -> [(project: String, body: String)] { lock.withLock { says } }
+    func stopBodies() -> [String] { lock.withLock { stops } }
+    func startBodies() -> [String] { lock.withLock { starts } }
+
+    /// Pushes a `factory.changed` SSE event to connected `/events` clients.
+    func emitFactoryChanged(project: String) {
+        let (id, clients) = lock.withLock { () -> (UInt64, [NWConnection]) in
+            let id = nextEventID; nextEventID += 1
+            return (id, eventClients)
+        }
+        let payload = "id: \(id)\nevent: log\ndata: {\"id\":\(id),\"ts\":\"2026-11-26T00:00:00Z\",\"source\":\"factory\",\"type\":\"factory.changed\",\"payload\":{\"project\":\(Self.json(project))}}\n\n"
+        let data = Data(payload.utf8)
+        queue.async {
+            for client in clients { client.send(content: data, completion: .idempotent) }
+        }
+    }
 
     init(_ mode: Mode) throws {
         self.mode = mode
@@ -76,7 +113,13 @@ final class StubDaemon {
         return "127.0.0.1:\(port)"
     }
 
-    func stop() { listener.cancel() }
+    func stop() {
+        let clients = lock.withLock { () -> [NWConnection] in
+            let c = eventClients; eventClients = []; return c
+        }
+        for client in clients { client.cancel() }
+        listener.cancel()
+    }
 
     private func serve(_ connection: NWConnection) {
         connection.start(queue: queue)
@@ -110,21 +153,26 @@ final class StubDaemon {
         let words = request.split(separator: " ")
         let method = words.first.map(String.init) ?? "GET"
         let path = words.dropFirst().first.map(String.init) ?? "/"
+        let body = request.range(of: "\r\n\r\n").map { String(request[$0.upperBound...]) } ?? ""
         lock.withLock {
             seen.append("\(method) \(path)")
             if method == "POST", path.hasPrefix("/api/turn") { typed.append(Self.typedText(request)) }
-            if method == "POST", path.hasPrefix("/api/pending/answer"), let range = request.range(of: "\r\n\r\n") {
-                answers.append(String(request[range.upperBound...]))
-            }
+            if method == "POST", path.hasPrefix("/api/pending/answer") { answers.append(body) }
         }
-        let reply = response(for: path)
+        if method == "GET", path.hasPrefix("/events"), enableEvents {
+            let head = Data("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n\r\n: ok\n\n".utf8)
+            lock.withLock { eventClients.append(connection) }
+            connection.send(content: head, completion: .idempotent)
+            return
+        }
+        let reply = response(for: path, method: method, body: body)
         let delay = method == "POST" ? postDelay : 0
         queue.asyncAfter(deadline: .now() + delay) {
             connection.send(content: reply, completion: .contentProcessed { _ in connection.cancel() })
         }
     }
 
-    private func response(for path: String) -> Data {
+    private func response(for path: String, method: String = "GET", body: String = "") -> Data {
         switch mode {
         case .notSheepdog:
             return http(200, "text/html", "<html><body>Router login</body></html>")
@@ -149,9 +197,13 @@ final class StubDaemon {
             }
             if path.hasPrefix("/api/state") {
                 let voice = #""voice":{"mode":"off","status":"off","muted":false,"stalled":false,"client_connected":false}"#
-                let factoryPart = factory.map { #","factory":"# + $0 } ?? ""
+                let currentFactory = factoryState ?? factory
+                let factoryPart = currentFactory.map { #","factory":"# + $0 } ?? ""
                 let pendingPart = pendingAction.map { #","pending_action":"# + $0 } ?? ""
                 return http(200, "application/json", #"{"agents":"# + agents + #","questions":"# + questions + factoryPart + pendingPart + "," + voice + #","version":"v0.1.4"}"#)
+            }
+            if path.hasPrefix("/api/factory/projects") {
+                return factoryResponse(path: path, method: method, body: body, fallback: factory)
             }
             if path.hasPrefix("/api/pending/answer") {
                 return http(200, "application/json", #"{"ok":true,"spoken":"Answered."}"#)
@@ -218,8 +270,43 @@ final class StubDaemon {
         return text
     }
 
+    private func factoryResponse(path: String, method: String, body: String, fallback: String?) -> Data {
+        let clean = String(path.prefix { $0 != "?" })
+        if method == "GET", clean == "/api/factory/projects" {
+            return http(200, "application/json", #"{"protocol":1,"projects":"# + (factoryState ?? fallback ?? "[]") + "}")
+        }
+        if method == "POST", clean == "/api/factory/projects/stop" {
+            lock.withLock { stops.append(body) }
+            let (status, json) = stopHandler?(body) ?? (200, #"{"ok":true}"#)
+            return http(status, "application/json", json)
+        }
+        if method == "POST", clean == "/api/factory/projects/start" {
+            lock.withLock { starts.append(body) }
+            let (status, json) = startHandler?(body) ?? (200, #"{"ok":true}"#)
+            return http(status, "application/json", json)
+        }
+        let prefix = "/api/factory/projects/"
+        if clean.hasPrefix(prefix) {
+            let rest = clean.dropFirst(prefix.count)
+            let rawID = rest.prefix { $0 != "/" }
+            let id = String(rawID).removingPercentEncoding ?? String(rawID)
+            let suffix = String(rest.dropFirst(rawID.count))
+            if method == "GET", suffix == "/graph" {
+                if let err = lock.withLock({ factoryGraphErrors[id] }) { return http(err.0, "application/json", err.1) }
+                if let graph = lock.withLock({ factoryGraphs[id] }) { return http(200, "application/json", graph) }
+                return http(404, "application/json", #"{"error":"factory project not found"}"#)
+            }
+            if method == "POST", suffix == "/say" {
+                lock.withLock { says.append((id, body)) }
+                let (status, json) = sayHandler?(id, body) ?? (200, #"{"ok":true}"#)
+                return http(status, "application/json", json)
+            }
+        }
+        return http(404, "application/json", #"{"error":"not found"}"#)
+    }
+
     private func http(_ status: Int, _ type: String, _ body: String) -> Data {
-        let reason = [200: "OK", 401: "Unauthorized", 404: "Not Found"][status] ?? "Error"
+        let reason = [200: "OK", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 409: "Conflict", 503: "Service Unavailable"][status] ?? "Error"
         let bytes = Data(body.utf8)
         let head = "HTTP/1.1 \(status) \(reason)\r\nContent-Type: \(type)\r\nContent-Length: \(bytes.count)\r\nConnection: close\r\n\r\n"
         return Data(head.utf8) + bytes

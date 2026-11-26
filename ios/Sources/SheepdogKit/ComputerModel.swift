@@ -28,6 +28,7 @@ public final class ComputerModel {
     public private(set) var canTalkTo = true
     public private(set) var agents: [Agent] = []
     public private(set) var factoryHeads: [FactoryProjectHead] = []
+    public private(set) var factoryChanges: [String: Int] = [:]
     public private(set) var questions: [PendingAction] = []
     /// The voice's own question (`/api/state` `pending_action`).
     public private(set) var pendingAction: PendingAction?
@@ -471,6 +472,9 @@ public final class ComputerModel {
             setLiveUpdates(.open)
             runtime.send(.channelOpened(.events))
         case let .output(output):
+            if case let .event(event) = output, event.type == "factory.changed", let project = event.string("project") {
+                factoryChanges[project, default: 0] += 1
+            }
             if let onStreamOutput {
                 onStreamOutput(output)
             } else if case .event = output {
