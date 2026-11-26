@@ -46,20 +46,36 @@ final class StubDaemon {
     private var answers: [String] = []
     /// Terminal screen snapshots by pane id (`GET /api/agents/<pane>/screen`).
     var screens: [String: String] = [:]
-    /// Dynamic override for `/api/state`'s `factory` JSON array (when set).
+    /// Dynamic overrides for `/api/state` fields (when set).
     var factoryState: String? {
         get { lock.withLock { _factoryState } }
         set { lock.withLock { _factoryState = newValue } }
     }
     private var _factoryState: String?
+    var questionsState: String? {
+        get { lock.withLock { _questionsState } }
+        set { lock.withLock { _questionsState = newValue } }
+    }
+    private var _questionsState: String?
+    var pendingActionState: String? {
+        get { lock.withLock { _pendingActionState } }
+        set { lock.withLock { _pendingActionState = newValue } }
+    }
+    private var _pendingActionState: String?
     /// Graph JSON by project id (`GET /api/factory/projects/<id>/graph`).
     var factoryGraphs: [String: String] = [:]
     /// Optional HTTP error `(status, json)` for graph requests by project id.
     var factoryGraphErrors: [String: (Int, String)] = [:]
-    /// Optional custom handlers for factory POST routes.
+    /// Settings JSON by project id (`""` for `GET /api/factory/settings`).
+    var factorySettings: [String: String] = [:]
+    var factorySettingsErrors: [String: (Int, String)] = [:]
+    var factoryAsks: String = #"{"protocol":1,"asks":[]}"#
+    /// Optional custom handlers for factory and answer POST routes.
     var sayHandler: ((String, String) -> (Int, String))?
     var stopHandler: ((String) -> (Int, String))?
     var startHandler: ((String) -> (Int, String))?
+    var proposeSettingHandler: ((String, String) -> (Int, String))?
+    var answerHandler: ((String) -> (Int, String))?
     /// Enable SSE `/events` streaming so tests can push `factory.changed`.
     var enableEvents = false
     private var eventClients: [NWConnection] = []
@@ -67,6 +83,7 @@ final class StubDaemon {
     private var says: [(project: String, body: String)] = []
     private var stops: [String] = []
     private var starts: [String] = []
+    private var proposals: [(project: String, body: String)] = []
 
     /// How many requests started with `prefix` ("POST /api/turn").
     func requests(_ prefix: String) -> Int {
@@ -77,6 +94,7 @@ final class StubDaemon {
     func sayBodies() -> [(project: String, body: String)] { lock.withLock { says } }
     func stopBodies() -> [String] { lock.withLock { stops } }
     func startBodies() -> [String] { lock.withLock { starts } }
+    func proposeBodies() -> [(project: String, body: String)] { lock.withLock { proposals } }
 
     /// Pushes a `factory.changed` SSE event to connected `/events` clients.
     func emitFactoryChanged(project: String) {
@@ -198,15 +216,18 @@ final class StubDaemon {
             if path.hasPrefix("/api/state") {
                 let voice = #""voice":{"mode":"off","status":"off","muted":false,"stalled":false,"client_connected":false}"#
                 let currentFactory = factoryState ?? factory
+                let currentQuestions = questionsState ?? questions
+                let currentPending = pendingActionState ?? pendingAction
                 let factoryPart = currentFactory.map { #","factory":"# + $0 } ?? ""
-                let pendingPart = pendingAction.map { #","pending_action":"# + $0 } ?? ""
-                return http(200, "application/json", #"{"agents":"# + agents + #","questions":"# + questions + factoryPart + pendingPart + "," + voice + #","version":"v0.1.4"}"#)
+                let pendingPart = currentPending.map { #","pending_action":"# + $0 } ?? ""
+                return http(200, "application/json", #"{"agents":"# + agents + #","questions":"# + currentQuestions + factoryPart + pendingPart + "," + voice + #","version":"v0.1.4"}"#)
             }
-            if path.hasPrefix("/api/factory/projects") {
+            if path.hasPrefix("/api/factory/") {
                 return factoryResponse(path: path, method: method, body: body, fallback: factory)
             }
             if path.hasPrefix("/api/pending/answer") {
-                return http(200, "application/json", #"{"ok":true,"spoken":"Answered."}"#)
+                let (status, json) = answerHandler?(body) ?? (200, #"{"ok":true,"spoken":"Answered."}"#)
+                return http(status, "application/json", json)
             }
             if path.hasPrefix("/api/turn") {
                 let turn = lock.withLock { typed.count }
@@ -275,6 +296,14 @@ final class StubDaemon {
         if method == "GET", clean == "/api/factory/projects" {
             return http(200, "application/json", #"{"protocol":1,"projects":"# + (factoryState ?? fallback ?? "[]") + "}")
         }
+        if method == "GET", clean == "/api/factory/asks" {
+            return http(200, "application/json", lock.withLock { factoryAsks })
+        }
+        if method == "GET", clean == "/api/factory/settings" {
+            if let err = lock.withLock({ factorySettingsErrors[""] }) { return http(err.0, "application/json", err.1) }
+            if let rows = lock.withLock({ factorySettings[""] }) { return http(200, "application/json", rows) }
+            return http(404, "application/json", #"{"error":"not found"}"#)
+        }
         if method == "POST", clean == "/api/factory/projects/stop" {
             lock.withLock { stops.append(body) }
             let (status, json) = stopHandler?(body) ?? (200, #"{"ok":true}"#)
@@ -295,6 +324,16 @@ final class StubDaemon {
                 if let err = lock.withLock({ factoryGraphErrors[id] }) { return http(err.0, "application/json", err.1) }
                 if let graph = lock.withLock({ factoryGraphs[id] }) { return http(200, "application/json", graph) }
                 return http(404, "application/json", #"{"error":"factory project not found"}"#)
+            }
+            if method == "GET", suffix == "/settings" {
+                if let err = lock.withLock({ factorySettingsErrors[id] }) { return http(err.0, "application/json", err.1) }
+                if let rows = lock.withLock({ factorySettings[id] }) { return http(200, "application/json", rows) }
+                return http(404, "application/json", #"{"error":"factory project not found"}"#)
+            }
+            if method == "POST", suffix == "/settings" {
+                lock.withLock { proposals.append((id, body)) }
+                let (status, json) = proposeSettingHandler?(id, body) ?? (404, #"{"error":"factory project not found"}"#)
+                return http(status, "application/json", json)
             }
             if method == "POST", suffix == "/say" {
                 lock.withLock { says.append((id, body)) }
