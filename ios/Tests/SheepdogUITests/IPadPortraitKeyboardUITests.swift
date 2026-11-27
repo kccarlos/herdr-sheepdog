@@ -76,7 +76,7 @@ final class IPadPortraitKeyboardUITests: XCTestCase {
 
     func testClosingTypingBoxRepeatedlyInPortrait() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogOpenDemo"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogDemoPaused", "-sheepdogOpenDemo"]
         app.launch()
         XCTAssertTrue(element(app, "demo.header").waitForExistence(timeout: 20))
         XCTAssertTrue(element(app, "sidebar.show").waitForExistence(timeout: 10), "the sidebar is hidden in portrait")

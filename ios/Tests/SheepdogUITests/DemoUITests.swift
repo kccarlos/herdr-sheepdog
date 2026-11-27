@@ -188,7 +188,7 @@ final class DemoUITests: XCTestCase {
 
     func testClosingTypingBoxRepeatedly() throws {
         let app = XCUIApplication()
-        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogOpenDemo"]
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogDemoPaused", "-sheepdogOpenDemo"]
         app.launch()
         XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
         stressCloseTypingBox(app)
