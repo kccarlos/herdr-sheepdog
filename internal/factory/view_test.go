@@ -2635,3 +2635,178 @@ func TestLogViewAndEngineLogLinesObservationsAndTaskFilter(t *testing.T) {
 		t.Errorf("LogLines(missing) err = %v, want ErrProjectNotFound", err)
 	}
 }
+
+func TestProjectHeadAndViewGoalUndelivered(t *testing.T) {
+	t0 := time.Date(2026, 11, 27, 12, 0, 0, 0, time.UTC)
+	doneTask := flow.Task{ID: "T1", Title: "done", Done: &flow.Merged{MergedCommit: "aaa"}}
+	splitChild := flow.Task{ID: "T1a", Title: "split", SplitFrom: "T1"}
+	newTask := flow.Task{ID: "T2", Title: "new"}
+
+	cases := []struct {
+		name string
+		st   flow.State
+		want bool
+	}{
+		{
+			name: "normal_running",
+			st:   flow.State{Project: flow.Project{ID: "p", Started: true, Goal: "Goal 1", GoalGen: 1}, Tasks: []flow.Task{doneTask}},
+			want: false,
+		},
+		{
+			name: "pending_wake_held",
+			st: flow.State{
+				Project: flow.Project{
+					ID: "p", Started: true, Goal: "Goal 2", NewGoal: true, NewGoalTasks: 1, GoalGen: 2,
+					Wakes: []flow.Wake{{Key: "new_goal", GoalGen: 2, At: t0}},
+				},
+				Tasks: []flow.Task{doneTask},
+			},
+			want: false,
+		},
+		{
+			name: "pending_wake_in_flight",
+			st: flow.State{
+				Project: flow.Project{
+					ID: "p", Started: true, Goal: "Goal 2", NewGoal: true, NewGoalTasks: 1, GoalGen: 2,
+					CoordWakesInFlight: []flow.Wake{{Key: "new_goal", GoalGen: 2, At: t0}},
+				},
+				Tasks: []flow.Task{doneTask},
+			},
+			want: false,
+		},
+		{
+			name: "exhausted_empty_wakes",
+			st: flow.State{
+				Project: flow.Project{ID: "p", Started: true, Goal: "Goal 2", NewGoal: true, NewGoalTasks: 1, GoalGen: 2, GoalCmdGen: 1},
+				Tasks:   []flow.Task{doneTask},
+			},
+			want: true,
+		},
+		{
+			name: "exhausted_only_unrelated_or_stale_wake_and_split_child",
+			st: flow.State{
+				Project: flow.Project{
+					ID: "p", Started: true, Goal: "Goal 2", NewGoal: true, NewGoalTasks: 1, GoalGen: 2,
+					Wakes: []flow.Wake{{Key: "new_goal", GoalGen: 1, At: t0}, {Task: "T1", Key: "worker_note", At: t0}},
+				},
+				Tasks: []flow.Task{doneTask, splitChild},
+			},
+			want: true,
+		},
+		{
+			name: "settled_by_current_gen_command",
+			st: flow.State{
+				Project: flow.Project{ID: "p", Started: true, Goal: "Goal 2", NewGoal: true, NewGoalTasks: 1, GoalGen: 2, GoalCmdGen: 2},
+				Tasks:   []flow.Task{doneTask},
+			},
+			want: false,
+		},
+		{
+			name: "settled_by_new_non_split_task",
+			st: flow.State{
+				Project: flow.Project{ID: "p", Started: true, Goal: "Goal 2", NewGoal: true, NewGoalTasks: 1, GoalGen: 2},
+				Tasks:   []flow.Task{doneTask, newTask},
+			},
+			want: false,
+		},
+		{
+			name: "stopped_project",
+			st: flow.State{
+				Project: flow.Project{ID: "p", Started: false, Goal: "Goal 2", NewGoal: true, NewGoalTasks: 1, GoalGen: 2},
+				Tasks:   []flow.Task{doneTask},
+			},
+			want: false,
+		},
+		{
+			name: "finished_project",
+			st: flow.State{
+				Project: flow.Project{ID: "p", Started: true, Finished: true, Goal: "Goal 2", NewGoal: true, NewGoalTasks: 1, GoalGen: 2},
+				Tasks:   []flow.Task{doneTask},
+			},
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			head := projectHeadOf(tc.st)
+			view := ProjectsView([]flow.State{tc.st})[0]
+			if head.GoalUndelivered != tc.want || view.GoalUndelivered != tc.want {
+				t.Fatalf("GoalUndelivered = (head=%v, view=%v), want %v", head.GoalUndelivered, view.GoalUndelivered, tc.want)
+			}
+			for label, val := range map[string]any{"head": head, "view": view} {
+				raw, err := json.Marshal(val)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var obj map[string]any
+				if err := json.Unmarshal(raw, &obj); err != nil {
+					t.Fatal(err)
+				}
+				got, exists := obj["goal_undelivered"]
+				if tc.want {
+					if !exists || got != true {
+						t.Errorf("%s JSON goal_undelivered = (%v, exists=%v), want (true, true): %s", label, got, exists, raw)
+					}
+				} else if exists {
+					t.Errorf("%s JSON unexpectedly serialized goal_undelivered = %v: %s", label, got, raw)
+				}
+			}
+		})
+	}
+
+	t.Run("s9d_exhausted_then_same_goal_start_and_settle", func(t *testing.T) {
+		t.Parallel()
+		w := newRestartWorld(t, "Goal 1: initial")
+		w.pass() // J7 starts coord1
+		coord1 := w.state().Project.RunID
+		w.applyPlan()
+		if err := w.eng.Report(w.coordTok, "task", json.RawMessage(`{"action":"drop","task":"T1","why":"done elsewhere"}`)); err != nil {
+			t.Fatalf("task drop T1: %v", err)
+		}
+		w.now = w.now.Add(5 * time.Second)
+		w.pass()
+
+		const goal2 = "Goal 2: add keyboard shortcuts"
+		if err := w.eng.Start(w.repo, goal2, 2); err != nil {
+			t.Fatalf("Start(Goal 2): %v", err)
+		}
+		if w.eng.ProjectHeads()[0].GoalUndelivered || w.eng.Projects()[0].GoalUndelivered {
+			t.Fatal("GoalUndelivered must be false while new_goal wake is queued")
+		}
+		w.waitIdle(coord1) // J12 delivers Goal 2 (#1)
+		if w.eng.ProjectHeads()[0].GoalUndelivered || w.eng.Projects()[0].GoalUndelivered {
+			t.Fatal("GoalUndelivered must be false while new_goal wake is in flight")
+		}
+		for range 2 {
+			sent := lastSendTo(t, w.srv.Requests(), coord1)
+			w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+			w.srv.SetScreen(coord1, formatPromptEcho("❯", sent)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+			w.waitIdle(coord1)
+		}
+		w.now = w.now.Add(15 * time.Second)
+		w.pass()
+
+		if !w.eng.ProjectHeads()[0].GoalUndelivered || !w.eng.Projects()[0].GoalUndelivered {
+			t.Fatalf("after J12 exhaustion: GoalUndelivered = (head=%v, view=%v), want (true, true)",
+				w.eng.ProjectHeads()[0].GoalUndelivered, w.eng.Projects()[0].GoalUndelivered)
+		}
+		logs, err := w.eng.LogLines(w.id, DefaultLogLimit, "", false)
+		if err != nil {
+			t.Fatalf("LogLines: %v", err)
+		}
+		if !slices.ContainsFunc(logs, func(e LogEntry) bool {
+			return e.By == "engine" && strings.Contains(e.Decision, "New goal → Give it this goal")
+		}) {
+			t.Errorf("exhausted log entry should name New goal → Give it this goal: %+v", logs)
+		}
+
+		// Recovery: Start with the same goal immediately clears GoalUndelivered.
+		if err := w.eng.Start(w.repo, goal2, 2); err != nil {
+			t.Fatalf("Start(same Goal 2): %v", err)
+		}
+		if w.eng.ProjectHeads()[0].GoalUndelivered || w.eng.Projects()[0].GoalUndelivered {
+			t.Fatal("GoalUndelivered must clear once same-goal Start re-queues the wake")
+		}
+	})
+}

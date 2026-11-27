@@ -405,6 +405,41 @@ final class FactoryProjectBoardUITests: XCTestCase {
         XCTAssertTrue(waitUntil(5) { !goneHead.exists }, "projectGone must refresh the computer so the deleted project head disappears")
     }
 
+    func testUndeliveredGoalNoticePrefillsNewGoalAndClearsWhenSettled() throws {
+        let undelivered = #"[{"id":"proj-1","name":"notes","goal":"Add keyboard shortcuts","state":"running","counts":{"done":1},"folder":"~/code/notes","coordinator_pane":"coord-notes-1","goal_undelivered":true}]"#
+        let settled = #"[{"id":"proj-1","name":"notes","goal":"Add keyboard shortcuts","state":"running","counts":{"done":1},"folder":"~/code/notes","coordinator_pane":"coord-notes-1"}]"#
+        let doneGraph = #"{"protocol":1,"project":"proj-1","folder":"~/code/notes","tasks":[{"ref":"T1","title":"feat: search","stage":"done","after":[],"dependents":[],"layer":0,"rounds":0,"steps":[{"name":"planned","state":"done"},{"name":"merged","state":"done"}]}]}"#
+
+        let stub = try StubDaemon(.computer(name: "Work Mac", agents: "[]", questions: "[]", factory: undelivered))
+        stub.factoryGraphs["proj-1"] = doneGraph
+        stub.startHandler = { [weak stub] _ in
+            stub?.factoryState = settled
+            return (200, #"{"ok":true,"device_id":"dev-1"}"#)
+        }
+        let host = try stub.start(); defer { stub.stop() }
+
+        let app = launch(host: host)
+        showAgentsPane(app)
+        tapWhenTappable(scrollToVisible(app, app.descendants(matching: .any)["flock.factory.proj-1"].firstMatch), "notes head")
+        XCTAssertTrue(app.descendants(matching: .any)["factoryProject.board"].waitForExistence(timeout: 15))
+
+        let notice = app.staticTexts["factoryProject.goalUndelivered"].firstMatch
+        XCTAssertTrue(notice.waitForExistence(timeout: 10))
+        XCTAssertEqual(notice.label, "The coordinator did not get the new goal. Give it the goal again.")
+
+        tapWhenTappable(app.buttons["factoryProject.newGoal"].firstMatch, "New goal")
+        XCTAssertTrue(app.descendants(matching: .any)["factoryProject.goalSheet"].waitForExistence(timeout: 10))
+        let field = app.descendants(matching: .any)["factoryProject.goal.field"].firstMatch
+        XCTAssertEqual(field.value as? String, "Add keyboard shortcuts", "New goal must prefill the undelivered goal")
+        let submit = app.buttons["factoryProject.goal.submit"].firstMatch
+        XCTAssertEqual(submit.label, "Give it this goal")
+        XCTAssertTrue(submit.isEnabled, "prefilled undelivered goal must enable submit immediately")
+
+        tapWhenTappable(submit, "Give it this goal")
+        XCTAssertTrue(waitUntil(10) { !notice.exists }, "undelivered notice must disappear once settled")
+        XCTAssertTrue(stub.startBodies().contains { $0.contains("~/code/notes") && $0.contains("Add keyboard shortcuts") })
+    }
+
     private func waitUntil(_ timeout: TimeInterval = 5, _ check: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
