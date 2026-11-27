@@ -804,7 +804,7 @@ func (e *Engine) observeCoordLocked(ctx context.Context, id string, s *flow.Stat
 		}
 		_, err = e.advanceRunLocked(ctx, id, "", s, "", flow.RoleCoordinator, "claude", &p.Run)
 	}
-	if p.NewGoal && len(s.Tasks) > p.NewGoalTasks && slices.ContainsFunc(s.Tasks[p.NewGoalTasks:], func(t flow.Task) bool { return t.SplitFrom == "" }) {
+	if flow.NewGoalSettled(*p, s.Tasks, err == nil) {
 		p.NewGoal, p.NewGoalTasks, dirty = false, 0, true
 	}
 	if recoverEndedCoordWakes(p) {
@@ -1883,6 +1883,9 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 		return
 	}
 	if len(d.Asked) == 0 {
+		if flow.Ended(task) {
+			e.cancelEndedTaskAsksLocked(id, s, ti, now)
+		}
 		if holdWhy != "" && (rowChanged || holdChanged) {
 			e.commitLogLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: facts, Rule: r.ID, Decision: "waiting", Why: holdWhy})
 		} else if rowChanged || holdChanged {

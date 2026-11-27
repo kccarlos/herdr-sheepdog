@@ -36,6 +36,21 @@ func ProjectFinished(p Project, tasks []Task) bool {
 	return AllTasksEnded(tasks) && !p.NewGoal && (p.Finished || len(p.Wakes) == 0 && len(p.CoordWakesInFlight) == 0)
 }
 
+// NewGoalSettled reports whether a pending NewGoal has been handled: either a
+// non-split task was added since NewGoal was set, or (when coordObserved is
+// true) every task has ended and the live coordinator finished its turn cleanly
+// with no wakes held or in flight (J4, design.md section 6).
+func NewGoalSettled(p Project, tasks []Task, coordObserved bool) bool {
+	if !p.NewGoal {
+		return false
+	}
+	if len(tasks) > p.NewGoalTasks && slices.ContainsFunc(tasks[p.NewGoalTasks:], func(t Task) bool { return t.SplitFrom == "" }) {
+		return true
+	}
+	return coordObserved && AllTasksEnded(tasks) && len(p.Wakes) == 0 && len(p.CoordWakesInFlight) == 0 &&
+		p.Run != nil && p.Run.State == PhaseIdle && p.Run.Turn > 0 && p.Run.Status != "error"
+}
+
 // IsCoordR29 reports whether r ended as stuck at a dialog via R29 (J10).
 func IsCoordR29(r *RunRecord) bool {
 	return r != nil && r.State == PhaseEnded && r.Result == EndStuck && !r.BlockedSince.IsZero()

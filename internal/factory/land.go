@@ -178,8 +178,8 @@ func (e *Engine) execCleanup(ctx context.Context, id string, s *flow.State, ti i
 	now := e.now()
 	stopTaskRuns(t, s.Settings, now)
 	steps := []string{"stopped the task's runs"}
-	if n := cancelTaskDecisionAsks(s, t.ID, now); n > 0 {
-		steps = append(steps, fmt.Sprintf("cancelled %d decision ask(s)", n))
+	if n := cancelTaskAsks(s, t.ID, now); n > 0 {
+		steps = append(steps, fmt.Sprintf("cancelled %d task ask(s)", n))
 	}
 	if len(t.Attempts) == 0 {
 		return strings.Join(steps, "; "), false, nil
