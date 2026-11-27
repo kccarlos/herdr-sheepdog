@@ -36,19 +36,25 @@ func ProjectFinished(p Project, tasks []Task) bool {
 	return AllTasksEnded(tasks) && !p.NewGoal && (p.Finished || len(p.Wakes) == 0 && len(p.CoordWakesInFlight) == 0)
 }
 
-// NewGoalSettled reports whether a pending NewGoal has been handled: either a
-// non-split task was added since NewGoal was set, or (when coordObserved is
-// true) every task has ended and the live coordinator finished its turn cleanly
-// with no wakes held or in flight (J4, design.md section 6).
-func NewGoalSettled(p Project, tasks []Task, coordObserved bool) bool {
+// HasNewGoalWake reports whether wakes contains the project-level new_goal wake.
+func HasNewGoalWake(wakes []Wake) bool {
+	return slices.ContainsFunc(wakes, func(w Wake) bool { return w.Task == "" && w.Key == "new_goal" })
+}
+
+// NewGoalSettled reports whether a pending NewGoal has positive handling
+// evidence: a non-split task added after NewGoalTasks, a confirmed new_goal
+// wake batch, or a confirmed J7 startup handoff turn (J4/J12, design.md section 6).
+func NewGoalSettled(p Project, tasks []Task, confirmedWake, confirmedStartup bool) bool {
 	if !p.NewGoal {
 		return false
 	}
 	if len(tasks) > p.NewGoalTasks && slices.ContainsFunc(tasks[p.NewGoalTasks:], func(t Task) bool { return t.SplitFrom == "" }) {
 		return true
 	}
-	return coordObserved && AllTasksEnded(tasks) && len(p.Wakes) == 0 && len(p.CoordWakesInFlight) == 0 &&
-		p.Run != nil && p.Run.State == PhaseIdle && p.Run.Turn > 0 && p.Run.Status != "error"
+	if HasNewGoalWake(p.Wakes) || p.Run == nil || p.Run.State != PhaseIdle || p.Run.Turn == 0 || p.Run.Status == "error" {
+		return false
+	}
+	return confirmedWake || (p.NewGoalStartup && confirmedStartup && !HasNewGoalWake(p.CoordWakesInFlight))
 }
 
 // IsCoordR29 reports whether r ended as stuck at a dialog via R29 (J10).

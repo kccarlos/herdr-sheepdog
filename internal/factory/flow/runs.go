@@ -26,6 +26,9 @@ const EvSession = "session"
 // CoordWakePromptPrefix identifies the submitted prompt for a J12 batch.
 const CoordWakePromptPrefix = "Wake: "
 
+// CoordHandoffPromptPrefix identifies the submitted prompt for a J7 handoff.
+const CoordHandoffPromptPrefix = "Handoff from the store"
+
 // WakeEvidenceUnavailable marks a blank or failed transcript read.
 const WakeEvidenceUnavailable = "wake evidence screen unavailable"
 
@@ -74,7 +77,7 @@ type RunEvent struct {
 	StatusAt                                                                         time.Time
 	SessionID                                                                        string
 	LimitLine, Tail                                                                  string
-	Inferred, Urgent, HandoffUsed, WakeConfirmed                                     bool
+	Inferred, Urgent, HandoffUsed, WakeConfirmed, HandoffConfirmed                   bool
 	WakeSeq                                                                          int64
 	WakeReason                                                                       string
 }

@@ -279,7 +279,11 @@ func (e *Engine) reconcileCoordWakesLocked(id string, s *flow.State, tick flow.R
 			return true
 		}
 	case p.CoordWakeSeq != 0 && tick.WakeSeq == p.CoordWakeSeq && tick.WakeConfirmed:
+		newGoalConfirmed := flow.HasNewGoalWake(p.CoordWakesInFlight)
 		clearCoordBatch(p)
+		if flow.NewGoalSettled(*p, s.Tasks, newGoalConfirmed, false) {
+			p.NewGoal, p.NewGoalTasks, p.NewGoalStartup = false, 0, false
+		}
 		e.saveLocked(id, *s)
 		return true
 	case p.CoordWakeSeq == 0:

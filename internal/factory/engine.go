@@ -296,7 +296,7 @@ func (e *Engine) StartSet(folder, goal string, set map[string]string) error {
 		_, _ = e.observeCoordLocked(ctx, id, &s)
 	}
 	if s.Project.Goal != "" && goal != s.Project.Goal && len(s.Tasks) > 0 {
-		s.Project.NewGoal, s.Project.NewGoalTasks = true, len(s.Tasks)
+		s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.NewGoalStartup = true, len(s.Tasks), false
 		if s.Project.RunID != "" || (s.Project.Run != nil && s.Project.Run.State != flow.PhaseEnded) {
 			holdProjectWake(&s, "new_goal", "owner gave a new goal", "goal: "+goal, e.now())
 		}
@@ -451,7 +451,7 @@ func (e *Engine) Stop(project string) error {
 		recoverEndedCoordWakes(&s.Project)
 	}
 	acts := map[bool][]flow.Act{true: slices.DeleteFunc(s.Project.Acts, func(a flow.Act) bool { return a.Key == flow.AskStopCoordinator })}[s.Project.Finished]
-	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.Invariants, s.Project.WaitKey, s.Project.CoordSilentStops = "", "", nil, false, acts, nil, false, 0, nil, "", 0
+	s.Project.RunID, s.Project.RunTokenHash, s.Project.Run, s.Project.Started, s.Project.Acts, s.Project.Base, s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.NewGoalStartup, s.Project.Invariants, s.Project.WaitKey, s.Project.CoordSilentStops = "", "", nil, false, acts, nil, false, 0, false, nil, "", 0
 	clearCoordTrack(&s.Project, true, true)
 	delete(e.lastPass, id)
 	delete(e.lastSweep, id)
@@ -804,14 +804,14 @@ func (e *Engine) observeCoordLocked(ctx context.Context, id string, s *flow.Stat
 		}
 		_, err = e.advanceRunLocked(ctx, id, "", s, "", flow.RoleCoordinator, "claude", &p.Run)
 	}
-	if flow.NewGoalSettled(*p, s.Tasks, err == nil) {
-		p.NewGoal, p.NewGoalTasks, dirty = false, 0, true
+	if flow.NewGoalSettled(*p, s.Tasks, false, false) {
+		p.NewGoal, p.NewGoalTasks, p.NewGoalStartup, dirty = false, 0, false, true
 	}
 	if recoverEndedCoordWakes(p) {
 		dirty = true
 	}
-	if r := p.Run; r != nil && r.State == flow.PhaseEnded && (p.RunID != "" || p.RunTokenHash != "" || !p.CoordWakeAt.IsZero() || !p.CoordErrorAt.IsZero() || (!flow.IsCoordR29(r) && p.CoordDialogStucks != 0) || (r.Result != flow.EndStopped && p.CoordSilentStops != 0)) {
-		p.RunID, p.RunTokenHash, p.CoordSilentStops, dirty = "", "", map[bool]int{true: p.CoordSilentStops}[r.Result == flow.EndStopped], true
+	if r := p.Run; r != nil && r.State == flow.PhaseEnded && (p.RunID != "" || p.RunTokenHash != "" || p.NewGoalStartup || !p.CoordWakeAt.IsZero() || !p.CoordErrorAt.IsZero() || (!flow.IsCoordR29(r) && p.CoordDialogStucks != 0) || (r.Result != flow.EndStopped && p.CoordSilentStops != 0)) {
+		p.RunID, p.RunTokenHash, p.NewGoalStartup, p.CoordSilentStops, dirty = "", "", false, map[bool]int{true: p.CoordSilentStops}[r.Result == flow.EndStopped], true
 		clearCoordTrack(p, !flow.IsCoordR29(r), false)
 	} else if r != nil && r.State != flow.PhaseEnded && !p.CoordWakeAt.IsZero() &&
 		(len(p.CoordWakesInFlight) == 0 && r.Turn > p.CoordWakeTurn || r.Turn <= p.CoordWakeTurn && r.CLI != world.CodexCLI && r.Status == "working") {
@@ -911,7 +911,7 @@ func (e *Engine) passProjectRulesLocked(ctx context.Context, id string, s *flow.
 		}
 		stopRec(&s.Project.Run, flow.RoleCoordinator, s.Settings, now)
 		recoverEndedCoordWakes(&s.Project)
-		s.Project.RunID, s.Project.RunTokenHash = "", ""
+		s.Project.RunID, s.Project.RunTokenHash, s.Project.NewGoalStartup = "", "", false
 		clearCoordTrack(&s.Project, true, false)
 		if s.Project.CoordSilentStops = map[bool]int{true: s.Project.CoordSilentStops + 1}[r.ID == "J9"]; s.Project.CoordSilentStops >= 2 {
 			e.reconcileAlertLocked(id, s, flow.AlertAgentsDown+"@j9", true, flow.Alert{Kind: flow.AlertAgentsDown, Cause: d.Why, At: now, Rule: "J9", Scope: "j9_silent"}, "alert", "")
@@ -1330,6 +1330,7 @@ func (e *Engine) startCoordLocked(ctx context.Context, id string, s *flow.State,
 		s.Project.Acts, line.Why = append(s.Project.Acts, flow.Act{Key: flow.AskStartCoordinator, Result: "failed", At: now}), err.Error()
 	} else {
 		s.Project.RunID, s.Project.Acts = termID, append(s.Project.Acts, flow.Act{Key: flow.AskStartCoordinator, Result: "done", At: now})
+		s.Project.NewGoalStartup = s.Project.NewGoal && !flow.HasNewGoalWake(s.Project.Wakes) && !flow.HasNewGoalWake(s.Project.CoordWakesInFlight)
 		clearCoordTrack(&s.Project, false, true)
 		line.Asked, line.Decision, line.Why = []string{"coordinator:" + termID}, "started coordinator "+in.CLI+"/"+in.Model, why
 	}
@@ -1435,7 +1436,7 @@ func (e *Engine) advanceRunLocked(ctx context.Context, id, taskID string, s *flo
 	if (*recp).State == flow.PhaseEnded || e.HC == nil {
 		return (*recp).TaskRun(), nil
 	}
-	evs, err := world.ObserveRun(ctx, e.HC, **recp, world.RunObservation{CodexHome: e.Paths.CodexHome(), PendingWake: role == flow.RoleCoordinator && len(s.Project.CoordWakesInFlight) > 0})
+	evs, err := world.ObserveRun(ctx, e.HC, **recp, world.RunObservation{CodexHome: e.Paths.CodexHome(), PendingWake: role == flow.RoleCoordinator && (len(s.Project.CoordWakesInFlight) > 0 || s.Project.NewGoalStartup)})
 	if err != nil {
 		return flow.Run{}, err
 	}
@@ -1552,8 +1553,16 @@ events:
 			break // Observe the screen again before acting on its timeout.
 		}
 	}
-	if role == flow.RoleCoordinator && len(evs) > 0 && e.reconcileCoordWakesLocked(id, s, evs[len(evs)-1], now) {
-		return (*recp).TaskRun(), nil
+	if role == flow.RoleCoordinator && len(evs) > 0 {
+		tick := evs[len(evs)-1]
+		if e.reconcileCoordWakesLocked(id, s, tick, now) {
+			return (*recp).TaskRun(), nil
+		}
+		if tick.Kind == flow.EvTick && flow.NewGoalSettled(s.Project, s.Tasks, false, tick.HandoffConfirmed) {
+			s.Project.NewGoal, s.Project.NewGoalTasks, s.Project.NewGoalStartup = false, 0, false
+			e.saveLocked(id, *s)
+			return (*recp).TaskRun(), nil
+		}
 	}
 	if !reflect.DeepEqual(before, **recp) {
 		e.saveLocked(id, *s)
@@ -1847,6 +1856,9 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 	if !flow.Ended(task) && !e.cancelStaleGateAsksLocked(id, s, ti, now) {
 		return
 	}
+	if flow.Ended(task) && !e.cancelEndedTaskAsksLocked(id, s, ti, now) {
+		return
+	}
 	r, d := flow.FirstMatch(flow.TaskRows, flow.In{Task: task, Settings: s.Settings, Facts: facts, Asks: s.Asks, Now: now})
 	e.reconcileCIStalledLocked(id, s, task, r.ID, facts, now)
 	rowChanged := s.Tasks[ti].LastRow != r.ID
@@ -1883,9 +1895,6 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 		return
 	}
 	if len(d.Asked) == 0 {
-		if flow.Ended(task) {
-			e.cancelEndedTaskAsksLocked(id, s, ti, now)
-		}
 		if holdWhy != "" && (rowChanged || holdChanged) {
 			e.commitLogLocked(id, s, LogLine{By: "engine", Task: s.Tasks[ti].ID, Facts: facts, Rule: r.ID, Decision: "waiting", Why: holdWhy})
 		} else if rowChanged || holdChanged {

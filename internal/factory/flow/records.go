@@ -187,6 +187,7 @@ type Project struct {
 	Base               *BaseState        `json:"base,omitempty"`
 	NewGoal            bool              `json:"new_goal,omitempty"`            // J4: owner gave a new goal after a plan existed
 	NewGoalTasks       int               `json:"new_goal_tasks,omitempty"`      // J4: task count when NewGoal was set
+	NewGoalStartup     bool              `json:"new_goal_startup,omitempty"`    // J4/J7: current coordinator was launched with this NewGoal in its startup handoff
 	CoordDialogStucks  int               `json:"coord_dialog_stucks,omitempty"` // J10: consecutive R29 dialog-stuck ends
 	CoordSilentStops   int               `json:"coord_silent_stops,omitempty"`  // J9: consecutive silent coordinator stops
 	CoordErrorAt       time.Time         `json:"coord_error_at,omitempty"`      // J8: when coordinator was last told to go on
