@@ -199,4 +199,58 @@ final class FactorySettingsTests: XCTestCase {
             }
         }
     }
+
+    func testAnswerErrorKeptNoticeAndParseFix() throws {
+        let row = try DaemonClient.decoder.decode(
+            FactorySettingRow.self,
+            from: Data(#"{"name":"max_running","label":"max running","value":"3","default":"3","min":1,"max":20}"#.utf8)
+        )
+        XCTAssertEqual(row.keptNotice(was: "3"), "Kept at 3. Nothing changed.")
+        XCTAssertEqual(row.keptNotice(was: "  "), "Kept at not set. Nothing changed.")
+        XCTAssertEqual(row.keptNotice(was: nil), "Kept at not set. Nothing changed.")
+
+        XCTAssertEqual(
+            FactorySettingRow.answerError(
+                "The daemon refused: out_of_range: max running 4 does not fit",
+                computerName: "Work Mac"
+            ),
+            "Not saved: another setting changed after you asked. max running 4 does not fit"
+        )
+        let pairMsg = FactorySettingRow.answerError(
+            "The daemon refused: proof_required: owner asks require a paired device session",
+            computerName: "Work Mac"
+        )
+        XCTAssertTrue(pairMsg.contains("Not saved: Work Mac no longer knows this phone"))
+        XCTAssertFalse(pairMsg.contains("proof_required"))
+        XCTAssertEqual(
+            FactorySettingRow.answerError(
+                "The daemon refused: proof_rejected: AnswerProof is unknown, expired, or does not match.",
+                computerName: "Work Mac"
+            ),
+            "AnswerProof is unknown, expired, or does not match."
+        )
+        XCTAssertEqual(
+            FactorySettingRow.answerError(
+                "The daemon refused: unknown_setting: Unknown setting \"foo\".",
+                computerName: "Work Mac"
+            ),
+            "Unknown setting \"foo\"."
+        )
+        XCTAssertEqual(
+            FactorySettingRow.answerError("Not saved: plain message", computerName: "Work Mac"),
+            "Not saved: plain message"
+        )
+
+        let simple = FactorySettingRow.parseFix("run: codex login")
+        XCTAssertEqual(simple.command, "codex login")
+        XCTAssertEqual(simple.rest, "")
+
+        let withRest = FactorySettingRow.parseFix("run: claude auth login, then retry")
+        XCTAssertEqual(withRest.command, "claude auth login")
+        XCTAssertEqual(withRest.rest, ", then retry")
+
+        let plain = FactorySettingRow.parseFix("install Antigravity CLI (agy)")
+        XCTAssertNil(plain.command)
+        XCTAssertEqual(plain.rest, "install Antigravity CLI (agy)")
+    }
 }

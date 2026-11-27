@@ -243,6 +243,10 @@ public struct FactorySettingRow: Decodable, Equatable, Identifiable, Sendable {
         return "\(prefix). Change it before the next start."
     }
 
+    public func keptNotice(was: String?) -> String {
+        "Kept at \(was?.trimmed.nonEmpty ?? "not set"). Nothing changed."
+    }
+
     public static func errorMessage(_ error: Error, computerName: String, linkUsable: Bool = true) -> String {
         if let r = error as? FactoryRefusal, r.code != "proof_required", !r.message.isEmpty { return r.message }
         if case let .rejected(status, msg) = error as? DaemonError,
@@ -251,6 +255,41 @@ public struct FactorySettingRow: Decodable, Equatable, Identifiable, Sendable {
             error, computerName: computerName, linkUsable: linkUsable,
             prefix: "Not changed: ", retry: "try again"
         )
+    }
+
+    public static func answerError(_ raw: String, computerName: String) -> String {
+        let text = raw.hasPrefix("The daemon refused: ") ? String(raw.dropFirst(20)) : raw
+        if text.hasPrefix("proof_required") {
+            let err = DaemonError.rejected(status: 403, message: "proof_required")
+            return factoryActionError(
+                err, computerName: computerName, linkUsable: true,
+                prefix: "Not saved: ", retry: "try again"
+            )
+        }
+        if text.hasPrefix("out_of_range:") {
+            let detail = String(text.dropFirst(13)).trimmed
+            return "Not saved: another setting changed after you asked. \(detail)"
+        }
+        if let colon = text.range(of: ": "),
+           colon.lowerBound > text.startIndex,
+           text[..<colon.lowerBound].allSatisfy({ $0.isASCII && ($0.isLowercase || $0 == "_") }),
+           let detail = String(text[colon.upperBound...]).trimmed.nonEmpty {
+            return detail
+        }
+        return text
+    }
+
+    public static func parseFix(_ fix: String) -> (command: String?, rest: String) {
+        let text = fix.trimmed
+        guard text.lowercased().hasPrefix("run:") else { return (nil, text) }
+        let body = String(text.dropFirst(4)).trimmed
+        let cut = [body.range(of: " ("), body.range(of: ", then ")]
+            .compactMap { $0?.lowerBound }
+            .min()
+        if let cut {
+            return (String(body[..<cut]).trimmed, String(body[cut...]).trimmed)
+        }
+        return (body.nonEmpty, "")
     }
 
     enum CodingKeys: String, CodingKey {

@@ -242,7 +242,7 @@ extension FactorySettingsUITests {
             stub?.factoryAsks = #"{"protocol":1,"asks":[]}"#
             stub?.questionsState = "[]"
             stub?.pendingActionState = nil
-            return (409, #"{"code":"closed","error":"Ask \"ask-rule-1\" is already cancelled."}"#)
+            return (409, #"{"code":"already_closed","error":"Ask \"ask-rule-1\" is already cancelled."}"#)
         }
         tapWhenTappable(saveBtn, "Save first tap (delayed 409)")
         // Rapid second tap while the first answer is still in flight (`computer.answer` returns `nil`).
