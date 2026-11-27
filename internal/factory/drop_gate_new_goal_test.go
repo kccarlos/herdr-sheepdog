@@ -982,11 +982,14 @@ func TestDropCleanupPRCloseFailureStillLogsAskCancellation(t *testing.T) {
 }
 
 // TestNewGoalRequiresPositiveHandlingBeforeJ4Finish covers state-table rows S9d,
-// S9e, and S8b (PR #853 r2 High): with all old tasks ended, neither exhausting
-// an unconfirmed new_goal wake retry via J12 nor interrupting the J7 startup
-// prompt of a reopened project may clear NewGoal or let J4 finish the project
-// (or cancel open project-wide asks); positive handling of the new_goal wake or
-// reopened startup prompt must clear NewGoal and finish through J4.
+// S9d-r5, S9e, and S8b (PR #853 r2 High & r5 Codex r4 Finding 1): with all old
+// tasks ended, neither exhausting an unconfirmed new_goal wake retry via J12
+// nor interrupting the J7 startup prompt of a reopened project may clear
+// NewGoal or let J4 finish the project (or cancel open project-wide asks);
+// J12 surfaces the exhausted new_goal wake in the project log, an explicit
+// same-goal Start after exhaustion queues a fresh generation-tagged new_goal
+// wake for the current generation, and confirmed delivery or a qualifying
+// coordinator command then clears NewGoal and finishes through J4.
 func TestNewGoalRequiresPositiveHandlingBeforeJ4Finish(t *testing.T) {
 	t.Parallel()
 
@@ -1058,6 +1061,209 @@ func TestNewGoalRequiresPositiveHandlingBeforeJ4Finish(t *testing.T) {
 		}
 		if len(st.Asks) != 1 || st.Asks[0].Status != flow.AskStatusOpen {
 			t.Errorf("project-wide ask after exhausted new_goal retry = %+v, want open", st.Asks)
+		}
+
+		// Existing surface: J12 records the exhausted project:new_goal wake in log.jsonl
+		// and exposes it through the project's visible LogLines view.
+		j12 := logRules(t, h.paths.Log(h.id), "J12")
+		if len(j12) == 0 {
+			t.Fatalf("expected J12 log lines after wake exhaustion, got none")
+		}
+		lastJ12 := j12[len(j12)-1]
+		if !slices.Contains(lastJ12.Asked, "project:new_goal") || !strings.Contains(lastJ12.Decision, "exhausted") || !strings.Contains(lastJ12.Decision, "project:new_goal") || lastJ12.Why == "" {
+			t.Errorf("last J12 log line = %+v, want exhausted project:new_goal decision with non-empty Why", lastJ12)
+		}
+		visibleLogs, err := h.eng.LogLines(h.id, DefaultLogLimit, "", false)
+		if err != nil {
+			t.Fatalf("LogLines(%s): %v", h.id, err)
+		}
+		if !slices.ContainsFunc(visibleLogs, func(e LogEntry) bool {
+			return e.By == "engine" && strings.Contains(e.Decision, "exhausted") && strings.Contains(e.Decision, "project:new_goal") && e.Why != ""
+		}) {
+			t.Errorf("LogLines(%s, observations=false) = %+v, want visible exhausted project:new_goal entry", h.id, visibleLogs)
+		}
+
+		// Answering a subsequent J13 heartbeat prompt without a qualifying command
+		// still preserves NewGoal=true (positive-evidence rule holds).
+		h.now = h.now.Add(time.Duration(st.Settings.HeartbeatMinutes+1) * time.Minute)
+		h.pass() // J13 sends heartbeat wake
+		hbSend := lastSendTo(t, h.srv.Requests(), coord1)
+		if !strings.Contains(hbSend, "Wake: heartbeat") {
+			t.Fatalf("expected J13 heartbeat prompt while exhausted, got:\n%s", hbSend)
+		}
+		h.setCoordWorking(coord1)
+		h.srv.SetScreen(coord1, completedWakeScreen("claude", hbSend, "Task counts reviewed; awaiting goal delivery."))
+		h.coordIdleWithStatus(coord1, "idle")
+		stAfterHB := h.state()
+		if !stAfterHB.Project.NewGoal || stAfterHB.Project.Finished || len(stAfterHB.Project.Wakes) != 0 || len(stAfterHB.Project.CoordWakesInFlight) != 0 {
+			t.Fatalf("after heartbeat reply while goal wake exhausted: gen=%d pending=%v finished=%v held=%+v in-flight=%+v, want pending=true finished=false empty queues",
+				stAfterHB.Project.GoalGen, stAfterHB.Project.NewGoal, stAfterHB.Project.Finished, stAfterHB.Project.Wakes, stAfterHB.Project.CoordWakesInFlight)
+		}
+
+		// Codex r4 Finding 1: explicit same-goal Start after exhaustion queues a fresh
+		// generation-tagged new_goal wake for the current generation, and confirmed delivery settles.
+		genBefore := stAfterHB.Project.GoalGen
+		sendsBefore := len(sendsTo(t, h.srv.Requests(), coord1))
+		if err := h.eng.Start(h.repo, "Goal 2: check edge case", 2); err != nil {
+			t.Fatalf("Start(same Goal 2 after exhaustion): %v", err)
+		}
+		stAfterSameStart := h.state()
+		if !stAfterSameStart.Project.NewGoal || stAfterSameStart.Project.Finished {
+			t.Fatalf("after same-goal Start on exhausted pending goal: NewGoal=%v Finished=%v, want (true, false)",
+				stAfterSameStart.Project.NewGoal, stAfterSameStart.Project.Finished)
+		}
+		if stAfterSameStart.Project.GoalGen < genBefore || stAfterSameStart.Project.GoalGen == 0 {
+			t.Fatalf("after same-goal Start on exhausted pending goal: GoalGen=%d (before=%d), want >= %d and > 0",
+				stAfterSameStart.Project.GoalGen, genBefore, genBefore)
+		}
+		if !flow.HasNewGoalWakeGen(stAfterSameStart.Project.Wakes, stAfterSameStart.Project.GoalGen) {
+			t.Fatalf("same-goal Start after wake exhaustion did not queue current-generation new_goal wake: gen=%d pending=%v held=%+v in-flight=%+v",
+				stAfterSameStart.Project.GoalGen, stAfterSameStart.Project.NewGoal, stAfterSameStart.Project.Wakes, stAfterSameStart.Project.CoordWakesInFlight)
+		}
+		wakeIdx := slices.IndexFunc(stAfterSameStart.Project.Wakes, func(w flow.Wake) bool {
+			return w.Task == "" && w.Key == "new_goal"
+		})
+		if wakeIdx < 0 {
+			t.Fatalf("missing held new_goal wake in %+v", stAfterSameStart.Project.Wakes)
+		}
+		requeued := stAfterSameStart.Project.Wakes[wakeIdx]
+		if requeued.Retried {
+			t.Errorf("re-queued new_goal wake after same-goal Start has Retried=true, want fresh retry budget: %+v", requeued)
+		}
+		if !strings.Contains(requeued.Facts, "Goal 2: check edge case") {
+			t.Errorf("re-queued new_goal wake Facts = %q, want current goal text", requeued.Facts)
+		}
+
+		// J12 re-delivers the goal wake (#1 of fresh budget); Esc-interrupting #1 retries (#2)
+		// without settling, and confirming #2 settles NewGoal and finishes through J4.
+		h.now = h.now.Add(15 * time.Second)
+		h.pass()
+		sendsAfterRedeliver := sendsTo(t, h.srv.Requests(), coord1)
+		if len(sendsAfterRedeliver) != sendsBefore+1 || !strings.Contains(sendsAfterRedeliver[len(sendsAfterRedeliver)-1], "Goal 2: check edge case") {
+			t.Fatalf("after same-goal Start pass: sends=%d (want %d), last=%q",
+				len(sendsAfterRedeliver), sendsBefore+1, sendsAfterRedeliver[len(sendsAfterRedeliver)-1])
+		}
+		redeliver1 := sendsAfterRedeliver[len(sendsAfterRedeliver)-1]
+		h.setCoordWorking(coord1)
+		h.srv.SetScreen(coord1, formatPromptEcho("❯", redeliver1)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+		h.coordIdleWithStatus(coord1, "idle")
+		if stMid := h.state(); !stMid.Project.NewGoal || stMid.Project.Finished || len(sendsTo(t, h.srv.Requests(), coord1)) != sendsBefore+2 {
+			t.Fatalf("after 1st interrupted redelivery: NewGoal=%v Finished=%v sends=%d (want %d)",
+				stMid.Project.NewGoal, stMid.Project.Finished, len(sendsTo(t, h.srv.Requests(), coord1)), sendsBefore+2)
+		}
+
+		redeliver2 := lastSendTo(t, h.srv.Requests(), coord1)
+		h.setCoordWorking(coord1)
+		h.srv.SetScreen(coord1, completedWakeScreen("claude", redeliver2, "Goal 2 audit complete; T1 already covers the edge case."))
+		h.coordIdleWithStatus(coord1, "idle")
+		if h.state().Project.NewGoal {
+			t.Fatalf("NewGoal stayed true after confirmed redelivered new_goal wake")
+		}
+
+		h.finishThroughJ4(coord1)
+		stFinal, _ := assertLogInvariants(t, h.paths.State(h.id), h.paths.Log(h.id))
+		if !stFinal.Project.Finished || stFinal.Project.NewGoal || stFinal.Project.RunID != "" || h.eng.Projects()[0].State != "finished" {
+			t.Fatalf("project did not finish after confirmed redelivered goal wake: Finished=%v NewGoal=%v RunID=%q state=%q",
+				stFinal.Project.Finished, stFinal.Project.NewGoal, stFinal.Project.RunID, h.eng.Projects()[0].State)
+		}
+	})
+
+	t.Run("same_goal_start_after_exhaustion_requeues_and_settles_via_qualifying_command", func(t *testing.T) {
+		t.Parallel()
+		w := newRestartWorld(t, "Goal 1: initial setup")
+		w.pass() // J7 starts coord1
+		coord1 := w.state().Project.RunID
+		w.applyPlan()
+		// End T1 via a Goal 1 command before bumping generation so all tasks are ended
+		// and pre-Goal-2 commands exist in history (must not settle Goal 2).
+		if err := w.eng.Report(w.coordTok, "task", json.RawMessage(`{"action":"drop","task":"T1","why":"completed elsewhere in Goal 1"}`)); err != nil {
+			t.Fatalf("task drop T1: %v", err)
+		}
+		w.now = w.now.Add(5 * time.Second)
+		w.pass() // N1 cleans up T1 while coord1 is still working
+
+		const goal2 = "Goal 2: re-deliver after exhaustion and settle via command"
+		if err := w.eng.Start(w.repo, goal2, 2); err != nil {
+			t.Fatalf("Start(Goal 2): %v", err)
+		}
+		w.waitIdle(coord1) // J12 delivers Goal 2 new_goal wake (#1)
+		for range 2 {
+			sent := lastSendTo(t, w.srv.Requests(), coord1)
+			w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+			w.srv.SetScreen(coord1, formatPromptEcho("❯", sent)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+			w.waitIdle(coord1)
+		}
+		w.now = w.now.Add(15 * time.Second)
+		w.pass()
+
+		stExhausted := w.state()
+		if !stExhausted.Project.NewGoal || stExhausted.Project.Finished || len(stExhausted.Project.Wakes) != 0 || len(stExhausted.Project.CoordWakesInFlight) != 0 {
+			t.Fatalf("precondition after Goal 2 wake exhaustion: NewGoal=%v Finished=%v Wakes=%+v InFlight=%+v, want pending with empty queues",
+				stExhausted.Project.NewGoal, stExhausted.Project.Finished, stExhausted.Project.Wakes, stExhausted.Project.CoordWakesInFlight)
+		}
+		visibleLogs, err := w.eng.LogLines(w.id, DefaultLogLimit, "", false)
+		if err != nil {
+			t.Fatalf("LogLines(%s): %v", w.id, err)
+		}
+		if !slices.ContainsFunc(visibleLogs, func(e LogEntry) bool {
+			return e.By == "engine" && strings.Contains(e.Decision, "exhausted") && strings.Contains(e.Decision, "project:new_goal") && e.Why != ""
+		}) {
+			t.Errorf("LogLines(%s) missing exhausted project:new_goal entry: %+v", w.id, visibleLogs)
+		}
+
+		// Owner presses Start with the same goal text after exhaustion (with all tasks ended).
+		genBefore := stExhausted.Project.GoalGen
+		sendsBefore := len(sendsTo(t, w.srv.Requests(), coord1))
+		if err := w.eng.Start(w.repo, goal2, 2); err != nil {
+			t.Fatalf("Start(same Goal 2 after exhaustion): %v", err)
+		}
+		stRequeued := w.state()
+		if !stRequeued.Project.NewGoal || stRequeued.Project.GoalGen < genBefore || !flow.HasNewGoalWakeGen(stRequeued.Project.Wakes, stRequeued.Project.GoalGen) {
+			t.Fatalf("same-goal Start after exhaustion: gen=%d (before=%d) pending=%v held=%+v in-flight=%+v, want pending=true and current-gen new_goal wake",
+				stRequeued.Project.GoalGen, genBefore, stRequeued.Project.NewGoal, stRequeued.Project.Wakes, stRequeued.Project.CoordWakesInFlight)
+		}
+
+		// J12 re-delivers the goal wake; coordinator records qualifying commands
+		// (`plan amend` adding non-split T2, then `task drop T2`) while both
+		// redelivered wake replies (#1 and #2) are Esc-interrupted.
+		w.now = w.now.Add(15 * time.Second)
+		w.pass()
+		if got := len(sendsTo(t, w.srv.Requests(), coord1)); got != sendsBefore+1 {
+			t.Fatalf("after same-goal Start pass: sends=%d, want %d", got, sendsBefore+1)
+		}
+		redeliver1 := lastSendTo(t, w.srv.Requests(), coord1)
+		w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+		amend := `{"why":"handle redelivered Goal 2","tasks":[{"id":"T2","estimate_lines":50,"title":"feat: goal 2 follow-up",` + testPlanJSON + `}]}`
+		if err := w.eng.Report(w.coordTok, "plan amend", []byte(amend)); err != nil {
+			t.Fatalf("plan amend T2: %v", err)
+		}
+		if err := w.eng.Report(w.coordTok, "task", json.RawMessage(`{"action":"drop","task":"T2","why":"already covered"}`)); err != nil {
+			t.Fatalf("task drop T2: %v", err)
+		}
+		w.now = w.now.Add(5 * time.Second)
+		w.pass() // N1 cleans up T2 while coord1 is still working and redeliver1 is in flight
+		if stMid := w.state(); stMid.Project.Finished || len(logRules(t, w.paths.Log(w.id), "J4")) != 0 {
+			t.Fatalf("J4 fired mid-turn before coordinator went idle and redelivered wake drained: Finished=%v j4=%+v",
+				stMid.Project.Finished, logRules(t, w.paths.Log(w.id), "J4"))
+		}
+
+		w.srv.SetScreen(coord1, formatPromptEcho("❯", redeliver1)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+		w.waitIdle(coord1) // J12 retries redelivered wake (#2)
+		if stRetry := w.state(); stRetry.Project.Finished || len(logRules(t, w.paths.Log(w.id), "J4")) != 0 {
+			t.Fatalf("J4 fired while retried redelivery was still pending: Finished=%v j4=%+v",
+				stRetry.Project.Finished, logRules(t, w.paths.Log(w.id), "J4"))
+		}
+
+		redeliver2 := lastSendTo(t, w.srv.Requests(), coord1)
+		w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+		w.srv.SetScreen(coord1, formatPromptEcho("❯", redeliver2)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+		w.waitIdle(coord1) // redelivery exhausts; qualifying command in current generation settles NewGoal
+
+		driveRestartWorldJ4Finish(t, w)
+		stFinal, _ := assertLogInvariants(t, w.paths.State(w.id), w.paths.Log(w.id))
+		if !stFinal.Project.Finished || stFinal.Project.NewGoal || stFinal.Project.RunID != "" {
+			t.Fatalf("after qualifying command on redelivered same-goal Start: Finished=%v NewGoal=%v RunID=%q, want (true, false, \"\")",
+				stFinal.Project.Finished, stFinal.Project.NewGoal, stFinal.Project.RunID)
 		}
 	})
 
@@ -2123,13 +2329,78 @@ func TestLegacyPendingGoalUpgrade(t *testing.T) {
 				t.Errorf("upgraded new_goal wake Facts = %q, want persisted Goal 3 without stale Goal 2", ug.Facts)
 			}
 
-			// Repeated load of the raw legacy file returns the same initial generation.
+			// Repeated load of the raw legacy file before save must return an identical
+			// full state (including a deterministic synthesized wake timestamp and
+			// identical coordinator wake text), not a wall-clock timestamp per read.
+			time.Sleep(5 * time.Millisecond)
 			st2, err := LoadState(statePath)
 			if err != nil {
 				t.Fatalf("LoadState #2: %v", err)
 			}
-			if st2.Project.GoalGen != st1.Project.GoalGen {
-				t.Fatalf("repeated LoadState before save changed GoalGen: got %d, want %d", st2.Project.GoalGen, st1.Project.GoalGen)
+			if !reflect.DeepEqual(st2, st1) {
+				t.Fatalf("repeated LoadState on raw legacy state.json before save returned different states:\n#1: %+v\n#2: %+v", st1, st2)
+			}
+			if msg1, msg2 := wakeMessage(st1), wakeMessage(st2); msg1 != msg2 {
+				t.Fatalf("repeated LoadState before save changed wakeMessage:\n#1:\n%s\n#2:\n%s", msg1, msg2)
+			}
+			pathsCopy := Paths{DataDir: t.TempDir()}
+			writeLegacyStateFixture(t, pathsCopy.State("proj-legacy-pending"), pathsCopy.Log("proj-legacy-pending"), "proj-legacy-pending", legacyPendingJSON)
+			stCopy, err := LoadState(pathsCopy.State("proj-legacy-pending"))
+			if err != nil {
+				t.Fatalf("LoadState(copy): %v", err)
+			}
+			if !reflect.DeepEqual(stCopy, st1) {
+				t.Fatalf("LoadState on identical raw legacy state.json copy differed from #1:\ncopy: %+v\n#1:   %+v", stCopy, st1)
+			}
+
+			// A raw legacy pending state with empty wakes (and no persisted timestamps)
+			// must also load deterministically across repeated reads before save.
+			emptyWakesPaths := Paths{DataDir: t.TempDir()}
+			emptyWakesPath := emptyWakesPaths.State("proj-legacy-empty-wakes")
+			emptyWakesJSON := `{
+  "seq": 2,
+  "project": {
+    "id": "proj-legacy-empty-wakes",
+    "folder": "/tmp/legacy-empty-wakes",
+    "goal": "Goal 2: legacy pending goal without wakes",
+    "started": true,
+    "new_goal": true,
+    "new_goal_tasks": 1
+  },
+  "settings": {
+    "plan_review_rounds": 0,
+    "max_running": 2
+  },
+  "tasks": [` + legacyMergedTaskJSON + `]
+}`
+			writeLegacyStateFixture(t, emptyWakesPath, emptyWakesPaths.Log("proj-legacy-empty-wakes"), "proj-legacy-empty-wakes", emptyWakesJSON)
+			ew1, err := LoadState(emptyWakesPath)
+			if err != nil {
+				t.Fatalf("LoadState(emptyWakes #1): %v", err)
+			}
+			if !ew1.Project.NewGoal || ew1.Project.GoalGen == 0 || !flow.HasNewGoalWakeGen(ew1.Project.Wakes, ew1.Project.GoalGen) {
+				t.Fatalf("LoadState(emptyWakes #1): NewGoal=%v GoalGen=%d Wakes=%+v, want upgraded generation-tagged new_goal wake",
+					ew1.Project.NewGoal, ew1.Project.GoalGen, ew1.Project.Wakes)
+			}
+			time.Sleep(5 * time.Millisecond)
+			ew2, err := LoadState(emptyWakesPath)
+			if err != nil {
+				t.Fatalf("LoadState(emptyWakes #2): %v", err)
+			}
+			if !reflect.DeepEqual(ew2, ew1) {
+				t.Fatalf("repeated LoadState on empty-wakes legacy state.json before save differed:\n#1: %+v\n#2: %+v", ew1, ew2)
+			}
+			if msg1, msg2 := wakeMessage(ew1), wakeMessage(ew2); msg1 != msg2 {
+				t.Fatalf("repeated LoadState on empty-wakes legacy state.json changed wakeMessage:\n#1:\n%s\n#2:\n%s", msg1, msg2)
+			}
+			emptyWakesCopyPaths := Paths{DataDir: t.TempDir()}
+			writeLegacyStateFixture(t, emptyWakesCopyPaths.State("proj-legacy-empty-wakes"), emptyWakesCopyPaths.Log("proj-legacy-empty-wakes"), "proj-legacy-empty-wakes", emptyWakesJSON)
+			ewCopy, err := LoadState(emptyWakesCopyPaths.State("proj-legacy-empty-wakes"))
+			if err != nil {
+				t.Fatalf("LoadState(emptyWakes copy): %v", err)
+			}
+			if !reflect.DeepEqual(ewCopy, ew1) {
+				t.Fatalf("LoadState on identical empty-wakes legacy state.json copy differed from #1:\ncopy: %+v\n#1:   %+v", ewCopy, ew1)
 			}
 
 			// Once saved with its nonzero generation, repeated loads must NOT bump GoalGen again
