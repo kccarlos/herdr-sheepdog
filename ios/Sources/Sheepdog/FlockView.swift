@@ -990,6 +990,7 @@ struct FactoryHeadCard: View {
     var project: FactoryProjectBoard?
     var onGone: (() -> Void)?
     var onGoal: (() -> Void)?
+    var onOpen: (() -> Void)?
 
     @EnvironmentObject private var model: SessionViewModel
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
@@ -998,6 +999,9 @@ struct FactoryHeadCard: View {
     @State private var actionChecks: [FactoryStartCheck] = []
 
     private var session: ComputerModel? { model.fleet.model(computer?.id ?? model.currentComputerID) }
+    private var headLabel: String {
+        [item.accessibilitySummary, computer?.name.trimmedOrNil].compactMap { $0 }.joined(separator: ", ")
+    }
 
     private var tint: Color {
         switch item.head.state {
@@ -1011,16 +1015,27 @@ struct FactoryHeadCard: View {
         VStack(alignment: .leading, spacing: 8) {
             if project != nil {
                 summary
+            } else if let onOpen {
+                Button(action: onOpen) { summary.contentShape(Rectangle()) }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(headLabel)
+                    .accessibilityIdentifier("flock.factory.\(item.id)")
             } else {
                 NavigationLink(destination: FactoryProjectView(initialHead: item.head, computerID: computer?.id ?? model.currentComputerID)) {
                     summary.contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .accessibilityLabel([item.accessibilitySummary, computer?.name.trimmedOrNil].compactMap { $0 }.joined(separator: ", "))
+                .accessibilityLabel(headLabel)
                 .accessibilityIdentifier("flock.factory.\(item.id)")
             }
-            item.alertLine.map { Text($0).font(.subheadline.weight(.semibold)) }
-            item.alertFixLine.map { Text($0).font(.footnote).foregroundStyle(Theme.muted) }
+            item.alertLine.map {
+                Text($0).font(.subheadline.weight(.semibold))
+                    .accessibilityIdentifier("factoryProject.alert.cause")
+            }
+            item.alertFixLine.map {
+                Text($0).font(.footnote).foregroundStyle(Theme.muted)
+                    .accessibilityIdentifier("factoryProject.alert.fix")
+            }
             let canStop = project?.canStop == true, folder = canStop ? nil : item.resumableFolder, canGoal = project?.canChangeGoal == true && onGoal != nil
             if canStop || folder != nil || canGoal {
                 OptionFlow(spacing: 8) {
@@ -1049,7 +1064,10 @@ struct FactoryHeadCard: View {
                     }
                 }.buttonStyle(.bordered).tint(Theme.ink).controlSize(.large)
             }
-            actionError.map { Text($0).font(.footnote).foregroundStyle(Theme.danger) }
+            actionError.map {
+                Text($0).font(.footnote).foregroundStyle(Theme.danger)
+                    .accessibilityIdentifier("factoryProject.actionError")
+            }
             ForEach(actionChecks.indices, id: \.self) { FactoryStartCheckRow(check: actionChecks[$0], computerName: computer?.name) }
             project?.barNote.map { Text($0).font(.footnote).foregroundStyle(Theme.muted) }
             if item.coordinatorBlocked {

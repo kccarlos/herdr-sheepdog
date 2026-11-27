@@ -92,6 +92,7 @@ struct FactoryCommandCopyRow: View {
             }
             .buttonStyle(.bordered).tint(Theme.ink).frame(minHeight: 44)
             .accessibilityLabel(copied ? "Copied \(command)" : "Copy the command \(command)")
+            .accessibilityIdentifier("factoryProject.check.copy")
         }
     }
 }

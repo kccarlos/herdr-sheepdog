@@ -433,12 +433,16 @@ Mac panel.
 The same app, with the room an iPad has. In Slide Over or a narrow split
 it looks exactly like the iPhone app.
 
-- **Sidebar:** Conversation, All agents (with how many are waiting), then
-  your agents under their spaces. A waiting agent shows a hand and
-  "waiting"; the others show how long they have been in their state.
+- **Sidebar:** Conversation, All agents (with how many are waiting), active
+  factory projects, then your agents under their spaces. A waiting agent shows
+  a hand and "waiting"; the others show how long they have been in their state.
+  Tapping a factory project opens its board directly (even on another computer,
+  without moving the voice).
 - **Detail:** an agent's window (terminal, its question above the keys,
-  the keys and a composer), the Conversation in a centred column, or **All agents**: every agent as a card in two columns,
-  with the filters All, Waiting and Working, and Expand all. Expanded
+  the keys and a composer), a factory project's board, the Conversation in a
+  centred column, or **All agents**: every factory project head and agent as a
+  card in two columns (with **Stopped** and collapsed **Done** for finished
+  projects), the filters All, Waiting and Working, and Expand all. Expanded
   cards also list up to three earlier messages.
 - **The voice capsule** floats at the bottom centre of the detail, as on
   the iPhone, and moves aside when the sidebar shows. The keyboard button

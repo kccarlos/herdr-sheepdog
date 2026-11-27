@@ -4,6 +4,8 @@ import SwiftUI
 struct FactoryProjectView: View {
     let initialHead: FactoryProjectHead
     let computerID: String
+    var leading: AnyView? = nil
+    var onDismiss: (() -> Void)? = nil
     @EnvironmentObject private var model: SessionViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var loaded: Result<([FactoryTask], Bool), Error>?
@@ -20,24 +22,30 @@ struct FactoryProjectView: View {
     private var head: FactoryProjectHead { computer?.factoryHeads.first { $0.id == initialHead.id } ?? initialHead }
 
     var body: some View {
-        ScrollViewReader { proxy in
-            boardScroll
-                .onChange(of: showAsks) {
-                    guard showAsks else { return }
-                    proxy.scrollTo("factoryProject.asks", anchor: .top)
-                    showAsks = false
-                }
+        VStack(spacing: 0) {
+            if let leading { DetailHeader(title: head.name) { leading } trailing: { EmptyView() } }
+            ScrollViewReader { proxy in
+                boardScroll
+                    .onChange(of: showAsks) {
+                        guard showAsks else { return }
+                        proxy.scrollTo("factoryProject.asks", anchor: .top)
+                        showAsks = false
+                    }
+            }
         }
         .navigationDestination(isPresented: $showsCoordinator) {
             FactoryCoordinatorView(initialHead: head, computerID: computerID) { showAsks = true }
+                .toolbar(.visible, for: .navigationBar)
         }
         .navigationDestination(isPresented: $showsSettings) {
             FactorySettingsView(initialHead: head, computerID: computerID, onGone: projectGone)
+                .toolbar(.visible, for: .navigationBar)
         }
         .navigationDestination(isPresented: Binding(get: { selectedTask != nil }, set: { if !$0 { selectedTask = nil } })) {
             if let task = selectedTask {
                 let current = (try? loaded?.get())?.0.first { $0.ref == task.ref } ?? task
                 FactoryTaskView(task: current, projectName: head.name, projectState: head.state)
+                    .toolbar(.visible, for: .navigationBar)
             }
         }
         .sheet(isPresented: $showsGoalSheet) {
@@ -53,8 +61,9 @@ struct FactoryProjectView: View {
             if case let .failure(error) = loaded {
                 let failure = FactoryProjectBoard.loadFailure(projectName: head.name, computerName: name, error: error, linkUsable: computer?.link.isUsable == true)
                 VStack(spacing: 12) {
-                    Text(failure.heading).font(.headline)
+                    Text(failure.heading).font(.headline).accessibilityIdentifier("factoryProject.loadError.heading")
                     Text(failure.detail).foregroundStyle(Theme.muted)
+                        .accessibilityIdentifier("factoryProject.loadError.detail")
                     Button(failure.retryLabel) { Task { await load() } }
                         .buttonStyle(PillButtonStyle(fullWidth: false)).accessibilityIdentifier("factoryProject.retry")
                 }.multilineTextAlignment(.center).padding()
@@ -83,8 +92,9 @@ struct FactoryProjectView: View {
                     }
                     Text("Tasks").font(.headline).accessibilityAddTraits(.isHeader)
                     if board.isEmptyTasks {
-                        Text(board.emptyTasksHeading)
+                        Text(board.emptyTasksHeading).accessibilityIdentifier("factoryProject.emptyTasks.heading")
                         Text(board.emptyTasksDetail).foregroundStyle(Theme.muted)
+                            .accessibilityIdentifier("factoryProject.emptyTasks.detail")
                     }
                     ForEach(board.activeGroups, id: \.stage) { group in
                         Text("\(group.label) \(group.tasks.count)").font(.subheadline.weight(.semibold))
@@ -106,7 +116,7 @@ struct FactoryProjectView: View {
             }
         }
         .background(Theme.surface).navigationTitle(head.name)
-        .navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar)
+        .navigationBarTitleDisplayMode(.inline).toolbar(onDismiss == nil ? .visible : .hidden, for: .navigationBar)
         .task(id: "\(computer?.factoryChanges[head.id] ?? 0):\(head.state.rawValue):\(head.goal)") { await load() }
         .onChange(of: head.state) { feedback = nil }
     }
@@ -198,7 +208,7 @@ struct FactoryProjectView: View {
 
     private func projectGone() {
         model.notices.banner = .init(tone: .info, message: "This project is gone.")
-        dismiss()
+        if let onDismiss { onDismiss() } else { dismiss() }
         Task { await computer?.refresh() }
     }
 }

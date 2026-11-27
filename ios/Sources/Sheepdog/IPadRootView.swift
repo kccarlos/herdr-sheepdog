@@ -8,6 +8,7 @@ enum IPadDetail: Hashable {
     case agent(String)
     /// Two agents side by side (stacked in portrait).
     case pair(String, String)
+    case factoryProject(computerID: String, projectID: String)
 
     /// Whether the floating voice capsule is over this detail. An agent's
     /// terminal has its own composer and key bar at the foot, and the
@@ -16,7 +17,7 @@ enum IPadDetail: Hashable {
     /// later task).
     var showsCapsule: Bool {
         switch self {
-        case .conversation, .allAgents: return true
+        case .conversation, .allAgents, .factoryProject: return true
         case .agent, .pair: return false
         }
     }
@@ -26,7 +27,7 @@ enum IPadDetail: Hashable {
         switch self {
         case let .agent(id): return [id]
         case let .pair(a, b): return [a, b]
-        case .conversation, .allAgents: return []
+        case .conversation, .allAgents, .factoryProject: return []
         }
     }
 }
@@ -128,11 +129,13 @@ struct IPadSidebar: View {
     /// (several computers only; with one there is no computer level).
     private var sections: SidebarSections {
         SidebarSections(snapshots: model.computerSnapshots, currentID: model.currentComputerID,
-                        currentName: model.currentComputerName, currentAgents: model.flock.all)
+                        currentName: model.currentComputerName, currentAgents: model.flock.all,
+                        currentFactoryHeads: model.fleet.current?.factoryHeads ?? [],
+                        currentQuestions: model.agentsModel.questions)
     }
 
     private var paneState: FlockPaneState {
-        model.flockPaneState
+        model.flockPaneState(hasAgents: !model.agentsModel.factoryList.isEmpty)
     }
 
     var body: some View {
@@ -233,7 +236,7 @@ struct IPadSidebar: View {
     @ViewBuilder
     private var agentRows: some View {
         let sections = self.sections
-        if sections.computers.first?.spaces.isEmpty ?? true, !sections.showsComputerHeaders {
+        if !(sections.computers.first?.hasContent ?? false), !sections.showsComputerHeaders {
             emptyRow
                 .padding(.top, 16)
         }
@@ -243,6 +246,18 @@ struct IPadSidebar: View {
                 computerHeader(computer.id, name: computer.name)
             }
             if model.agentsModel.isComputerExpanded(computer.id) {
+                if let detail = computer.factorySectionDetail {
+                    HStack(spacing: 4) {
+                        Text("Factory projects").fontWeight(.semibold)
+                        Text(detail)
+                    }
+                    .font(.caption).foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 10).padding(.top, 12).padding(.bottom, 2)
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel("Factory projects, \(detail.dropFirst(2))")
+                    .accessibilityAddTraits(.isHeader).accessibilityIdentifier("sidebar.factorySection")
+                    ForEach(computer.factoryProjects) { factoryRow($0, computerID: computer.id) }
+                }
                 ForEach(computer.spaces) { space in
                     Text(space.name.isEmpty ? "Other" : space.name)
                         .font(.caption.weight(.semibold))
@@ -300,6 +315,34 @@ struct IPadSidebar: View {
         )
     }
 
+    private func factoryRow(_ item: FactoryAgentsList.Item, computerID: String) -> some View {
+        let selected = ui.detail == .factoryProject(computerID: computerID, projectID: item.id)
+        let dot: Color = item.head.state == .running ? Theme.working : Theme.idle
+        let shape = RoundedRectangle(cornerRadius: 10, style: .continuous)
+        return Button {
+            select(.factoryProject(computerID: computerID, projectID: item.id))
+        } label: {
+            HStack(spacing: 10) {
+                Circle().fill(dot).frame(width: 8, height: 8).padding(.horizontal, 7)
+                HStack(spacing: 5) {
+                    Text(item.head.name).font(.body.weight(selected ? .semibold : .regular)).foregroundStyle(Theme.ink)
+                    Text(item.kindWord).font(.caption).foregroundStyle(Theme.muted)
+                }
+                .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                Text(item.sidebarMeta)
+                    .font(.caption.weight(item.isSidebarWaiting ? .semibold : .regular))
+                    .foregroundStyle(item.isSidebarWaiting ? Theme.blockedText : Theme.muted)
+            }
+            .padding(.horizontal, 10).frame(minHeight: 44)
+            .background(shape.fill(selected ? Theme.line : .clear))
+            .contentShape(.hoverEffect, shape).contentShape(shape).hoverEffect(.highlight)
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .ignore).accessibilityLabel(item.sidebarAccessibilityLabel)
+        .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
+        .accessibilityIdentifier("sidebar.factory.\(item.id)")
+    }
+
     private func agentRow(_ agent: Agent, remote: Bool = false) -> some View {
         let selected = !remote && ui.detail.panes.contains(agent.paneID)
         let blocked = agent.state == .blocked
@@ -353,15 +396,27 @@ struct IPadSidebar: View {
         .accessibilityIdentifier(remote ? "computerLabel.sidebarAgent.\(agent.alias)" : "sidebar.agent.\(agent.alias)")
     }
 
+    private var emptyMessage: String {
+        switch paneState {
+        case .loading: return "Connecting…"
+        case .reconnecting: return "Reconnecting…"
+        case .empty, .content: return "No agents running."
+        case .notConnected: return model.isConfigured ? "Not connected." : "Pair your computer to see its agents."
+        case .tokenRefused: return (model.notices.pairingProblem ?? .revoked).title
+        case .unreachable, .noNetwork, .untrusted, .updateNeeded:
+            return model.linkModel.presentation.inline?.message ?? "Can't reach the computer."
+        }
+    }
+
     /// No agent to list: why, in one line, with the one action that helps.
     @ViewBuilder
     private var emptyRow: some View {
         VStack(alignment: .leading, spacing: 4) {
+            Text(emptyMessage).accessibilityIdentifier("sidebar.empty.message")
             switch paneState {
             case .loading, .reconnecting:
-                Text(paneState == .loading ? "Connecting…" : "Reconnecting…")
+                EmptyView()
             case .empty, .content:
-                Text("No agents running.")
                 if model.agentActionsAvailable {
                     Button("New agent") {
                         scenes.request(from: sceneID)
@@ -373,7 +428,6 @@ struct IPadSidebar: View {
                     .accessibilityIdentifier("sidebar.newAgent")
                 }
             case .notConnected:
-                Text(model.isConfigured ? "Not connected." : "Pair your computer to see its agents.")
                 Button(model.isConfigured ? "Connect" : "Pair") {
                     if model.isConfigured {
                         model.connect()
@@ -386,15 +440,12 @@ struct IPadSidebar: View {
                 .foregroundStyle(Theme.primaryText)
                 .frame(minHeight: 44)
             case .tokenRefused:
-                Text((model.notices.pairingProblem ?? .revoked).title)
                 Button("Scan again") { model.needsNewScan(model.notices.pairingProblem ?? .revoked) }
                     .fontWeight(.semibold)
                     .foregroundStyle(Theme.primaryText)
                     .frame(minHeight: 44)
                     .accessibilityIdentifier("sidebar.scan")
             case .unreachable, .noNetwork, .untrusted, .updateNeeded:
-                // The link's own words, the same as the chip's sheet.
-                Text(model.linkModel.presentation.inline?.message ?? "Can't reach the computer.")
                 if paneState != .noNetwork {
                     Button("Try again") { model.retryLink() }
                         .fontWeight(.semibold)
@@ -451,6 +502,14 @@ struct IPadDetailView: View {
                 AllAgentsView(leading: leading)
             case .agent, .pair:
                 AgentPanes(panes: ui.detail.panes, leading: leading)
+            case let .factoryProject(computerID, projectID):
+                if let head = model.fleet.model(computerID)?.factoryHeads.first(where: { $0.id == projectID }) {
+                    FactoryProjectView(initialHead: head, computerID: computerID,
+                                       leading: leading, onDismiss: { ui.detail = .allAgents })
+                        .id("\(computerID)|\(projectID)")
+                } else {
+                    IPadAgentGone(leading: leading) { ui.detail = .allAgents }
+                }
             }
         }
         .background(Theme.surface)

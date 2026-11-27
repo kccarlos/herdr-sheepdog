@@ -466,19 +466,24 @@ section 6.
   `NavigationSplitView`, balanced in landscape and `prominentDetail` in
   portrait (the sidebar slides over; portrait opens on the detail).
   - `IPadSidebar` (390 pt): the title with `+` and `⋯`, Conversation, All
-    agents with the waiting count, then the agents under their spaces
-    (`SidebarSections` in Kit: spaces by name, agents by alias, running
-    only; no computer row with one computer). No capsule: it floats over
-    the detail. No agents: one line with the action that helps (New agent, Connect,
-    Pair, Retry).
+    agents with the waiting count, active factory projects above ordinary
+    agents (`SidebarSections` in Kit: non-finished factory heads with waiting
+    or state meta, then spaces by name and ordinary agents by alias, running
+    only; factory worker and coordinator panes filtered out; no computer row
+    with one computer). No capsule: it floats over the detail. No agents or
+    projects: one line with the action that helps (New agent, Connect, Pair,
+    Retry).
   - The detail (`SceneUI.detail`): the Conversation in a 720 pt column;
     the open questions, the coach mark and the capsule are the floating
-    dock (below); All agents
-    (`AllAgentsView`: `AgentCard`s in two independent columns, one at the
-    accessibility sizes; `AgentFilter` All / Waiting / Working with a
-    plain empty state and Show all; Expand all fills `expandedAgents` with
-    every card that has no question; expanded cards add "Earlier", up to 3
-    older messages, `Agent.earlierWorkerMessages`); or
+    dock (below); All agents (`AllAgentsView`: `FactoryAgentsList` sections —
+    Needs you asks and stuck coordinators, Working heads and agents, Stopped
+    heads, and collapsed Done for finished heads — plus `AgentCard`s in two
+    independent columns, one at the accessibility sizes; `AgentFilter` All /
+    Waiting / Working with a plain empty state and Show all; Expand all fills
+    `expandedAgents` with every card that has no question; expanded cards add
+    "Earlier", up to 3 older messages, `Agent.earlierWorkerMessages`); a
+    factory project board (`IPadDetail.factoryProject`, including another
+    computer's project directly per D12 without moving voice); or
     an agent's window as a pane (`AgentScreenView(pane:)` with a
     `PaneChrome`: its own header with the dot, name and space, ⋯, and
     Close instead of a pop). A shell pushes on the detail's own stack.

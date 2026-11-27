@@ -42,6 +42,13 @@ public struct FactoryAgentsList: Equatable, Sendable {
         public var accessibilitySummary: String {
             ["\(head.name) \(kindWord)", head.goal, stateWord, countsLine].joined(separator: ", ")
         }
+        public var isSidebarWaiting: Bool { waitingOnYouCount > 0 || coordinatorBlocked }
+        private var sidebarWaiting: Int { waitingOnYouCount + (coordinatorBlocked ? 1 : 0) }
+        public var sidebarMeta: String { sidebarWaiting > 0 ? "\(sidebarWaiting) waiting" : stateWord }
+        public var sidebarAccessibilityLabel: String {
+            let base = "\(head.name) \(kindWord), \(stateWord)"
+            return sidebarWaiting > 0 ? "\(base), \(sidebarWaiting) waiting on you" : base
+        }
         public var accessibilityLabel: String {
             [accessibilitySummary, alertLine, alertFixLine,
              coordinatorBlocked ? "the coordinator is stuck on a prompt" : nil]
@@ -50,7 +57,7 @@ public struct FactoryAgentsList: Equatable, Sendable {
     }
 
     public let agents: Flock
-    private let items: [Item]
+    let items: [Item]
     public let factoryAsks: [PendingAction]
 
     public init(agents: [Agent], heads: [FactoryProjectHead], questions: [PendingAction]) {

@@ -7,17 +7,36 @@ import SwiftUI
 /// waiting card carries its question and answer buttons, as on iPhone.
 /// With one computer there are no computer sections.
 struct AllAgentsView: View {
+    private enum CardItem: Identifiable {
+        case ask(PendingAction), head(FactoryAgentsList.Item), agent(Agent)
+        var id: String {
+            switch self {
+            case let .ask(a): return "ask:\(a.id)"
+            case let .head(h): return "head:\(h.id)"
+            case let .agent(a): return "agent:\(a.paneID)"
+            }
+        }
+    }
+
     let leading: AnyView?
     @EnvironmentObject private var model: SessionViewModel
+    @Environment(SceneUI.self) private var ui
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var filter: AgentFilter = .all
+    @State private var openDone: Set<String> = []
 
-    private var paneState: FlockPaneState {
-        model.flockPaneState
+    private var factoryList: FactoryAgentsList { model.agentsModel.factoryList }
+    private var paneState: FlockPaneState { model.flockPaneState(hasAgents: !factoryList.isEmpty) }
+    private var shown: [Agent] { factoryList.agents.running.filter(filter.matches) }
+
+    private var currentHasMatches: Bool {
+        switch filter {
+        case .all: return !factoryList.isEmpty
+        case .waiting: return !shown.isEmpty || !factoryList.needsYouHeads.isEmpty || !factoryList.factoryAsks.isEmpty
+        case .working: return !shown.isEmpty || !factoryList.workingHeads.isEmpty
+        }
     }
-
-    private var shown: [Agent] { model.flock.running.filter(filter.matches) }
 
     private var allExpanded: Bool {
         let open = shown.filter { model.questionCard(for: $0.paneID) == nil }
@@ -25,9 +44,12 @@ struct AllAgentsView: View {
     }
 
     private var subtitle: String {
-        let count = model.flock.running.count
+        let count = factoryList.agents.running.count
+        let projects = factoryList.needsYouHeads.count + factoryList.workingHeads.count
+            + factoryList.stoppedHeads.count + factoryList.finishedHeads.count
         var text = count == 1 ? "1 agent" : "\(count) agents"
-        let waiting = model.flock.waitingCount
+        if projects > 0 { text += " · \(projects == 1 ? "1 factory project" : "\(projects) factory projects")" }
+        let waiting = factoryList.waitingCount
         if waiting > 0 { text += " · \(waiting) waiting" }
         return text
     }
@@ -41,7 +63,7 @@ struct AllAgentsView: View {
             }
             if paneState != .content, model.otherSnapshots.isEmpty {
                 FlockUnavailableView(state: paneState)
-            } else if shown.isEmpty, model.otherSnapshots.isEmpty {
+            } else if !currentHasMatches, model.otherSnapshots.isEmpty {
                 ContentUnavailableView {
                     Label(filter.emptyText, systemImage: filter == .waiting ? "hand.raised" : "square.grid.2x2")
                 } actions: {
@@ -156,7 +178,7 @@ struct AllAgentsView: View {
                 VStack(alignment: .leading, spacing: 14) {
                     let sections = model.sectionSnapshots
                     if sections.isEmpty {
-                        sectioned(shown)
+                        sectioned(factoryList, computer: nil)
                     } else {
                         ForEach(sections) { computer in
                             let offline: Bool = { if case .offline = computer.reachability { return true }; return false }()
@@ -178,11 +200,13 @@ struct AllAgentsView: View {
                             .padding(.top, computer.id == sections.first?.id ? 0 : 10)
                             if model.agentsModel.isComputerExpanded(computer.id) {
                                 if computer.isCurrent {
-                                    sectioned(shown)
+                                    sectioned(factoryList, computer: nil)
                                 } else if offline {
                                     OfflineComputerRow(name: computer.name, lastSeen: computer.lastSeen()) { model.session(computer.id)?.retry() }
                                 } else {
-                                    columns(Flock(computer.agents).running.filter(filter.matches), computer: computer.id)
+                                    let list = FactoryAgentsList(agents: computer.agents, heads: computer.factoryHeads,
+                                                                 questions: computer.questions)
+                                    sectioned(list, computer: computer)
                                 }
                             }
                         }
@@ -207,61 +231,126 @@ struct AllAgentsView: View {
         )
     }
 
-    /// The current computer's agents under Needs you / Working / Done, each
-    /// section in its two columns.
+    /// Agents and factory project heads under Needs you / Working / Stopped / Done.
     @ViewBuilder
-    private func sectioned(_ agents: [Agent]) -> some View {
-        ForEach([AgentGroup.needsYou, .working, .done], id: \.self) { group in
-            let members = agents.filter { $0.group == group }
-            if !members.isEmpty {
-                AgentSectionHeader(group: group, count: members.count)
-                columns(members, computer: nil)
+    private func sectioned(_ list: FactoryAgentsList, computer: ComputerSnapshot?) -> some View {
+        let id = computer?.id ?? model.currentComputerID
+        let agents = list.agents.running.filter(filter.matches)
+        let asks = filter == .working ? [] : list.factoryAsks
+        let needsHeads = filter == .working ? [] : list.needsYouHeads
+        let workHeads = filter == .waiting ? [] : list.workingHeads
+        let stopHeads = filter == .all ? list.stoppedHeads : []
+        let doneHeads = filter == .all ? list.finishedHeads : []
+        let groups: [(AgentGroup, [CardItem])] = [
+            (.needsYou, asks.map(CardItem.ask) + needsHeads.map(CardItem.head)
+                + agents.filter { $0.group == .needsYou }.map(CardItem.agent)),
+            (.working, workHeads.map(CardItem.head) + agents.filter { $0.group == .working }.map(CardItem.agent)),
+            (.done, doneHeads.map(CardItem.head) + agents.filter { $0.group == .done }.map(CardItem.agent)),
+        ]
+        ForEach(groups, id: \.0) { group, items in
+            if group == .done && !stopHeads.isEmpty {
+                AgentSectionHeader(group: .working, count: stopHeads.count, title: "Stopped")
+                columns(stopHeads.map(CardItem.head), computer: computer, firstAskID: asks.first?.id)
+            }
+            if !items.isEmpty {
+                let folded = group == .done && !doneHeads.isEmpty
+                if folded {
+                    doneFoldRow(count: items.count, id: id)
+                } else if computer == nil || list.hasFactoryContent {
+                    AgentSectionHeader(group: group, count: items.count)
+                }
+                if !folded || openDone.contains(id) {
+                    columns(items, computer: computer, firstAskID: asks.first?.id)
+                }
             }
         }
+    }
+
+    private func doneFoldRow(count: Int, id: String) -> some View {
+        let open = openDone.contains(id)
+        return Button {
+            withAnimation(Theme.ease) {
+                if open { openDone.remove(id) } else { openDone.insert(id) }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                Text("Done (\(count))").font(.subheadline.weight(.medium))
+                Spacer()
+            }
+            .foregroundStyle(Theme.muted).frame(minHeight: 44).contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityValue(open ? "Shown" : "Hidden").accessibilityIdentifier("flock.section.done")
     }
 
     /// Two columns of independent heights (no row gaps), one at the
     /// accessibility sizes.
     @ViewBuilder
-    private func columns(_ agents: [Agent], computer: String?) -> some View {
+    private func columns(_ items: [CardItem], computer: ComputerSnapshot?, firstAskID: String?) -> some View {
         if dynamicTypeSize.isAccessibilitySize {
-            column(agents, computer: computer)
+            column(items, computer: computer, firstAskID: firstAskID)
         } else {
-            let (left, right) = AgentFilter.columns(agents)
+            let (left, right) = AgentFilter.columns(items)
             HStack(alignment: .top, spacing: 14) {
-                column(left, computer: computer)
-                column(right, computer: computer)
+                column(left, computer: computer, firstAskID: firstAskID)
+                column(right, computer: computer, firstAskID: firstAskID)
             }
         }
     }
 
-    /// `computer` is another computer's id, nil for the current one's.
-    private func column(_ agents: [Agent], computer: String?) -> some View {
-        let first = computer == nil ? shown.first { model.questionCard(for: $0.paneID) != nil }?.paneID : nil
-        let ownerID = computer ?? model.currentComputerID
+    /// `computer` is another computer's snapshot, nil for the current one.
+    private func column(_ items: [CardItem], computer: ComputerSnapshot?, firstAskID: String?) -> some View {
+        let first = computer == nil && factoryList.factoryAsks.isEmpty && factoryList.needsYouHeads.isEmpty
+            ? shown.first { model.questionCard(for: $0.paneID) != nil }?.paneID : nil
+        let ownerID = computer?.id ?? model.currentComputerID
         return LazyVStack(spacing: 12) {
-            ForEach(agents) { agent in
-                let question = computer.map { model.remoteCard(computer: $0, paneID: agent.paneID) } ?? model.questionCard(for: agent.paneID)
-                let key = computer.map { "\($0)|\(agent.paneID)" } ?? agent.paneID
-                AgentCard(
-                    agent: agent,
-                    question: question,
-                    primary: agent.paneID == first,
-                    voiceQuestion: computer == nil && question?.pending.id == model.approval?.pending.id,
-                    showsEarlier: true,
-                    computer: computer,
-                    expanded: Binding(
-                        get: { model.agentsModel.expandedAgents.contains(key) },
-                        set: { open in
-                            if open { model.agentsModel.expandedAgents.insert(key) } else { model.agentsModel.expandedAgents.remove(key) }
-                        }
-                    ),
-                    answer: { model.answer(question: $0, option: $1, on: ownerID) }
-                )
-                .id(key)
+            ForEach(items) { item in
+                switch item {
+                case let .ask(ask):
+                    let card = askCard(ask, computer: computer)
+                    ApprovalCardView(card: card, primary: computer == nil && ask.id == firstAskID,
+                                     idPrefix: "factoryAsk.\(ask.id)") {
+                        model.answer(question: card.pending.id, option: $0, on: ownerID)
+                    }
+                case let .head(headItem):
+                    let dialog = headItem.coordinatorDialog.map { askCard($0, computer: computer) }
+                    FactoryHeadCard(item: headItem, computer: computer, dialog: dialog,
+                                    answer: { model.answer(question: $0, option: $1, on: ownerID) },
+                                    onOpen: {
+                                        ui.detail = .factoryProject(computerID: ownerID, projectID: headItem.id)
+                                        ui.detailPath = NavigationPath()
+                                    })
+                case let .agent(agent):
+                    let question = computer.map { model.remoteCard(computer: $0.id, paneID: agent.paneID) }
+                        ?? model.questionCard(for: agent.paneID)
+                    let key = computer.map { "\($0.id)|\(agent.paneID)" } ?? agent.paneID
+                    AgentCard(
+                        agent: agent, question: question, primary: agent.paneID == first,
+                        voiceQuestion: computer == nil && question?.pending.id == model.approval?.pending.id,
+                        showsEarlier: true, computer: computer?.id,
+                        expanded: Binding(
+                            get: { model.agentsModel.expandedAgents.contains(key) },
+                            set: { open in
+                                if open { model.agentsModel.expandedAgents.insert(key) }
+                                else { model.agentsModel.expandedAgents.remove(key) }
+                            }
+                        ),
+                        answer: { model.answer(question: $0, option: $1, on: ownerID) }
+                    )
+                    .id(key)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .top)
+    }
+
+    private func askCard(_ ask: PendingAction, computer: ComputerSnapshot?) -> ApprovalFlow.Card {
+        guard let computer else { return .init(pending: ask, phase: model.questionPhase(ask.id)) }
+        var pending = ask
+        pending.id = RemoteQuestion.id(computer: computer.id, question: ask.id)
+        return .init(pending: pending, phase: model.session(computer.id)?.phase(ask.id) ?? .open(error: nil))
     }
 
     private func ensureFocusedAgentVisible() {
@@ -273,7 +362,7 @@ struct AllAgentsView: View {
             let agents = model.sectionSnapshots.first(where: { $0.id == cid })?.agents ?? []
             matchingAgent = Flock(agents).running.first(where: { $0.paneID == target.paneID })
         } else {
-            matchingAgent = model.flock.running.first(where: { $0.paneID == target.paneID })
+            matchingAgent = factoryList.agents.running.first(where: { $0.paneID == target.paneID })
         }
         if matchingAgent == nil || !filter.matches(matchingAgent!) {
             filter = .all
@@ -281,7 +370,7 @@ struct AllAgentsView: View {
     }
 
     private var renderedFocusToken: [String] {
-        var ids = model.flock.running.map(\.paneID)
+        var ids = factoryList.agents.running.map(\.paneID)
         for computer in model.sectionSnapshots where !computer.isCurrent {
             if case .offline = computer.reachability { continue }
             ids.append(contentsOf: Flock(computer.agents).running.map { "\(computer.id)|\($0.paneID)" })

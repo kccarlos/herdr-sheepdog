@@ -67,7 +67,10 @@ struct MainView: View {
             toggleMute: VoiceBarModel(state: model.voice.state, talkMode: model.voice.talkMode).muteAvailability == .enabled
                 ? { model.voice.toggleMute() } : nil,
             muted: model.voice.isMuted,
-            agents: SidebarSections(computers: [.computer(id: model.currentComputerID, name: model.currentComputerName, agents: model.flock.all)]).agents,
+            agents: SidebarSections(computers: [.computer(
+                id: model.currentComputerID, name: model.currentComputerName, agents: model.flock.all,
+                factoryHeads: model.fleet.current?.factoryHeads ?? [], questions: model.agentsModel.questions
+            )]).agents,
             openAgent: { open(.agent($0)) },
             talkToNext: model.showsComputerLabels ? { model.talkToNext() } : nil
         )
@@ -90,7 +93,8 @@ struct MainView: View {
             case let .shell(cwd):
                 ui.detailPath.append(ShellRoute(cwd: cwd))
             case let .factoryProject(head, computerID):
-                ui.detailPath.append(FactoryProjectRoute(head: head, computerID: computerID))
+                ui.detailPath = NavigationPath()
+                ui.detail = .factoryProject(computerID: computerID, projectID: head.id)
             }
             return
         }
