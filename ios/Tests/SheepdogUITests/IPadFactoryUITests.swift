@@ -96,9 +96,25 @@ final class IPadFactoryUITests: XCTestCase {
         XCTAssertLessThanOrEqual(taskT8.frame.maxX, graph.frame.minX + 2, "task list and graph sit side by side")
         XCTAssertEqual(element(app, "factoryProject.say.field").label, "Tell the notes factory")
         XCTAssertEqual(element(app, "factoryProject.coordinator").label, "Open the notes coordinator's window")
-        XCTAssertEqual(element(app, "factoryProject.graph.node.T7").label, "T7, Search, working, after T1 and T4")
+        let nodeT7 = element(app, "factoryProject.graph.node.T7")
+        let nodeT10 = element(app, "factoryProject.graph.node.T10")
+        XCTAssertEqual(nodeT7.label, "T7, Search, working, after T1 and T4")
         XCTAssertEqual(element(app, "factoryProject.graph.node.T6").label, "T6, Storage, split")
-        XCTAssertEqual(element(app, "factoryProject.graph.node.T10").label, "T10, Import, waiting on you, after T4")
+        XCTAssertEqual(nodeT10.label, "T10, Import, waiting on you, after T4")
+        XCTAssertTrue(
+            element(app, "factoryProject.graph.layer.0").exists
+                && element(app, "factoryProject.graph.layer.1").exists
+                && element(app, "factoryProject.graph.layer.2").exists,
+            "graph groups nodes into per-layer containers for layer-by-layer VoiceOver order"
+        )
+        XCTAssertLessThanOrEqual(
+            nodeT7.frame.maxX, graph.frame.maxX - 1,
+            "third layer node T7 fits inside the graph card without right-edge clipping"
+        )
+        XCTAssertLessThanOrEqual(
+            nodeT10.frame.maxX, graph.frame.maxX - 1,
+            "third layer node T10 fits inside the graph card without right-edge clipping"
+        )
         shot("13b-board-graph")
 
         let droppedNode = element(app, "factoryProject.graph.node.T9")
@@ -250,18 +266,35 @@ final class IPadFactoryUITests: XCTestCase {
     }
 
     func testBoardGraphAtLargestText() throws {
-        let heads = #"[{"id":"proj-1","name":"notes","goal":"A notes page with search","state":"running","counts":{"working":2,"owner_answer":1,"done":4},"folder":"~/code/notes","coordinator_pane":"coord-notes-1"}]"#
+        let heads = #"""
+        [{"id":"proj-1","name":"notes","goal":"A notes page with search","state":"running",
+          "counts":{"working":2,"owner_answer":1,"done":4},"folder":"~/code/notes",
+          "coordinator_pane":"coord-notes-1"}]
+        """#
         let stub = try StubDaemon(.computer(name: "Work Mac", agents: "[]", questions: "[]", factory: heads))
         stub.factoryGraphs["proj-1"] = Self.sampleGraph
-        let host = try stub.start(); defer { stub.stop() }
+        let host = try stub.start()
+        defer { stub.stop() }
 
-        let app = launch(computers: "Work Mac=\(host)", extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"])
+        let app = launch(
+            computers: "Work Mac=\(host)",
+            extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        )
         let notesRow = element(app, "sidebar.factory.proj-1")
         XCTAssertTrue(notesRow.waitForExistence(timeout: 15))
         tapWhenTappable(notesRow, "notes at AX5")
         let graph = scrollToVisible(app, element(app, "factoryProject.graph"))
-        XCTAssertTrue(graph.waitForExistence(timeout: 15))
         XCTAssertEqual(graph.label, "task graph: 7 tasks in 3 layers")
+        let doneFold = app.buttons["factoryProject.doneFold"].firstMatch
+        XCTAssertTrue(doneFold.exists)
+        XCTAssertLessThanOrEqual(
+            doneFold.frame.maxY, graph.frame.minY + 2,
+            "at AX5 the graph must stack below the task list"
+        )
+        XCTAssertLessThan(
+            abs(doneFold.frame.minX - graph.frame.minX), 8,
+            "at AX5 the graph aligns with the full-width task column"
+        )
         XCTAssertTrue(scrollToVisible(app, element(app, "factoryProject.graph.node.T7")).exists)
         shot("13b-board-graph-ax5")
     }
