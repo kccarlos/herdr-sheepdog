@@ -71,10 +71,23 @@ final class FactorySettingsUITests: XCTestCase {
         XCTAssertTrue(secondRevRow.staticTexts["not used while reviewer models are set"].exists)
 
         // Transient reload failure preserves already-loaded rows; subsequent factory.changed updates live.
+        XCTAssertTrue(
+            waitUntil(10) { stub.requests("GET /events") >= 1 },
+            "/events stream must connect before emitting factory.changed"
+        )
+        let getsBefore = stub.requests("GET /api/factory/projects/proj-1/settings")
         stub.factorySettingsErrors["proj-1"] = (503, #"{"error":"herdr busy"}"#)
         stub.emitFactoryChanged(project: "proj-1")
-        usleep(400_000)
-        XCTAssertFalse(app.staticTexts["Can't load the settings. Trying again."].exists, "transient reload failure must keep loaded rows")
+        XCTAssertTrue(
+            waitUntil(10) { stub.requests("GET /api/factory/projects/proj-1/settings") > getsBefore },
+            "factory.changed must trigger a settings reload request before checking row preservation"
+        )
+        usleep(300_000)
+        XCTAssertTrue(secondRevRow.exists && allFold.exists, "transient reload failure must keep loaded rows")
+        XCTAssertFalse(
+            app.staticTexts["Can't load the settings. Trying again."].exists,
+            "transient reload failure must keep loaded rows"
+        )
 
         stub.factorySettingsErrors["proj-1"] = nil
         stub.factorySettings["proj-1"] = Self.settingsJSON(maxRunning: "5")
@@ -123,5 +136,14 @@ final class FactorySettingsUITests: XCTestCase {
         tapWhenTappable(app.buttons["factorySettings.retry"].firstMatch, "Retry settings")
         XCTAssertTrue(loadErr.waitForNonExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["No settings available."].waitForExistence(timeout: 5))
+    }
+
+    private func waitUntil(_ timeout: TimeInterval = 5, _ check: () -> Bool) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if check() { return true }
+            usleep(100_000)
+        }
+        return check()
     }
 }
