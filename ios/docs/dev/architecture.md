@@ -361,7 +361,7 @@ accessibility text sizes. The voice capsule stays in place.
   (`Presentation.newFactoryProject`), reuses `GET /api/spaces` and
   `FactoryNewProjectForm`, runs start checks via `checkFactory`, and on
   start dismisses into `FactoryProjectRoute` to push the new project's
-  board. When a running head has a coordinator pane, `FactoryCoordinatorView` and
+  board (or sets `IPadDetail.factoryProject` on regular-width iPad). When a running head has a coordinator pane, `FactoryCoordinatorView` and
   `FactoryCoordinatorWindow` open its live terminal through
   `AgentScreenView` (without the agent menu, Stop or Attach) and show the
   project's off-state recovery screen when the coordinator is not running.
@@ -471,19 +471,28 @@ section 6.
   `NavigationSplitView`, balanced in landscape and `prominentDetail` in
   portrait (the sidebar slides over; portrait opens on the detail).
   - `IPadSidebar` (390 pt): the title with `+` and `⋯`, Conversation, All
-    agents with the waiting count, then the agents under their spaces
-    (`SidebarSections` in Kit: spaces by name, agents by alias, running
-    only; no computer row with one computer). No capsule: it floats over
-    the detail. No agents: one line with the action that helps (New agent, Connect,
-    Pair, Retry).
+    agents with the waiting count, active factory projects above ordinary
+    agents (`SidebarSections` in Kit: non-finished factory heads with waiting
+    or state meta, then spaces by name and ordinary agents by alias, running
+    only; factory worker and coordinator panes filtered out; no computer row
+    with one computer). No capsule: it floats over the detail. No agents or
+    projects: one line with the action that helps (New agent, Connect, Pair,
+    Retry).
   - The detail (`SceneUI.detail`): the Conversation in a 720 pt column;
     the open questions, the coach mark and the capsule are the floating
-    dock (below); All agents
-    (`AllAgentsView`: `AgentCard`s in two independent columns, one at the
-    accessibility sizes; `AgentFilter` All / Waiting / Working with a
-    plain empty state and Show all; Expand all fills `expandedAgents` with
-    every card that has no question; expanded cards add "Earlier", up to 3
-    older messages, `Agent.earlierWorkerMessages`); or
+    dock (below); All agents (`AllAgentsView`: `FactoryAgentsList` sections —
+    Needs you asks and stuck coordinators, Working heads and agents, Stopped
+    heads, and collapsed Done for finished heads — plus `AgentCard`s in two
+    independent columns, one at the accessibility sizes; `AgentFilter` All /
+    Waiting / Working with a plain empty state and Show all; Expand all fills
+    `expandedAgents` with every card that has no question; expanded cards add
+    "Earlier", up to 3 older messages, `Agent.earlierWorkerMessages`); a
+    factory project board (`IPadDetail.factoryProject`, including another
+    computer's project directly per D12 without moving voice, laying out the
+    task list beside the layered dependency graph `FactoryTaskGraphView` over
+    Kit's `FactoryTaskGraph` (`BoardLayout`) when regular-width room allows
+    and stacking in narrow windows or at accessibility text sizes; tapping any
+    graph node pushes `FactoryTaskView`); or
     an agent's window as a pane (`AgentScreenView(pane:)` with a
     `PaneChrome`: its own header with the dot, name and space, ⋯, and
     Close instead of a pop). A shell pushes on the detail's own stack.
@@ -499,9 +508,9 @@ section 6.
     sidebar when the sidebar lies over the detail in portrait; beside it
     the detail's own bounds already exclude the sidebar). The offset
     animates with `Theme.ease`, none under Reduce Motion. The dock shows
-    only on the Conversation and All agents (`IPadDetail.showsCapsule`;
-    the questions only on the Conversation, as on iPhone, where they sit on
-    the Agents cards): an agent's terminal has its own composer and key
+    on the Conversation, All agents and factory project boards
+    (`IPadDetail.showsCapsule`; the questions only on the Conversation, as
+    on iPhone, where they sit on the Agents cards): an agent's terminal has its own composer and key
     bar, which a floating capsule must never cover, so, as on iPhone, a
     terminal has no capsule (its voice controls are a later task).
 - **Two panes** (`AgentPanes.swift`): `IPadDetail.pair` puts two agents
@@ -536,9 +545,13 @@ section 6.
 - **Tests:** `IPadUITests` (offline demo, skipped on iPhone) covers the
   sidebar and detail, the floating capsule (clear of the sidebar, centred
   in portrait, gone from a terminal), All agents, two panes with drag and
-  drop, Open in New Window and the shortcuts; `IPadPortraitKeyboardUITests`
-  the chat's keyboard with the sidebar hidden. ios.yml runs only these on an iPad
-  simulator, from the same build as the iPhone run.
+  drop, Open in New Window and the shortcuts; `IPadFactoryUITests`
+  (`StubDaemon`, skipped on iPhone) covers factory projects in the iPad
+  sidebar and All agents, local and remote boards (D12), task navigation,
+  settled factory asks, gone projects, empty/error states and Dynamic Type;
+  `IPadPortraitKeyboardUITests` the chat's keyboard with the sidebar hidden.
+  ios.yml runs only these on an iPad simulator, from the same build as the
+  iPhone run.
 - **Opening a window** goes through one seam: `\.openAgentWindow`
   (`WindowRequest`: an agent, a new agent, a shell). The iPhone layout
   pushes on `navigationPath`. Requests from the session itself (a card's
