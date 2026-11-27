@@ -307,6 +307,9 @@ func (e *Engine) reconcileCoordWakesLocked(id string, s *flow.State, tick flow.R
 		saved = e.saveLocked(id, next)
 	} else {
 		decision := fmt.Sprintf("unconfirmed wake: retried [%s], exhausted [%s]", strings.Join(retried, ", "), strings.Join(exhausted, ", "))
+		if slices.Contains(exhausted, "project:new_goal") {
+			decision += " (start again with the same goal to re-deliver)"
+		}
 		saved = e.commitLogLocked(id, &next, LogLine{By: "engine", Rule: "J12", Asked: keys, Decision: decision, Why: reason})
 	}
 	if saved {

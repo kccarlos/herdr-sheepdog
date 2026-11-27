@@ -298,8 +298,11 @@ func (e *Engine) StartSet(folder, goal string, set map[string]string) error {
 	if goal != s.Project.Goal {
 		s.Project.GoalGen++
 	}
-	if s.Project.Goal != "" && goal != s.Project.Goal && len(s.Tasks) > 0 {
+	requeueNewGoal := s.Project.Goal != "" && goal != s.Project.Goal && len(s.Tasks) > 0
+	if requeueNewGoal {
 		s.Project.NewGoal, s.Project.NewGoalTasks = true, len(s.Tasks)
+	}
+	if requeueNewGoal || s.Project.NewGoal && goal != "" && !flow.HasNewGoalWakeGen(s.Project.Wakes, s.Project.GoalGen) && !flow.HasNewGoalWakeGen(s.Project.CoordWakesInFlight, s.Project.GoalGen) {
 		replaceProjectWake(&s, flow.Wake{Key: "new_goal", Why: "owner gave a new goal", Facts: "goal: " + goal, GoalGen: s.Project.GoalGen, At: e.now()})
 	}
 	s.Project.Folder, s.Project.RepoURL, s.Project.Goal, s.Project.Started, s.Project.Finished, s.Project.Acts, s.Project.Base, s.Project.Invariants, s.Project.WaitKey, s.Project.CoordSilentStops = root, repoURL, goal, true, false, nil, nil, nil, "", 0
