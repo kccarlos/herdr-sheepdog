@@ -443,11 +443,13 @@ it looks exactly like the iPhone app.
   Tapping a factory project opens its board directly (even on another computer,
   without moving the voice).
 - **Detail:** an agent's window (terminal, its question above the keys,
-  the keys and a composer), a factory project's board, the Conversation in a
-  centred column, or **All agents**: every factory project head and agent as a
-  card in two columns (with **Stopped** and collapsed **Done** for finished
-  projects), the filters All, Waiting and Working, and Expand all. Expanded
-  cards also list up to three earlier messages.
+  the keys and a composer), a factory project's board (with the task list and
+  interactive dependency graph side by side; tap any task node to open its
+  details), the Conversation in a centred column, or **All agents**: every
+  factory project head and agent as a card in two columns (with **Stopped**
+  and collapsed **Done** for finished projects), the filters All, Waiting and
+  Working, and Expand all. Expanded cards also list up to three earlier
+  messages.
 - **The voice capsule** floats at the bottom centre of the detail, as on
   the iPhone, and moves aside when the sidebar shows. The keyboard button
   turns it into the text field. An agent's terminal has no capsule (so

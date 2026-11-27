@@ -9,7 +9,10 @@ struct FactoryProjectView: View {
     var onDismiss: (() -> Void)? = nil
     @EnvironmentObject private var model: SessionViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var loaded: Result<([FactoryTask], Bool), Error>?
+    @State private var boardWidth: CGFloat = 0
     @State private var text = ""
     @State private var feedback: (message: String, color: Color)?
     @State private var showsCoordinator = false
@@ -22,6 +25,14 @@ struct FactoryProjectView: View {
 
     private var computer: ComputerModel? { model.fleet.model(computerID) }
     private var head: FactoryProjectHead { computer?.factoryHeads.first { $0.id == initialHead.id } ?? initialHead }
+    private var isRegular: Bool { sizeClass == .regular }
+    private var boardLayout: FactoryTaskGraph.BoardLayout {
+        .init(
+            isRegular: isRegular,
+            isAccessibilitySize: dynamicTypeSize.isAccessibilitySize,
+            availableWidth: boardWidth
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -62,6 +73,7 @@ struct FactoryProjectView: View {
             showsSettings = false
             selectedTask = nil
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width.rounded() } action: { boardWidth = $0 }
     }
 
     private var boardScroll: some View {
@@ -95,35 +107,19 @@ struct FactoryProjectView: View {
                             .accessibilityIdentifier("factoryProject.settings")
                     }
                     composer(board, on: computer)
-                    if !board.openAsks.isEmpty {
-                        Text(board.asksHeading).font(.headline).foregroundStyle(Theme.blockedText)
-                            .accessibilityAddTraits(.isHeader).id("factoryProject.asks")
-                    }
-                    ForEach(board.openAsks, id: \.id) { ask in
-                        ApprovalCardView(card: .init(pending: ask, phase: computer.phase(ask.id)), idPrefix: "question.\(ask.id)") { computer.answer(question: ask.id, option: $0) }
-                    }
-                    Text("Tasks").font(.headline).accessibilityAddTraits(.isHeader)
-                    if board.isEmptyTasks {
-                        Text(board.emptyTasksHeading)
-                            .accessibilityIdentifier("factoryProject.emptyTasks.heading")
-                        Text(board.emptyTasksDetail)
-                            .foregroundStyle(Theme.muted)
-                            .accessibilityIdentifier("factoryProject.emptyTasks.detail")
-                    }
-                    ForEach(board.activeGroups, id: \.stage) { group in
-                        Text("\(group.label) \(group.tasks.count)").font(.subheadline.weight(.semibold))
-                            .foregroundStyle(group.isAlert ? Theme.blockedText : Theme.muted).accessibilityAddTraits(.isHeader)
-                        ForEach(group.tasks, content: row)
-                    }
-                    if !board.doneTasks.isEmpty {
-                        Button { showDone.toggle() } label: {
-                            HStack(spacing: 6) { Text(board.doneFoldLabel).font(.subheadline.weight(.semibold)); Spacer(); Image(systemName: "chevron.right").font(.footnote.weight(.semibold)).rotationEffect(.degrees(showDone ? 90 : 0)).accessibilityHidden(true) }
-                                .foregroundStyle(Theme.muted).frame(minHeight: 44).contentShape(Rectangle())
-                        }.buttonStyle(.plain).accessibilityValue(showDone ? "Shown" : "Hidden").accessibilityIdentifier("factoryProject.doneFold")
-                        if showDone { ForEach(board.doneTasks, content: row) }
+                    let layout = boardLayout.sideBySide && !board.isEmptyTasks
+                        ? AnyLayout(HStackLayout(alignment: .top, spacing: 16))
+                        : AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+                    layout {
+                        tasksSection(board, on: computer)
+                            .frame(width: board.isEmptyTasks ? nil : boardLayout.listWidth, alignment: .leading)
+                        if isRegular && !board.isEmptyTasks {
+                            FactoryTaskGraphView(graph: FactoryTaskGraph(tasks: tasks)) { selectedTask = $0 }
+                        }
                     }
                 }
-                .frame(maxWidth: 660, alignment: .leading).padding(16)
+                .frame(maxWidth: isRegular ? .infinity : 660, alignment: .leading)
+                .padding(16)
                 .accessibilityElement(children: .contain).accessibilityIdentifier("factoryProject.board")
             } else {
                 ProgressView(FactoryProjectBoard.loadingMessage(projectName: head.name, computerName: name)).padding()
@@ -136,6 +132,48 @@ struct FactoryProjectView: View {
         .toolbar(onDismiss == nil ? .visible : .hidden, for: .navigationBar)
         .task(id: "\(computer?.factoryChanges[head.id] ?? 0):\(head.state.rawValue):\(head.goal)") { await load() }
         .onChange(of: head.state) { feedback = nil }
+    }
+
+    private func tasksSection(_ board: FactoryProjectBoard, on computer: ComputerModel) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !board.openAsks.isEmpty {
+                Text(board.asksHeading).font(.headline).foregroundStyle(Theme.blockedText)
+                    .accessibilityAddTraits(.isHeader).id("factoryProject.asks")
+            }
+            ForEach(board.openAsks, id: \.id) { ask in
+                ApprovalCardView(card: .init(pending: ask, phase: computer.phase(ask.id)),
+                                 idPrefix: "question.\(ask.id)") {
+                    computer.answer(question: ask.id, option: $0)
+                }
+            }
+            Text("Tasks").font(.headline).accessibilityAddTraits(.isHeader)
+            if board.isEmptyTasks {
+                Text(board.emptyTasksHeading)
+                    .accessibilityIdentifier("factoryProject.emptyTasks.heading")
+                Text(board.emptyTasksDetail)
+                    .foregroundStyle(Theme.muted)
+                    .accessibilityIdentifier("factoryProject.emptyTasks.detail")
+            }
+            ForEach(board.activeGroups, id: \.stage) { group in
+                Text("\(group.label) \(group.tasks.count)").font(.subheadline.weight(.semibold))
+                    .foregroundStyle(group.isAlert ? Theme.blockedText : Theme.muted).accessibilityAddTraits(.isHeader)
+                ForEach(group.tasks, content: row)
+            }
+            if !board.doneTasks.isEmpty {
+                Button { showDone.toggle() } label: {
+                    HStack(spacing: 6) {
+                        Text(board.doneFoldLabel).font(.subheadline.weight(.semibold))
+                        Spacer()
+                        Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
+                            .rotationEffect(.degrees(showDone ? 90 : 0)).accessibilityHidden(true)
+                    }
+                    .foregroundStyle(Theme.muted).frame(minHeight: 44).contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityValue(showDone ? "Shown" : "Hidden").accessibilityIdentifier("factoryProject.doneFold")
+                if showDone { ForEach(board.doneTasks, content: row) }
+            }
+        }
     }
 
     private func row(_ row: FactoryProjectBoard.Row) -> some View {
