@@ -441,3 +441,111 @@ func TestInvestigationFailureSaysWhy(t *testing.T) {
 		})
 	}
 }
+
+// TestInvestigationETA pins the ETA estimate rules: default 30 s with no
+// positive history, non-positive durations (frozen or backwards clock)
+// ignored, sub-second positive durations floored to 1 s so eta_s is never
+// 0, median filtered per backend, and startInvestigation computes the
+// estimate before launching the job goroutine so a fast job cannot fold
+// its own completion into its own ETA.
+func TestInvestigationETA(t *testing.T) {
+	recordDone := func(t *testing.T, h *harness, id, backend string, dur time.Duration) {
+		t.Helper()
+		started := h.clock.Now()
+		finished := started.Add(dur)
+		if err := h.sup.appendInvestigation(state.Investigation{
+			ID: id, PaneID: "w5:p1", Alias: "auth", Backend: backend,
+			Status: state.InvestigationDone, Started: started, Finished: &finished,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	t.Run("default, non-positive, sub-second floor and per-backend median", func(t *testing.T) {
+		h := newInvestigationHarness(t, &fakeInvestigator{answer: "ok", gate: make(chan struct{})})
+		if got := h.sup.investigateETA("codex"); got != defaultInvestigateETA {
+			t.Fatalf("empty history ETA = %v, want %v", got, defaultInvestigateETA)
+		}
+
+		// Zero and negative durations (frozen clock or NTP step back) are ignored.
+		recordDone(t, h, "inv-zero", "codex", 0)
+		recordDone(t, h, "inv-neg", "codex", -5*time.Second)
+		if got := h.sup.investigateETA("codex"); got != defaultInvestigateETA {
+			t.Fatalf("non-positive history ETA = %v, want %v", got, defaultInvestigateETA)
+		}
+		if got := h.sup.investigateETA(""); got != defaultInvestigateETA {
+			t.Fatalf("non-positive any-backend ETA = %v, want %v", got, defaultInvestigateETA)
+		}
+
+		// Sub-second positive durations floor to 1 s so eta_s is never 0.
+		recordDone(t, h, "inv-fast", "codex", 400*time.Millisecond)
+		if got := h.sup.investigateETA("codex"); got != minInvestigateETA {
+			t.Fatalf("sub-second history ETA = %v, want %v", got, minInvestigateETA)
+		}
+		job := start(t, h, "why did it fail?", "", "why")
+		if job.ETASeconds != 1 {
+			t.Fatalf("start ETASeconds with 400ms history = %d, want 1", job.ETASeconds)
+		}
+
+		// Median per backend ignores non-positive entries and isolates backends.
+		recordDone(t, h, "inv-c1", "codex", 15*time.Second)
+		recordDone(t, h, "inv-c2", "codex", 45*time.Second)
+		recordDone(t, h, "inv-cl1", "claude", 90*time.Second)
+		if got := h.sup.investigateETA("codex"); got != 15*time.Second {
+			t.Fatalf("codex median ETA = %v, want 15s", got)
+		}
+		if got := h.sup.investigateETA("claude"); got != 90*time.Second {
+			t.Fatalf("claude median ETA = %v, want 90s", got)
+		}
+		if got := h.sup.investigateETA("other"); got != defaultInvestigateETA {
+			t.Fatalf("unknown backend ETA = %v, want %v", got, defaultInvestigateETA)
+		}
+	})
+
+	t.Run("computed before goroutine starts", func(t *testing.T) {
+		for i := range 25 {
+			f := &fakeInvestigator{answer: "ok", backend: "codex"}
+			h := newInvestigationHarness(t, f)
+			// Immediate completion on a frozen clock (dur = 0) must still return
+			// the 30 s default, never 0 from racing with its own completion.
+			first := start(t, h, "why?", "", "why")
+			if first.ETASeconds != int(defaultInvestigateETA.Seconds()) {
+				t.Fatalf("iter %d: first ETASeconds = %d, want %d", i, first.ETASeconds, int(defaultInvestigateETA.Seconds()))
+			}
+			waitFor(t, func() bool { return len(h.pusher.all()) == 1 }, "first delivery")
+			// A follow-up after a 0-duration job also falls back to default (not 0).
+			second := start(t, h, "more?", first.Job, "more")
+			if second.ETASeconds != int(defaultInvestigateETA.Seconds()) {
+				t.Fatalf("iter %d: second ETASeconds = %d, want %d", i, second.ETASeconds, int(defaultInvestigateETA.Seconds()))
+			}
+			waitFor(t, func() bool { return len(h.pusher.all()) == 2 }, "second delivery")
+		}
+
+		// Even with a positive duration, a job that finishes immediately cannot
+		// fold its own duration into its own start ETA; only the next job sees it.
+		for i := range 25 {
+			h := newInvestigationHarness(t, nil)
+			h.sup.investigator = advancingInvestigator{clk: h.clock, dur: 5 * time.Second}
+			first := start(t, h, "why?", "", "why")
+			if first.ETASeconds != int(defaultInvestigateETA.Seconds()) {
+				t.Fatalf("iter %d: first ETASeconds = %d, want %d (must not include own 5s completion)", i, first.ETASeconds, int(defaultInvestigateETA.Seconds()))
+			}
+			waitFor(t, func() bool { return len(h.pusher.all()) == 1 }, "first delivery")
+			second := start(t, h, "again?", "", "again")
+			if second.ETASeconds != 5 {
+				t.Fatalf("iter %d: second ETASeconds = %d, want 5", i, second.ETASeconds)
+			}
+			waitFor(t, func() bool { return len(h.pusher.all()) == 2 }, "second delivery")
+		}
+	})
+}
+
+type advancingInvestigator struct {
+	clk *clock
+	dur time.Duration
+}
+
+func (a advancingInvestigator) Investigate(context.Context, InvestigationQuery) (InvestigationResult, error) {
+	a.clk.Advance(a.dur)
+	return InvestigationResult{Backend: "codex", Answer: "ok"}, nil
+}
