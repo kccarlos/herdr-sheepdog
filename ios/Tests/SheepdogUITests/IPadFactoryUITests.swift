@@ -69,7 +69,7 @@ final class IPadFactoryUITests: XCTestCase {
         let app = launch(computers: "Work Mac=\(host)")
         let section = element(app, "sidebar.factorySection")
         XCTAssertTrue(section.waitForExistence(timeout: 15))
-        XCTAssertTrue(section.label.contains("Factory projects") && section.label.contains("2, and 1 done"), section.label)
+        XCTAssertEqual(section.label, "Factory projects, 2, and 1 done")
 
         let notesRow = element(app, "sidebar.factory.proj-1")
         let photosRow = element(app, "sidebar.factory.proj-2")
@@ -93,6 +93,29 @@ final class IPadFactoryUITests: XCTestCase {
         XCTAssertEqual(element(app, "factoryProject.say.field").label, "Tell the notes factory")
         XCTAssertEqual(element(app, "factoryProject.coordinator").label, "Open the notes coordinator's window")
         shot("13a-board")
+
+        // Tap a dropped task in Done to push FactoryTaskView, verify its toolbar Back button pops cleanly,
+        // and verify re-tapping the selected project in the sidebar also pops back to the board.
+        let doneFold = revealAboveCapsule(app, scrollToVisible(app, app.buttons["factoryProject.doneFold"].firstMatch))
+        tapWhenTappable(doneFold, "Done fold on board")
+        let taskT9 = revealAboveCapsule(app, scrollToVisible(app, element(app, "factoryProject.task.T9")))
+        tapWhenTappable(taskT9, "task T9 on board")
+        let taskView = element(app, "factoryTask.view")
+        XCTAssertTrue(taskView.waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, "factoryTask.lastDecision").exists)
+        tapWhenTappable(app.navigationBars.buttons.element(boundBy: 0), "Back to notes board")
+        XCTAssertTrue(board.waitForExistence(timeout: 10))
+
+        scrollToTop(app)
+        let visibleT8 = revealAboveCapsule(app, scrollToVisible(app, element(app, "factoryProject.task.T8")))
+        tapWhenTappable(visibleT8, "task T8 on board")
+        XCTAssertTrue(taskView.waitForExistence(timeout: 10))
+        tapWhenTappable(notesRow, "selected notes project in sidebar")
+        XCTAssertTrue(board.waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            taskView.waitForNonExistence(timeout: 5),
+            "re-selecting the project in the sidebar pops pushed detail views"
+        )
     }
 
     func testAllAgentsHeadsBlockedCoordinatorDeduplicationAndRemoteProjectD12() throws {
@@ -115,18 +138,48 @@ final class IPadFactoryUITests: XCTestCase {
         XCTAssertEqual(notesSidebar.label, "notes factory, running, 1 waiting on you")
         XCTAssertFalse(element(app, "sidebar.agent.coord-notes").exists)
 
+        let homeSidebarHeader = element(app, "computerLabel.sidebar.fixture-2")
+        XCTAssertTrue(homeSidebarHeader.waitForExistence(timeout: 10))
+
         tapWhenTappable(element(app, "sidebar.allAgents"), "All agents")
         XCTAssertTrue(element(app, "flock.factory.proj-notes").waitForExistence(timeout: 10))
         XCTAssertFalse(element(app, "flock.agent.coord-notes").exists)
         XCTAssertFalse(element(app, "flock.factory.proj-done").exists)
         shot("13a-all-agents")
-        tapWhenTappable(scrollToVisible(app, app.buttons["flock.section.done"].firstMatch), "Done fold")
+
+        let doneFold = scrollToVisible(app, app.buttons["flock.section.done"].firstMatch)
+        let doneFoldLabel = doneFold.label
+        tapWhenTappable(doneFold, "Done fold")
         XCTAssertTrue(scrollToVisible(app, element(app, "flock.factory.proj-done")).exists)
+
+        // Tap a FactoryHeadCard directly inside All agents (covers FactoryHeadCard.onOpen + D12).
+        let homeCard = revealAboveCapsule(app, scrollToVisible(app, element(app, "flock.factory.proj-home")))
+        tapWhenTappable(homeCard, "Home Mac photos card in All agents")
+        XCTAssertTrue(element(app, "factoryProject.board").waitForExistence(timeout: 15))
+        XCTAssertTrue(scrollToVisible(app, element(app, "factoryProject.task.T2")).exists)
+        XCTAssertEqual(element(app, "computer.sidebarVoiceMarker.fixture-1").label, "Voice is on Work Mac")
+
+        // Return to All agents, check multi-computer counts/labels, and also verify sidebar remote open.
+        tapWhenTappable(element(app, "sidebar.allAgents"), "All agents again")
+        let allTitle = element(app, "allAgents.title")
+        XCTAssertTrue(allTitle.waitForExistence(timeout: 10))
+        let homeSectionHeader = scrollToVisible(app, element(app, "computerLabel.section.fixture-2"))
+        let sidebarSummary = homeSidebarHeader.label
+        let sectionSummary = homeSectionHeader.label
+        let titleLabel = allTitle.label
 
         tapWhenTappable(homeSidebar, "Home Mac photos in sidebar")
         XCTAssertTrue(element(app, "factoryProject.board").waitForExistence(timeout: 15))
         XCTAssertTrue(scrollToVisible(app, element(app, "factoryProject.task.T2")).exists)
         XCTAssertEqual(element(app, "computer.sidebarVoiceMarker.fixture-1").label, "Voice is on Work Mac")
+
+        continueAfterFailure = true
+        XCTAssertEqual(doneFoldLabel, "Done (1)", "decorative chevron in Done fold must be hidden from VoiceOver")
+        XCTAssertTrue(sidebarSummary.contains("1 factory project"), sidebarSummary)
+        XCTAssertFalse(sidebarSummary.contains("No agents"), sidebarSummary)
+        XCTAssertTrue(sectionSummary.contains("1 factory project"), sectionSummary)
+        XCTAssertFalse(sectionSummary.contains("No agents"), sectionSummary)
+        XCTAssertTrue(titleLabel.contains("3 factory projects"), titleLabel)
     }
 
     func testEmptyAndErrorStatesWithPlainFixTextAndVoiceOver() throws {
@@ -181,5 +234,216 @@ final class IPadFactoryUITests: XCTestCase {
         let offlineApp = launch(computers: "Work Mac=\(zeroHost)", extra: ["-sheepdogNoNetwork"])
         tapWhenTappable(element(offlineApp, "sidebar.allAgents"), "All agents offline")
         XCTAssertTrue(element(offlineApp, "flock.noNetwork").waitForExistence(timeout: 15))
+    }
+
+    func testSecondaryComputerWithoutFactoryProjectsKeepsTwoColumnGridAndOnlineTotals() throws {
+        let workHeads = #"""
+        [{"id":"proj-1","name":"notes","goal":"A notes page with search","state":"running",
+          "counts":{"working":2,"owner_answer":1,"done":4},"folder":"~/code/notes",
+          "coordinator_pane":"coord-notes-1"}]
+        """#
+        let workAgents = #"""
+        [{"pane_id":"p-pay","alias":"payments","kind":"claude","state":"working","workspace_label":"webapp"}]
+        """#
+        let workStub = try StubDaemon(.computer(
+            name: "Work Mac", agents: workAgents, questions: "[\(Self.sampleAsk)]",
+            factory: workHeads, pendingAction: Self.sampleAsk
+        ))
+
+        let homeBlocked = StubDaemon.blocked(
+            alias: "writer", space: "blog", pane: "h1:p1", question: "Publish the post now?"
+        )
+        let homeWorking = #"""
+        {"pane_id":"h1:p2","alias":"editor","kind":"codex","state":"working","workspace_label":"photos"}
+        """#
+        let homeStub = try StubDaemon(.computer(
+            name: "Home Mac", agents: "[\(homeBlocked.agent),\(homeWorking)]",
+            questions: "[\(homeBlocked.question)]", factory: "[]"
+        ))
+
+        let workHost = try workStub.start()
+        defer { workStub.stop() }
+        let homeHost = try homeStub.start()
+        defer { homeStub.stop() }
+
+        let app = launch(computers: "Work Mac=\(workHost);Home Mac=\(homeHost);Lab Mac=127.0.0.1:9")
+        let allAgentsNav = element(app, "sidebar.allAgents")
+        XCTAssertTrue(allAgentsNav.waitForExistence(timeout: 15))
+        expectation(for: NSPredicate(format: "label CONTAINS %@", "2 waiting"), evaluatedWith: allAgentsNav)
+        waitForExpectations(timeout: 15)
+
+        tapWhenTappable(allAgentsNav, "All agents")
+        let allTitle = element(app, "allAgents.title")
+        XCTAssertTrue(allTitle.waitForExistence(timeout: 10))
+        let titleLabel = allTitle.label
+
+        let homeHeader = scrollToVisible(app, element(app, "computerLabel.section.fixture-2"))
+        XCTAssertTrue(homeHeader.label.contains("2 agents · 1 waiting"), homeHeader.label)
+
+        let writerCard = revealAboveCapsule(app, scrollToVisible(app, element(app, "flock.agent.writer")))
+        let editorCard = revealAboveCapsule(app, scrollToVisible(app, element(app, "flock.agent.editor")))
+        XCTAssertTrue(writerCard.exists && editorCard.exists)
+        let writerMaxX = writerCard.frame.maxX
+        let editorMinX = editorCard.frame.minX
+
+        continueAfterFailure = true
+        XCTAssertTrue(titleLabel.contains("3 agents"), titleLabel)
+        XCTAssertTrue(titleLabel.contains("1 factory project"), titleLabel)
+        XCTAssertTrue(titleLabel.contains("2 waiting"), titleLabel)
+        XCTAssertLessThanOrEqual(
+            writerMaxX, editorMinX,
+            "secondary computer without factory projects keeps its two-column running grid in All agents"
+        )
+    }
+
+    func testAnsweredFactoryAskLingersInAllAgents() throws {
+        let heads = #"""
+        [{"id":"proj-1","name":"notes","goal":"A notes page with search","state":"running",
+          "counts":{"working":2,"owner_answer":1,"done":4},"folder":"~/code/notes",
+          "coordinator_pane":"coord-notes-1"}]
+        """#
+        let agents = #"""
+        [{"pane_id":"p-pay","alias":"payments","kind":"claude","state":"working","workspace_label":"webapp"}]
+        """#
+        let stub = try StubDaemon(.computer(
+            name: "Work Mac", agents: agents, questions: "[\(Self.sampleAsk)]",
+            factory: heads, pendingAction: nil
+        ))
+        stub.pendingActionState = Self.sampleAsk
+        stub.answerHandler = { [weak stub] _ in
+            stub?.questionsState = "[]"
+            stub?.pendingActionState = nil
+            return (200, #"{"ok":true,"spoken":"Answered."}"#)
+        }
+        let host = try stub.start()
+        defer { stub.stop() }
+
+        let app = launch(computers: "Work Mac=\(host)")
+        XCTAssertTrue(element(app, "sidebar.factory.proj-1").waitForExistence(timeout: 15))
+        tapWhenTappable(element(app, "sidebar.allAgents"), "All agents")
+        XCTAssertTrue(element(app, "factoryAsk.fask-del-1.card").waitForExistence(timeout: 10))
+
+        let statesBeforeAnswer = stub.requests("GET /api/state")
+        let option1 = revealAboveCapsule(
+            app, scrollToVisible(app, app.buttons["factoryAsk.fask-del-1.option.1"].firstMatch)
+        )
+        tapWhenTappable(option1, "Keep it option on factory ask")
+        XCTAssertTrue(waitUntil(5) {
+            stub.requests("POST /api/pending/answer") >= 1 && stub.requests("GET /api/state") > statesBeforeAnswer
+        }, "post-answer /api/state refresh completed")
+        usleep(150_000)
+        let lingeredInAll = element(app, "factoryAsk.fask-del-1.answered").exists
+
+        // Working filter hides settled asks, while All shows it while lingering.
+        tapWhenTappable(element(app, "allAgents.filter.working"), "Working filter")
+        XCTAssertFalse(element(app, "factoryAsk.fask-del-1.card").exists)
+        tapWhenTappable(element(app, "allAgents.filter.all"), "All filter")
+
+        XCTAssertTrue(
+            lingeredInAll,
+            "settled factory ask card must linger with confirmation after /api/state drops the open ask"
+        )
+    }
+
+    func testGoneFactoryProjectOnIPadShowsProjectGoneInsteadOfAgentGone() throws {
+        let heads = #"""
+        [{"id":"proj-1","name":"notes","goal":"A notes page with search","state":"running",
+          "counts":{"working":2,"owner_answer":1,"done":4},"folder":"~/code/notes",
+          "coordinator_pane":"coord-notes-1"}]
+        """#
+        let agents = #"""
+        [{"pane_id":"p-pay","alias":"payments","kind":"claude","state":"working","workspace_label":"webapp"}]
+        """#
+        let stub = try StubDaemon(.computer(name: "Work Mac", agents: agents, questions: "[]", factory: heads))
+        stub.enableEvents = true
+        stub.factoryGraphs["proj-1"] = Self.sampleGraph
+        let host = try stub.start()
+        defer { stub.stop() }
+
+        let app = launch(computers: "Work Mac=\(host)")
+        XCTAssertTrue(element(app, "sidebar.factory.proj-1").waitForExistence(timeout: 15))
+        XCTAssertTrue(waitUntil(5) { stub.requests("GET /events") >= 1 })
+
+        tapWhenTappable(element(app, "sidebar.factory.proj-1"), "notes in sidebar")
+        let board = element(app, "factoryProject.board")
+        XCTAssertTrue(board.waitForExistence(timeout: 15))
+
+        stub.factoryState = "[]"
+        stub.emitFactoryChanged(project: "proj-1")
+        XCTAssertTrue(board.waitForNonExistence(timeout: 10))
+        continueAfterFailure = true
+        XCTAssertFalse(app.staticTexts["That agent is gone"].exists, "a factory project must never show IPadAgentGone")
+        XCTAssertFalse(element(app, "agentGone.back").exists)
+        XCTAssertTrue(app.staticTexts["This project is gone."].waitForExistence(timeout: 3))
+    }
+
+    func testSidebarAndAllAgentsAtLargestText() throws {
+        let workHeads = #"""
+        [{"id":"proj-1","name":"customer-portal-migration","goal":"Migrate portal","state":"running",
+          "counts":{"working":2,"owner_answer":1,"done":1},"folder":"~/code/customer-portal-migration",
+          "coordinator_pane":"coord-1"},
+         {"id":"proj-2","name":"recipes","goal":"Import recipes","state":"finished",
+          "counts":{"done":4},"folder":"~/code/recipes"}]
+        """#
+        let homeHeads = #"""
+        [{"id":"proj-home","name":"photos","goal":"Organise albums","state":"stopped",
+          "counts":{"done":1,"queued":1},"folder":"~/code/photos"}]
+        """#
+        let workStub = try StubDaemon(.computer(
+            name: "Work Mac", agents: "[]", questions: "[\(Self.sampleAsk)]",
+            factory: workHeads, pendingAction: Self.sampleAsk
+        ))
+        workStub.factoryGraphs["proj-1"] = Self.sampleGraph
+        let homeStub = try StubDaemon(.computer(name: "Home Mac", agents: "[]", questions: "[]", factory: homeHeads))
+
+        let workHost = try workStub.start()
+        defer { workStub.stop() }
+        let homeHost = try homeStub.start()
+        defer { homeStub.stop() }
+
+        let app = launch(
+            computers: "Work Mac=\(workHost);Home Mac=\(homeHost)",
+            extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        )
+        let longRow = element(app, "sidebar.factory.proj-1")
+        XCTAssertTrue(longRow.waitForExistence(timeout: 15))
+        XCTAssertEqual(longRow.label, "customer-portal-migration factory, running, 1 waiting on you")
+        XCTAssertLessThanOrEqual(longRow.frame.maxX, 390.5)
+
+        let homeSidebarHeader = element(app, "computerLabel.sidebar.fixture-2")
+        XCTAssertTrue(homeSidebarHeader.waitForExistence(timeout: 10))
+        let homeSidebarSummary = homeSidebarHeader.label
+
+        tapWhenTappable(element(app, "sidebar.allAgents"), "All agents at AX5")
+        let allTitle = element(app, "allAgents.title")
+        XCTAssertTrue(allTitle.waitForExistence(timeout: 10))
+        let titleLabel = allTitle.label
+
+        let askCard = scrollToVisible(app, element(app, "factoryAsk.fask-del-1.card"))
+        let askMaxY = askCard.frame.maxY
+        let headCard = scrollToVisible(app, element(app, "flock.factory.proj-1"))
+        XCTAssertLessThanOrEqual(askMaxY, headCard.frame.minY, "AX5 collapses All agents to a single column")
+
+        let doneFold = revealAboveCapsule(app, scrollToVisible(app, app.buttons["flock.section.done"].firstMatch))
+        let doneFoldLabel = doneFold.label
+
+        scrollToTop(app)
+        let tappableHead = revealAboveCapsule(app, scrollToVisible(app, element(app, "flock.factory.proj-1")))
+        tapWhenTappable(tappableHead, "project head in All agents at AX5")
+        XCTAssertTrue(element(app, "factoryProject.board").waitForExistence(timeout: 15))
+
+        continueAfterFailure = true
+        XCTAssertTrue(homeSidebarSummary.contains("1 factory project"), homeSidebarSummary)
+        XCTAssertTrue(titleLabel.contains("3 factory projects"), titleLabel)
+        XCTAssertEqual(doneFoldLabel, "Done (1)")
+    }
+
+    private func waitUntil(_ timeout: TimeInterval = 5, _ check: () -> Bool) -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if check() { return true }
+            usleep(100_000)
+        }
+        return check()
     }
 }
