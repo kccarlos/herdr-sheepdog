@@ -544,10 +544,10 @@ func agyTrustDrawing(text string) bool {
 	return false
 }
 
-// coordWakeEvidence finds the newest numbered wake (or J7 handoff) and reads only its reply.
-func coordWakeEvidence(cli, clean string) (seq int64, confirmed bool, reason string, handoffConfirmed bool) {
+// coordWakeEvidence finds the newest numbered wake and reads only its reply.
+func coordWakeEvidence(cli, clean string) (seq int64, confirmed bool, reason string) {
 	if strings.TrimSpace(clean) == "" {
-		return 0, false, flow.WakeEvidenceUnavailable, false
+		return 0, false, flow.WakeEvidenceUnavailable
 	}
 	prompt := map[string]string{"claude": "❯", CodexCLI: "›", AgyCLI: ">"}[cli]
 	lines := strings.Split(strings.TrimRight(clean, "\n \t"), "\n")
@@ -574,20 +574,17 @@ func coordWakeEvidence(cli, clean string) (seq int64, confirmed bool, reason str
 			batchSize, _ := strconv.Atoi(count)
 			if seq, err := strconv.ParseInt(num, 10, 64); err == nil && seq > 0 &&
 				(draft == "" || cli == AgyCLI && batchSize > 0 && strings.HasPrefix(label, "task wake(s)")) {
-				confirmed, reason := coordWakeReply(cli, "Settings that differ", lines[i+1:end])
-				return seq, confirmed, reason, false
+				confirmed, reason := coordWakeReply(cli, lines[i+1:end])
+				return seq, confirmed, reason
 			}
-		}
-		if end == len(lines) && strings.HasPrefix(body, flow.CoordHandoffPromptPrefix) {
-			handoffConfirmed, _ = coordWakeReply(cli, "Never spend money", lines[i+1:end])
 		}
 		end = i
 	}
-	return 0, false, "missing numbered wake echo", handoffConfirmed
+	return 0, false, "missing numbered wake echo"
 }
 
-func coordWakeReply(cli, endMarker string, lines []string) (bool, string) {
-	seenEnd, confirmed, blank := false, false, false
+func coordWakeReply(cli string, lines []string) (bool, string) {
+	settings, confirmed, blank := false, false, false
 	for _, line := range lines {
 		trim := strings.TrimSpace(line)
 		subline, tool := strings.CutPrefix(trim, "⎿")
@@ -598,11 +595,11 @@ func coordWakeReply(cli, endMarker string, lines []string) (bool, string) {
 				cli == "claude" && strings.HasPrefix(marker, "· What should Claude")) {
 			return false, "wake reply interrupted"
 		}
-		if strings.HasPrefix(trim, endMarker) {
-			seenEnd, blank = true, false
+		if strings.HasPrefix(trim, "Settings that differ") {
+			settings, blank = true, false
 			continue
 		}
-		if !seenEnd {
+		if !settings {
 			continue
 		}
 		switch cli {
@@ -735,7 +732,7 @@ func ObserveRun(ctx context.Context, client *hc.Client, rec flow.RunRecord, opti
 				evidence = ansiRe.ReplaceAllString(strings.ReplaceAll(rd.Text, "\r\n", "\n"), "")
 			}
 		}
-		tick.WakeSeq, tick.WakeConfirmed, tick.WakeReason, tick.HandoffConfirmed = coordWakeEvidence(rec.CLI, evidence)
+		tick.WakeSeq, tick.WakeConfirmed, tick.WakeReason = coordWakeEvidence(rec.CLI, evidence)
 	}
 	return append(evs, tick), nil
 }

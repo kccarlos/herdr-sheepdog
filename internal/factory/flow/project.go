@@ -41,20 +41,29 @@ func HasNewGoalWake(wakes []Wake) bool {
 	return slices.ContainsFunc(wakes, func(w Wake) bool { return w.Task == "" && w.Key == "new_goal" })
 }
 
-// NewGoalSettled reports whether a pending NewGoal has positive handling
-// evidence: a non-split task added after NewGoalTasks, a confirmed new_goal
-// wake batch, or a confirmed J7 startup handoff turn (J4/J12, design.md section 6).
-func NewGoalSettled(p Project, tasks []Task, confirmedWake, confirmedStartup bool) bool {
+// HasNewGoalWakeGen reports whether wakes contains the project-level new_goal wake for gen.
+func HasNewGoalWakeGen(wakes []Wake, gen uint64) bool {
+	return slices.ContainsFunc(wakes, func(w Wake) bool { return w.Task == "" && w.Key == "new_goal" && w.GoalGen == gen })
+}
+
+// NewGoalSettled reports whether a pending NewGoal has handling evidence tied
+// to the current GoalGen: (a) a qualifying coordinator command recorded at
+// GoalGen (or a non-split task added after NewGoalTasks), or (b) a confirmed
+// new_goal wake carrying GoalGen (J4/J12, design.md section 6).
+func NewGoalSettled(p Project, tasks []Task, confirmedWake bool) bool {
 	if !p.NewGoal {
 		return false
 	}
 	if len(tasks) > p.NewGoalTasks && slices.ContainsFunc(tasks[p.NewGoalTasks:], func(t Task) bool { return t.SplitFrom == "" }) {
 		return true
 	}
-	if HasNewGoalWake(p.Wakes) || p.Run == nil || p.Run.State != PhaseIdle || p.Run.Turn == 0 || p.Run.Status == "error" {
+	if HasNewGoalWake(p.Wakes) {
 		return false
 	}
-	return confirmedWake || (p.NewGoalStartup && confirmedStartup && !HasNewGoalWake(p.CoordWakesInFlight))
+	if p.GoalGen > 0 && p.GoalCmdGen == p.GoalGen && (p.Run == nil || p.Run.State == PhaseIdle || p.Run.State == PhaseEnded) {
+		return true
+	}
+	return confirmedWake && p.Run != nil && p.Run.State == PhaseIdle && p.Run.Turn > 0 && p.Run.Status != "error"
 }
 
 // IsCoordR29 reports whether r ended as stuck at a dialog via R29 (J10).

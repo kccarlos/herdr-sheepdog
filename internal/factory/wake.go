@@ -53,6 +53,14 @@ func holdProjectWake(s *flow.State, k, why, facts string, now time.Time) {
 	appendWake(s, "", k, why, facts, now)
 }
 
+func replaceProjectWake(s *flow.State, w flow.Wake) {
+	if i := slices.IndexFunc(s.Project.Wakes, func(x flow.Wake) bool { return x.Task == "" && x.Key == w.Key }); i >= 0 {
+		s.Project.Wakes[i] = w
+		return
+	}
+	s.Project.Wakes = append(s.Project.Wakes, w)
+}
+
 // The facts block's bounds: a title's characters, the wakes listed.
 const maxFactsTitle, maxFactsWakes = 120, 20
 const ownerSayPrefix = "owner_say:"
@@ -279,10 +287,10 @@ func (e *Engine) reconcileCoordWakesLocked(id string, s *flow.State, tick flow.R
 			return true
 		}
 	case p.CoordWakeSeq != 0 && tick.WakeSeq == p.CoordWakeSeq && tick.WakeConfirmed:
-		newGoalConfirmed := flow.HasNewGoalWake(p.CoordWakesInFlight)
+		newGoalConfirmed := flow.HasNewGoalWakeGen(p.CoordWakesInFlight, p.GoalGen)
 		clearCoordBatch(p)
-		if flow.NewGoalSettled(*p, s.Tasks, newGoalConfirmed, false) {
-			p.NewGoal, p.NewGoalTasks, p.NewGoalStartup = false, 0, false
+		if flow.NewGoalSettled(*p, s.Tasks, newGoalConfirmed) {
+			p.NewGoal, p.NewGoalTasks = false, 0
 		}
 		e.saveLocked(id, *s)
 		return true
