@@ -149,7 +149,7 @@ Mac panel.
 
 - **The main screen.** At the top, **Conversation | Agents** (the badge
   counts the agents waiting on you), a flag button (**Mark this moment**),
-  **+** (New agent, New shell) and **⋯** (New conversation, Spaces, Stop,
+  **+** (New agent, New factory project, New shell) and **⋯** (New conversation, Spaces, Stop,
   End voice session, Settings). Hands-free, you can also start a fresh
   conversation by saying *"new conversation"* or *"start over"* and
   confirming within 20 seconds with *"yes, start over"* or *"confirm
@@ -346,7 +346,13 @@ Mac panel.
     it says so. "herdr is not running"
     means sheepdog cannot reach the backend: start it on your computer, then
     tap Try again.
-- **Factory projects.** Open a project in **Agents** to see its tasks, open
+- **Factory projects.** Start a new project from **+ ▸ New factory project**:
+  pick a git repository folder sheepdog knows on your computer (folders that
+  are already a project cannot be picked again), write a goal, and optionally
+  run **Check this folder** before pressing **Start the project and its
+  agents**. Any failing start check shows its fix with **Copy** for terminal
+  commands and keeps Start off until **Check again** passes; once started, the
+  new project's board opens automatically. Open a project in **Agents** to see its tasks, open
   asks, instruction box, and **Stop**, **Resume**, **New goal** or **Reopen
   with a new goal** controls (a finished project needs a new goal to reopen;
   start-check failures on **Resume**, **New goal** and **Reopen** show each

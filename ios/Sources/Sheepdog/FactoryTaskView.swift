@@ -66,10 +66,33 @@ struct FactoryTaskView: View {
     private func stepColor(_ s: String) -> Color { s == "done" ? Theme.done : s == "now" ? Theme.working : s == "ended" ? Theme.idle : Theme.muted }
 }
 
+struct FactoryCommandCopyRow: View {
+    let command: String
+    @State private var copied = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(command).font(.footnote.monospaced()).textSelection(.enabled).padding(7)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.fill, in: .rect(cornerRadius: Theme.Radius.small))
+            Button(copied ? "Copied" : "Copy") {
+                UIPasteboard.general.string = command
+                copied = true
+                AccessibilityNotification.Announcement("Copied").post()
+                Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    copied = false
+                }
+            }
+            .buttonStyle(.bordered).tint(Theme.ink)
+            .accessibilityLabel(copied ? "Copied \(command)" : "Copy the command \(command)")
+        }
+    }
+}
+
 struct FactoryStartCheckRow: View {
     let check: FactoryStartCheck
     let computerName: String?
-    @State private var copied = false
 
     var body: some View {
         let mark: (String, Color) = check.status == "ok" ? ("checkmark", Theme.done) : check.status == "warn" ? ("exclamationmark.triangle", Theme.primaryText) : check.status == "fail" ? ("xmark", Theme.danger) : ("minus", Theme.muted)
@@ -79,14 +102,7 @@ struct FactoryStartCheckRow: View {
                 if let detail = check.detail?.trimmedOrNil { Text(detail).foregroundStyle(Theme.muted) }
                 if let cmd = check.commandFix {
                     Text("Fix, in a terminal\(computerName?.trimmedOrNil.map { " on \($0)" } ?? ""):").fontWeight(.semibold)
-                    HStack(spacing: 8) {
-                        Text(cmd.command).font(.footnote.monospaced()).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, 8).padding(.vertical, 6).frame(maxWidth: .infinity, alignment: .leading).background(Theme.fill, in: .rect(cornerRadius: Theme.Radius.small))
-                        Button(copied ? "Copied" : "Copy") {
-                            UIPasteboard.general.string = cmd.command; copied = true; AccessibilityNotification.Announcement("Copied").post()
-                            Task { try? await Task.sleep(for: .seconds(2)); copied = false }
-                        }.buttonStyle(.bordered).tint(Theme.ink).accessibilityLabel(copied ? "Copied \(cmd.command)" : "Copy the command \(cmd.command)")
-                    }
+                    FactoryCommandCopyRow(command: cmd.command)
                     if let rest = cmd.rest { Text(rest).foregroundStyle(Theme.muted) }
                 } else if let fix = check.fix?.trimmedOrNil { Text("Fix: \(fix)").foregroundStyle(Theme.muted) }
             }

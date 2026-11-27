@@ -89,6 +89,8 @@ struct MainView: View {
                 ui.beside(paneID)
             case let .shell(cwd):
                 ui.detailPath.append(ShellRoute(cwd: cwd))
+            case let .factoryProject(head, computerID):
+                ui.detailPath.append(FactoryProjectRoute(head: head, computerID: computerID))
             }
             return
         }
@@ -99,6 +101,8 @@ struct MainView: View {
             model.navigation.path.append(AgentWindowRoute(paneID: paneID, computer: computer))
         case let .shell(cwd):
             model.navigation.path.append(ShellRoute(cwd: cwd))
+        case let .factoryProject(head, computerID):
+            model.navigation.path.append(FactoryProjectRoute(head: head, computerID: computerID))
         }
     }
 }
@@ -198,6 +202,9 @@ struct PhoneRootView: View {
             .navigationTitle(model.voiceName)
             .navigationDestination(for: ShellRoute.self) { route in
                 ShellWindowView(route: route)
+            }
+            .navigationDestination(for: FactoryProjectRoute.self) {
+                FactoryProjectView(initialHead: $0.head, computerID: $0.computerID)
             }
             .navigationDestination(for: AgentWindowRoute.self) { route in
                 Group {
@@ -510,6 +517,10 @@ struct SessionMenus {
         }
         .disabled(!value.actionsAvailable)
         .accessibilityIdentifier("new.agent")
+        Button { here { model.presentation.present(.newFactoryProject) } } label: {
+            Label("New factory project", systemImage: "point.3.connected.trianglepath.dotted")
+        }
+        .disabled(!value.actionsAvailable).accessibilityIdentifier("new.factoryProject")
         NewShellButton(shown: value.shellShown)
     }
 
@@ -660,6 +671,8 @@ struct SessionChrome: ViewModifier {
                 .environmentObject(model)
         case .newAgent:
             NewAgentSheet().presentationSizing(.form)
+        case .newFactoryProject:
+            FactoryNewProjectSheet().presentationSizing(.form)
         case .spaces:
             SpacesSheet().presentationSizing(.form)
         case .connection:
