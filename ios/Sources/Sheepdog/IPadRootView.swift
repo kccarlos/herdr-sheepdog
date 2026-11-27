@@ -59,9 +59,6 @@ struct IPadRootView: View {
                         .navigationDestination(for: ShellRoute.self) { route in
                             ShellWindowView(route: route)
                         }
-                        .navigationDestination(for: FactoryProjectRoute.self) {
-                            FactoryProjectView(initialHead: $0.head, computerID: $0.computerID)
-                        }
                         .navigationDestination(for: AgentWindowRoute.self) { route in
                             if let agent = model.agent(for: route) {
                                 AgentScreenView(agent: agent, computer: route.computer)
@@ -248,15 +245,22 @@ struct IPadSidebar: View {
             if model.agentsModel.isComputerExpanded(computer.id) {
                 if let detail = computer.factorySectionDetail {
                     HStack(spacing: 4) {
-                        Text("Factory projects").fontWeight(.semibold)
+                        Text("Factory projects")
+                            .fontWeight(.semibold)
                         Text(detail)
                     }
-                    .font(.caption).foregroundStyle(Theme.muted)
-                    .padding(.horizontal, 10).padding(.top, 12).padding(.bottom, 2)
+                    .font(.caption)
+                    .foregroundStyle(Theme.muted)
+                    .padding(.horizontal, 10)
+                    .padding(.top, 12)
+                    .padding(.bottom, 2)
                     .accessibilityElement(children: .combine)
-                    .accessibilityLabel("Factory projects, \(detail.dropFirst(2))")
-                    .accessibilityAddTraits(.isHeader).accessibilityIdentifier("sidebar.factorySection")
-                    ForEach(computer.factoryProjects) { factoryRow($0, computerID: computer.id) }
+                    .accessibilityLabel(computer.factorySectionAccessibilityLabel ?? "Factory projects")
+                    .accessibilityAddTraits(.isHeader)
+                    .accessibilityIdentifier("sidebar.factorySection")
+                    ForEach(computer.factoryProjects) {
+                        factoryRow($0, computerID: computer.id)
+                    }
                 }
                 ForEach(computer.spaces) { space in
                     Text(space.name.isEmpty ? "Other" : space.name)
@@ -323,22 +327,33 @@ struct IPadSidebar: View {
             select(.factoryProject(computerID: computerID, projectID: item.id))
         } label: {
             HStack(spacing: 10) {
-                Circle().fill(dot).frame(width: 8, height: 8).padding(.horizontal, 7)
-                HStack(spacing: 5) {
-                    Text(item.head.name).font(.body.weight(selected ? .semibold : .regular)).foregroundStyle(Theme.ink)
-                    Text(item.kindWord).font(.caption).foregroundStyle(Theme.muted)
-                }
-                .lineLimit(2).frame(maxWidth: .infinity, alignment: .leading)
+                Circle()
+                    .fill(dot)
+                    .frame(width: 8, height: 8)
+                    .padding(.horizontal, 7)
+                (Text(item.head.name)
+                    .font(.body.weight(selected ? .semibold : .regular))
+                    .foregroundStyle(Theme.ink)
+                    + Text(" \(item.kindWord)")
+                        .font(.caption)
+                        .foregroundStyle(Theme.muted))
+                .lineLimit(2)
+                .frame(maxWidth: .infinity, alignment: .leading)
                 Text(item.sidebarMeta)
                     .font(.caption.weight(item.isSidebarWaiting ? .semibold : .regular))
                     .foregroundStyle(item.isSidebarWaiting ? Theme.blockedText : Theme.muted)
+                    .fixedSize()
             }
-            .padding(.horizontal, 10).frame(minHeight: 44)
+            .padding(.horizontal, 10)
+            .frame(minHeight: 44)
             .background(shape.fill(selected ? Theme.line : .clear))
-            .contentShape(.hoverEffect, shape).contentShape(shape).hoverEffect(.highlight)
+            .contentShape(.hoverEffect, shape)
+            .contentShape(shape)
+            .hoverEffect(.highlight)
         }
         .buttonStyle(.plain)
-        .accessibilityElement(children: .ignore).accessibilityLabel(item.sidebarAccessibilityLabel)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(item.sidebarAccessibilityLabel)
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         .accessibilityIdentifier("sidebar.factory.\(item.id)")
     }
@@ -396,27 +411,20 @@ struct IPadSidebar: View {
         .accessibilityIdentifier(remote ? "computerLabel.sidebarAgent.\(agent.alias)" : "sidebar.agent.\(agent.alias)")
     }
 
-    private var emptyMessage: String {
-        switch paneState {
-        case .loading: return "Connecting…"
-        case .reconnecting: return "Reconnecting…"
-        case .empty, .content: return "No agents running."
-        case .notConnected: return model.isConfigured ? "Not connected." : "Pair your computer to see its agents."
-        case .tokenRefused: return (model.notices.pairingProblem ?? .revoked).title
-        case .unreachable, .noNetwork, .untrusted, .updateNeeded:
-            return model.linkModel.presentation.inline?.message ?? "Can't reach the computer."
-        }
+    private func emptyMessage(_ text: String) -> some View {
+        Text(text)
+            .accessibilityIdentifier("sidebar.empty.message")
     }
 
     /// No agent to list: why, in one line, with the one action that helps.
     @ViewBuilder
     private var emptyRow: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(emptyMessage).accessibilityIdentifier("sidebar.empty.message")
             switch paneState {
             case .loading, .reconnecting:
-                EmptyView()
+                emptyMessage(paneState == .loading ? "Connecting…" : "Reconnecting…")
             case .empty, .content:
+                emptyMessage("No agents running.")
                 if model.agentActionsAvailable {
                     Button("New agent") {
                         scenes.request(from: sceneID)
@@ -428,6 +436,7 @@ struct IPadSidebar: View {
                     .accessibilityIdentifier("sidebar.newAgent")
                 }
             case .notConnected:
+                emptyMessage(model.isConfigured ? "Not connected." : "Pair your computer to see its agents.")
                 Button(model.isConfigured ? "Connect" : "Pair") {
                     if model.isConfigured {
                         model.connect()
@@ -440,12 +449,15 @@ struct IPadSidebar: View {
                 .foregroundStyle(Theme.primaryText)
                 .frame(minHeight: 44)
             case .tokenRefused:
+                emptyMessage((model.notices.pairingProblem ?? .revoked).title)
                 Button("Scan again") { model.needsNewScan(model.notices.pairingProblem ?? .revoked) }
                     .fontWeight(.semibold)
                     .foregroundStyle(Theme.primaryText)
                     .frame(minHeight: 44)
                     .accessibilityIdentifier("sidebar.scan")
             case .unreachable, .noNetwork, .untrusted, .updateNeeded:
+                // The link's own words, the same as the chip's sheet.
+                emptyMessage(model.linkModel.presentation.inline?.message ?? "Can't reach the computer.")
                 if paneState != .noNetwork {
                     Button("Try again") { model.retryLink() }
                         .fontWeight(.semibold)
@@ -464,6 +476,7 @@ struct IPadSidebar: View {
 
     private func select(_ detail: IPadDetail) {
         withAnimation(Theme.ease) {
+            if ui.detail == detail { ui.detailReset += 1 }
             ui.detail = detail
             ui.detailPath = NavigationPath()
             // The overlay sidebar (portrait) gets out of the way.
@@ -504,11 +517,15 @@ struct IPadDetailView: View {
                 AgentPanes(panes: ui.detail.panes, leading: leading)
             case let .factoryProject(computerID, projectID):
                 if let head = model.fleet.model(computerID)?.factoryHeads.first(where: { $0.id == projectID }) {
-                    FactoryProjectView(initialHead: head, computerID: computerID,
-                                       leading: leading, onDismiss: { ui.detail = .allAgents })
+                    FactoryProjectView(initialHead: head, computerID: computerID, leading: leading,
+                                       resetToken: ui.detailReset, onDismiss: { ui.detail = .allAgents })
                         .id("\(computerID)|\(projectID)")
                 } else {
-                    IPadAgentGone(leading: leading) { ui.detail = .allAgents }
+                    Color.clear.onAppear {
+                        model.notices.banner = .init(tone: .info, message: "This project is gone.")
+                        ui.detailPath = NavigationPath()
+                        ui.detail = .allAgents
+                    }
                 }
             }
         }

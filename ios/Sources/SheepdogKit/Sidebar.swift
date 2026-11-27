@@ -32,14 +32,17 @@ public struct SidebarSections: Equatable, Sendable {
             self.spaces = spaces
         }
 
-        public var factorySectionDetail: String? {
-            let active = factoryProjects.count
-            let done = finishedFactoryCount
-            if active > 0 && done > 0 { return "· \(active), and \(done) done" }
-            if active > 0 { return "· \(active)" }
-            return done > 0 ? "· \(done) done" : nil
+        private var factoryCountSummary: String? {
+            switch (factoryProjects.count, finishedFactoryCount) {
+            case (let a, let d) where a > 0 && d > 0: return "\(a), and \(d) done"
+            case (let a, _) where a > 0: return "\(a)"
+            case (_, let d) where d > 0: return "\(d) done"
+            default: return nil
+            }
         }
 
+        public var factorySectionDetail: String? { factoryCountSummary.map { "· \($0)" } }
+        public var factorySectionAccessibilityLabel: String? { factoryCountSummary.map { "Factory projects, \($0)" } }
         public var hasContent: Bool { !spaces.isEmpty || !factoryProjects.isEmpty || finishedFactoryCount > 0 }
     }
 
@@ -69,7 +72,9 @@ public struct SidebarSections: Equatable, Sendable {
                                  factoryHeads: currentFactoryHeads ?? s.factoryHeads,
                                  questions: currentQuestions ?? s.questions)
             }
-            guard s.reachability.isOnline else { return .computer(id: s.id, name: s.name, agents: []) }
+            guard s.reachability.isOnline else {
+                return .computer(id: s.id, name: s.name, agents: [])
+            }
             return .computer(id: s.id, name: s.name, agents: s.agents,
                              factoryHeads: s.factoryHeads, questions: s.questions)
         }
@@ -93,8 +98,7 @@ extension SidebarSections.Computer {
         }
         let spaces = groups
             .map { name, agents in
-                let sorted = agents.sorted { $0.alias.localizedCaseInsensitiveCompare($1.alias) == .orderedAscending }
-                return SidebarSections.Space(name: name, agents: sorted)
+                SidebarSections.Space(name: name, agents: agents.sorted { $0.alias.localizedCaseInsensitiveCompare($1.alias) == .orderedAscending })
             }
             .sorted { lhs, rhs in
                 // Agents with no space last.

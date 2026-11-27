@@ -8,7 +8,10 @@ import SwiftUI
 /// With one computer there are no computer sections.
 struct AllAgentsView: View {
     private enum CardItem: Identifiable {
-        case ask(PendingAction), head(FactoryAgentsList.Item), agent(Agent)
+        case ask(PendingAction)
+        case head(FactoryAgentsList.Item)
+        case agent(Agent)
+
         var id: String {
             switch self {
             case let .ask(a): return "ask:\(a.id)"
@@ -30,11 +33,17 @@ struct AllAgentsView: View {
     private var paneState: FlockPaneState { model.flockPaneState(hasAgents: !factoryList.isEmpty) }
     private var shown: [Agent] { factoryList.agents.running.filter(filter.matches) }
 
+    private var settledFactoryAsk: PendingAction? { factoryList.settledAsk(from: model.approval) }
+
     private var currentHasMatches: Bool {
         switch filter {
-        case .all: return !factoryList.isEmpty
-        case .waiting: return !shown.isEmpty || !factoryList.needsYouHeads.isEmpty || !factoryList.factoryAsks.isEmpty
-        case .working: return !shown.isEmpty || !factoryList.workingHeads.isEmpty
+        case .all:
+            return !factoryList.isEmpty || settledFactoryAsk != nil
+        case .waiting:
+            return !shown.isEmpty || !factoryList.needsYouHeads.isEmpty
+                || !factoryList.factoryAsks.isEmpty || settledFactoryAsk != nil
+        case .working:
+            return !shown.isEmpty || !factoryList.workingHeads.isEmpty
         }
     }
 
@@ -44,14 +53,12 @@ struct AllAgentsView: View {
     }
 
     private var subtitle: String {
-        let count = factoryList.agents.running.count
-        let projects = factoryList.needsYouHeads.count + factoryList.workingHeads.count
-            + factoryList.stoppedHeads.count + factoryList.finishedHeads.count
-        var text = count == 1 ? "1 agent" : "\(count) agents"
-        if projects > 0 { text += " · \(projects == 1 ? "1 factory project" : "\(projects) factory projects")" }
-        let waiting = factoryList.waitingCount
-        if waiting > 0 { text += " · \(waiting) waiting" }
-        return text
+        let lists = [factoryList] + model.otherSnapshots.filter(\.reachability.isOnline).map(\.factoryList)
+        return ComputerSnapshot.summaryLine(
+            agents: lists.reduce(0) { $0 + $1.agents.running.count },
+            projects: lists.reduce(0) { $0 + $1.items.count },
+            waiting: lists.reduce(0) { $0 + $1.waitingCount }
+        )
     }
 
     var body: some View {
@@ -96,12 +103,14 @@ struct AllAgentsView: View {
                 Text("All agents")
                     .font(.headline)
                     .foregroundStyle(Theme.ink)
+                    .lineLimit(1)
                 Text(subtitle)
                     .font(.caption)
                     .foregroundStyle(Theme.muted)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
                     .contentTransition(.numericText())
             }
-            .lineLimit(1)
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
             .accessibilityIdentifier("allAgents.title")
@@ -204,9 +213,7 @@ struct AllAgentsView: View {
                                 } else if offline {
                                     OfflineComputerRow(name: computer.name, lastSeen: computer.lastSeen()) { model.session(computer.id)?.retry() }
                                 } else {
-                                    let list = FactoryAgentsList(agents: computer.agents, heads: computer.factoryHeads,
-                                                                 questions: computer.questions)
-                                    sectioned(list, computer: computer)
+                                    sectioned(computer.factoryList, computer: computer)
                                 }
                             }
                         }
@@ -234,55 +241,42 @@ struct AllAgentsView: View {
     /// Agents and factory project heads under Needs you / Working / Stopped / Done.
     @ViewBuilder
     private func sectioned(_ list: FactoryAgentsList, computer: ComputerSnapshot?) -> some View {
-        let id = computer?.id ?? model.currentComputerID
         let agents = list.agents.running.filter(filter.matches)
-        let asks = filter == .working ? [] : list.factoryAsks
-        let needsHeads = filter == .working ? [] : list.needsYouHeads
-        let workHeads = filter == .waiting ? [] : list.workingHeads
-        let stopHeads = filter == .all ? list.stoppedHeads : []
-        let doneHeads = filter == .all ? list.finishedHeads : []
-        let groups: [(AgentGroup, [CardItem])] = [
-            (.needsYou, asks.map(CardItem.ask) + needsHeads.map(CardItem.head)
-                + agents.filter { $0.group == .needsYou }.map(CardItem.agent)),
-            (.working, workHeads.map(CardItem.head) + agents.filter { $0.group == .working }.map(CardItem.agent)),
-            (.done, doneHeads.map(CardItem.head) + agents.filter { $0.group == .done }.map(CardItem.agent)),
-        ]
-        ForEach(groups, id: \.0) { group, items in
-            if group == .done && !stopHeads.isEmpty {
-                AgentSectionHeader(group: .working, count: stopHeads.count, title: "Stopped")
-                columns(stopHeads.map(CardItem.head), computer: computer, firstAskID: asks.first?.id)
-            }
-            if !items.isEmpty {
-                let folded = group == .done && !doneHeads.isEmpty
-                if folded {
-                    doneFoldRow(count: items.count, id: id)
-                } else if computer == nil || list.hasFactoryContent {
-                    AgentSectionHeader(group: group, count: items.count)
+        if computer != nil, !list.hasFactoryContent {
+            columns(agents.map(CardItem.agent), computer: computer, firstAskID: nil)
+        } else {
+            let id = computer?.id ?? model.currentComputerID
+            let settled = computer == nil ? settledFactoryAsk : nil
+            let asks = filter == .working ? [] : list.factoryAsks + (settled.map { [$0] } ?? [])
+            let needsHeads = filter == .working ? [] : list.needsYouHeads
+            let workHeads = filter == .waiting ? [] : list.workingHeads
+            let stopHeads = filter == .all ? list.stoppedHeads : []
+            let doneHeads = filter == .all ? list.finishedHeads : []
+            let groups: [(AgentGroup, [CardItem])] = [
+                (.needsYou, asks.map(CardItem.ask) + needsHeads.map(CardItem.head)
+                    + agents.filter { $0.group == .needsYou }.map(CardItem.agent)),
+                (.working, workHeads.map(CardItem.head) + agents.filter { $0.group == .working }.map(CardItem.agent)),
+                (.done, doneHeads.map(CardItem.head) + agents.filter { $0.group == .done }.map(CardItem.agent)),
+            ]
+            ForEach(groups, id: \.0) { group, items in
+                if group == .done && !stopHeads.isEmpty {
+                    AgentSectionHeader(group: .working, count: stopHeads.count, title: "Stopped")
+                    columns(stopHeads.map(CardItem.head), computer: computer, firstAskID: asks.first?.id)
                 }
-                if !folded || openDone.contains(id) {
-                    columns(items, computer: computer, firstAskID: asks.first?.id)
+                if !items.isEmpty {
+                    let folded = group == .done && !doneHeads.isEmpty
+                    if folded {
+                        SectionFoldRow(title: "Done (\(items.count))", expanded: openDone.contains(id),
+                                       identifier: "flock.section.done") { openDone.formSymmetricDifference([id]) }
+                    } else {
+                        AgentSectionHeader(group: group, count: items.count)
+                    }
+                    if !folded || openDone.contains(id) {
+                        columns(items, computer: computer, firstAskID: asks.first?.id)
+                    }
                 }
             }
         }
-    }
-
-    private func doneFoldRow(count: Int, id: String) -> some View {
-        let open = openDone.contains(id)
-        return Button {
-            withAnimation(Theme.ease) {
-                if open { openDone.remove(id) } else { openDone.insert(id) }
-            }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.right").font(.footnote.weight(.semibold))
-                    .rotationEffect(.degrees(open ? 90 : 0))
-                Text("Done (\(count))").font(.subheadline.weight(.medium))
-                Spacer()
-            }
-            .foregroundStyle(Theme.muted).frame(minHeight: 44).contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityValue(open ? "Shown" : "Hidden").accessibilityIdentifier("flock.section.done")
     }
 
     /// Two columns of independent heights (no row gaps), one at the
@@ -309,13 +303,13 @@ struct AllAgentsView: View {
             ForEach(items) { item in
                 switch item {
                 case let .ask(ask):
-                    let card = askCard(ask, computer: computer)
+                    let card = model.factoryAskCard(ask, computer: computer)
                     ApprovalCardView(card: card, primary: computer == nil && ask.id == firstAskID,
                                      idPrefix: "factoryAsk.\(ask.id)") {
                         model.answer(question: card.pending.id, option: $0, on: ownerID)
                     }
                 case let .head(headItem):
-                    let dialog = headItem.coordinatorDialog.map { askCard($0, computer: computer) }
+                    let dialog = headItem.coordinatorDialog.map { model.factoryAskCard($0, computer: computer) }
                     FactoryHeadCard(item: headItem, computer: computer, dialog: dialog,
                                     answer: { model.answer(question: $0, option: $1, on: ownerID) },
                                     onOpen: {
@@ -346,21 +340,14 @@ struct AllAgentsView: View {
         .frame(maxWidth: .infinity, alignment: .top)
     }
 
-    private func askCard(_ ask: PendingAction, computer: ComputerSnapshot?) -> ApprovalFlow.Card {
-        guard let computer else { return .init(pending: ask, phase: model.questionPhase(ask.id)) }
-        var pending = ask
-        pending.id = RemoteQuestion.id(computer: computer.id, question: ask.id)
-        return .init(pending: pending, phase: model.session(computer.id)?.phase(ask.id) ?? .open(error: nil))
-    }
-
     private func ensureFocusedAgentVisible() {
         guard let target = model.navigation.focusedAgent, filter != .all else { return }
         let isOther = target.isOtherComputer(currentComputerID: model.currentComputerID)
         let matchingAgent: Agent?
         if isOther, let cid = target.computerID {
             guard model.showsComputerLabels else { return }
-            let agents = model.sectionSnapshots.first(where: { $0.id == cid })?.agents ?? []
-            matchingAgent = Flock(agents).running.first(where: { $0.paneID == target.paneID })
+            let agents = model.sectionSnapshots.first(where: { $0.id == cid })?.factoryList.agents.running ?? []
+            matchingAgent = agents.first(where: { $0.paneID == target.paneID })
         } else {
             matchingAgent = factoryList.agents.running.first(where: { $0.paneID == target.paneID })
         }
@@ -373,7 +360,7 @@ struct AllAgentsView: View {
         var ids = factoryList.agents.running.map(\.paneID)
         for computer in model.sectionSnapshots where !computer.isCurrent {
             if case .offline = computer.reachability { continue }
-            ids.append(contentsOf: Flock(computer.agents).running.map { "\(computer.id)|\($0.paneID)" })
+            ids.append(contentsOf: computer.factoryList.agents.running.map { "\(computer.id)|\($0.paneID)" })
         }
         return ids
     }
@@ -391,11 +378,11 @@ struct AllAgentsView: View {
         guard target.isTargetPresent(
             currentComputerID: model.currentComputerID,
             sectioned: model.showsComputerLabels,
-            currentAgents: model.flock.running,
+            currentAgents: factoryList.agents.running,
             otherComputerAgents: { cid in
                 guard let comp = model.sectionSnapshots.first(where: { $0.id == cid }) else { return nil }
                 if case .offline = comp.reachability { return nil }
-                return comp.agents
+                return comp.factoryList.agents.running
             }
         ) else { return }
         let scrollID: String

@@ -42,7 +42,7 @@ public struct FactoryAgentsList: Equatable, Sendable {
         public var accessibilitySummary: String {
             ["\(head.name) \(kindWord)", head.goal, stateWord, countsLine].joined(separator: ", ")
         }
-        public var isSidebarWaiting: Bool { waitingOnYouCount > 0 || coordinatorBlocked }
+        public var isSidebarWaiting: Bool { sidebarWaiting > 0 }
         private var sidebarWaiting: Int { waitingOnYouCount + (coordinatorBlocked ? 1 : 0) }
         public var sidebarMeta: String { sidebarWaiting > 0 ? "\(sidebarWaiting) waiting" : stateWord }
         public var sidebarAccessibilityLabel: String {
@@ -57,7 +57,7 @@ public struct FactoryAgentsList: Equatable, Sendable {
     }
 
     public let agents: Flock
-    let items: [Item]
+    public let items: [Item]
     public let factoryAsks: [PendingAction]
 
     public init(agents: [Agent], heads: [FactoryProjectHead], questions: [PendingAction]) {
@@ -84,6 +84,11 @@ public struct FactoryAgentsList: Equatable, Sendable {
     public var waitingCount: Int { agents.waitingCount + needsYouHeads.count + factoryAsks.count }
     public var hasFactoryContent: Bool { !items.isEmpty || !factoryAsks.isEmpty }
     public var isEmpty: Bool { agents.isEmpty && !hasFactoryContent }
+
+    public func settledAsk(from approval: ApprovalFlow.Card?) -> PendingAction? {
+        guard let card = approval, card.pending.factory != nil, card.isSettled else { return nil }
+        return factoryAsks.contains { $0.id == card.pending.id } ? nil : card.pending
+    }
 
     public static func resumeErrorMessage(_ error: Error, computerName: String, linkUsable: Bool = true) -> String {
         factoryStartError(error, action: "Resume", computerName: computerName, linkUsable: linkUsable)
