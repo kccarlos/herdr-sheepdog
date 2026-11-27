@@ -513,15 +513,24 @@ func (e *Engine) cancelStaleGateAsksLocked(id string, s *flow.State, ti int, now
 	return true
 }
 
-// cancelTaskDecisionAsksLocked cancels taskID's open decision asks while
-// keeping its gated owner asks alive (N1, design.md 4.1, 7.1, KB-ASK-10).
-func cancelTaskDecisionAsks(s *flow.State, taskID string, now time.Time) int {
-	n := 0
+// cancelEndedTaskAsksLocked cancels task ti's open task-scoped asks (decision
+// and gate) via A4, logging each committed cancellation even if a later N1
+// cleanup step fails, while keeping project-wide and non-gate owner asks alive
+// (N1, design.md 4.1, 7.1, KB-ASK-10). Returns false if a commit fails.
+func (e *Engine) cancelEndedTaskAsksLocked(id string, s *flow.State, ti int, now time.Time) bool {
+	taskID := s.Tasks[ti].ID
 	for ai := range s.Asks {
-		if a := s.Asks[ai]; a.Task == taskID && a.Kind == flow.KindDecision && a.Status == flow.AskStatusOpen {
-			s.Asks[ai], _, _ = flow.StepAsk(a, flow.AskEvent{Kind: flow.EvAskCancel}, now)
-			n++
+		a := s.Asks[ai]
+		if taskID == "" || a.Task != taskID || (a.Kind != flow.KindDecision && a.Kind != flow.KindGate) || a.Status != flow.AskStatusOpen {
+			continue
+		}
+		next, row, dec := flow.StepAsk(a, flow.AskEvent{Kind: flow.EvAskCancel}, now)
+		s.Asks[ai] = next
+		if err := e.commitChangeLocked(id, s, LogLine{By: "engine", Task: taskID, Rule: row, Asked: dec.Asked, Decision: "cancelled task ask " + next.ID, Why: "task ended"}, Change{Kind: flow.EvAskCancel, AskID: next.ID, Task: taskID}); err != nil {
+			s.Asks[ai] = a
+			e.logError("factory.commit_error", id, err)
+			return false
 		}
 	}
-	return n
+	return true
 }
