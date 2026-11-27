@@ -74,9 +74,20 @@ final class FactoryNewProjectTests: XCTestCase {
         let blankGoal = FactoryNewProjectForm(spaces: spaces, heads: existing, selectedFolder: "~/code/notes", goal: "  \n\t ")
         XCTAssertTrue(blankGoal.canCheck && !blankGoal.canStart)
 
-        let ready = FactoryNewProjectForm(spaces: spaces, heads: existing, selectedFolder: "~/code/notes", goal: "A notes page with search")
-        XCTAssertTrue(ready.canCheck && ready.canStart)
-        XCTAssertEqual(ready.checkButtonLabel, "Check this folder")
+        let unchecked = FactoryNewProjectForm(
+            spaces: spaces, heads: existing, selectedFolder: "~/code/notes", goal: "A notes page with search"
+        )
+        XCTAssertTrue(unchecked.canCheck)
+        XCTAssertFalse(unchecked.canStart, "Start stays off until start checks pass")
+        XCTAssertEqual(unchecked.checkButtonLabel, "Check this folder")
+        XCTAssertEqual(unchecked.startHint, "Start turns on when no check fails.")
+
+        let emptyChecks = FactoryNewProjectForm(
+            spaces: spaces, heads: existing, selectedFolder: "~/code/notes", goal: "A notes page with search", checks: []
+        )
+        XCTAssertFalse(emptyChecks.canStart, "Empty check results must not enable Start")
+        XCTAssertNil(emptyChecks.checksSummary)
+        XCTAssertEqual(emptyChecks.startHint, "Start turns on when no check fails.")
 
         let ok = FactoryStartCheck(name: "git version", status: "ok", detail: "git version 2.47.1")
         let warn = FactoryStartCheck(name: "start fetch", status: "warn", detail: "stale", fix: "run: git fetch origin (sign in to git if it asks)")
@@ -95,15 +106,28 @@ final class FactoryNewProjectTests: XCTestCase {
         let oneFail = FactoryNewProjectForm(spaces: spaces, heads: existing, selectedFolder: "~/code/notes", goal: "Goal", checks: [ok, failCLI])
         XCTAssertTrue(oneFail.hasFailedChecks && !oneFail.canStart)
         XCTAssertEqual(oneFail.checkButtonLabel, "Check again")
+        XCTAssertEqual(oneFail.startHint, "Start turns on when no check fails.")
         XCTAssertEqual(oneFail.checksSummary, "1 check failed. Fix it, then check again.")
-        XCTAssertEqual(FactoryNewProjectForm(spaces: spaces, heads: existing, selectedFolder: "~/code/notes", goal: "Goal", checks: [failCLI, failPlain]).checksSummary, "2 checks failed. Fix them, then check again.")
+        XCTAssertEqual(
+            FactoryNewProjectForm(spaces: spaces, heads: existing, selectedFolder: "~/code/notes", goal: "Goal", checks: [failCLI, failPlain]).checksSummary,
+            "2 checks failed. Fix them, then check again."
+        )
 
         let warnPass = FactoryNewProjectForm(spaces: spaces, heads: existing, selectedFolder: "~/code/notes", goal: "Goal", checks: [ok, warn, skip])
         XCTAssertTrue(!warnPass.hasFailedChecks && warnPass.canStart)
+        XCTAssertEqual(warnPass.startHint, "Starting runs agents on your model accounts. They use your quota.")
         XCTAssertEqual(warnPass.checksSummary, "1 pass, 1 warning. You can start.")
+
         let allPass = FactoryNewProjectForm(spaces: spaces, heads: existing, selectedFolder: "~/code/notes", goal: "Goal", checks: [ok])
         XCTAssertTrue(allPass.canStart)
+        XCTAssertEqual(allPass.startHint, "Starting runs agents on your model accounts. They use your quota.")
         XCTAssertEqual(allPass.checksSummary, "All 1 checks pass.")
+
+        let passWithSkip = FactoryNewProjectForm(
+            spaces: spaces, heads: existing, selectedFolder: "~/code/notes", goal: "Goal", checks: [ok, skip]
+        )
+        XCTAssertTrue(passWithSkip.canStart)
+        XCTAssertEqual(passWithSkip.checksSummary, "All 2 checks pass.")
     }
 
     /// `POST /api/factory/projects/start` and `/check` wire shapes, 400 `results`, 403 & 503 refusals.
@@ -143,4 +167,42 @@ final class FactoryNewProjectTests: XCTestCase {
         XCTAssertEqual(FactoryNewProjectForm.startErrorMessage(DaemonError.rejected(status: 403, message: "proof_required"), computerName: "Work Mac"), "Not started: Work Mac no longer knows this phone. Pair this phone again in Settings ▸ Work Mac, then press Start again.")
         XCTAssertTrue(FactoryNewProjectForm.isFactoryUnavailable(DaemonError.rejected(status: 503, message: "factory is not available")))
     }
+
+    /// `POST /api/factory/projects/check` must override the 8 s JSON session timeout with
+    /// at least the web page's 45 s start-check budget (`web/factory/project.js` `AbortSignal.timeout(45000)`).
+    func testCheckRouteUsesStartCheckTimeoutPastEightSecondSessionLimit() async throws {
+        DelayedCheckProtocol.reset()
+        defer { DelayedCheckProtocol.reset() }
+
+        let config = DeviceCredentials.ephemeral(timeout: 0.15)
+        config.protocolClasses = [DelayedCheckProtocol.self]
+        let client = DaemonClient(endpoint: DaemonEndpoint(text: "127.0.0.1:7799")!, session: URLSession(configuration: config))
+
+        let checked = try await client.checkFactory(folder: "~/code/notes")
+        XCTAssertEqual(checked, [FactoryStartCheck(name: "git version", status: "ok", detail: "git 2.47")])
+        let timeout = try XCTUnwrap(DelayedCheckProtocol.seenTimeout)
+        XCTAssertGreaterThanOrEqual(timeout, 45, "check route must allow at least 45 s for start checks")
+    }
+}
+
+private final class DelayedCheckProtocol: URLProtocol {
+    nonisolated(unsafe) static var seenTimeout: TimeInterval?
+    static func reset() { seenTimeout = nil }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        Self.seenTimeout = request.timeoutInterval
+        DispatchQueue.global().asyncAfter(deadline: .now() + 0.35) {
+            let url = self.request.url!
+            let res = HTTPURLResponse(url: url, statusCode: 200, httpVersion: "HTTP/1.1", headerFields: nil)!
+            let body = Data(#"{"results":[{"name":"git version","status":"ok","detail":"git 2.47"}]}"#.utf8)
+            self.client?.urlProtocol(self, didReceive: res, cacheStoragePolicy: .notAllowed)
+            self.client?.urlProtocol(self, didLoad: body)
+            self.client?.urlProtocolDidFinishLoading(self)
+        }
+    }
+
+    override func stopLoading() {}
 }

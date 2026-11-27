@@ -38,6 +38,12 @@ final class StubDaemon {
     /// How long a POST waits before its answer (a slow computer), so a
     /// second tap lands while the first is in flight.
     var postDelay: TimeInterval = 0
+    /// Optional response delay for `POST /api/factory/projects/check` alone.
+    var checkDelay: TimeInterval {
+        get { lock.withLock { _checkDelay } }
+        set { lock.withLock { _checkDelay = newValue } }
+    }
+    private var _checkDelay: TimeInterval = 0
     private let lock = NSLock()
     private var seen: [String] = []
     /// The lines typed so far (`POST /api/turn`'s `text`).
@@ -192,7 +198,8 @@ final class StubDaemon {
             return
         }
         let reply = response(for: path, method: method, body: body)
-        let delay = method == "POST" ? postDelay : 0
+        let delay = method == "POST" && path.hasPrefix("/api/factory/projects/check") && checkDelay > 0
+            ? checkDelay : (method == "POST" ? postDelay : 0)
         queue.asyncAfter(deadline: .now() + delay) {
             connection.send(content: reply, completion: .contentProcessed { _ in connection.cancel() })
         }
