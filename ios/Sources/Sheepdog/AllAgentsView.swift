@@ -38,7 +38,7 @@ struct AllAgentsView: View {
     private var currentHasMatches: Bool {
         switch filter {
         case .all:
-            return !factoryList.isEmpty || settledFactoryAsk != nil
+            return !shown.isEmpty || factoryList.hasFactoryContent || settledFactoryAsk != nil
         case .waiting:
             return !shown.isEmpty || !factoryList.needsYouHeads.isEmpty
                 || !factoryList.factoryAsks.isEmpty || settledFactoryAsk != nil
@@ -261,7 +261,7 @@ struct AllAgentsView: View {
             ForEach(groups, id: \.0) { group, items in
                 if group == .done && !stopHeads.isEmpty {
                     AgentSectionHeader(group: .working, count: stopHeads.count, title: "Stopped")
-                    columns(stopHeads.map(CardItem.head), computer: computer, firstAskID: asks.first?.id)
+                    columns(stopHeads.map(CardItem.head), computer: computer, firstAskID: nil)
                 }
                 if !items.isEmpty {
                     let folded = group == .done && !doneHeads.isEmpty
