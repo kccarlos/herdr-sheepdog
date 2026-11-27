@@ -52,8 +52,6 @@ shard-3  SheepdogUITests/CardsUITests                  # 86
 shard-3  SheepdogUITests/FlockTypingUITests            # 48
 shard-3  SheepdogUITests/NewConversationUITests        # 41
 shard-3  SheepdogUITests/NewWithoutVoiceUITests        # 15
-shard-3  SheepdogUITests/FactoryTaskAndGoalUITests
-shard-3  SheepdogUITests/FactorySettingsUITests
 shard-3  SheepdogUITests/VoiceRobustnessUITests        # 146
 shard-3  SheepdogUITests/FirstRunUITests               # 104
 shard-3  SheepdogUITests/WalkthroughUITests            # 101
@@ -83,6 +81,8 @@ shard-4  SheepdogUITests/ReadmeRecordingUITests
 # they have a job of their own (shards 2 and 4 hit the 50-minute limit).
 shard-5  SheepdogUITests/FilesDemoUITests
 shard-5  SheepdogUITests/AgentAttentionLargestTextUITests
-shard-5  SheepdogUITests/FactorySayKeyboardUITests
 shard-6  SheepdogUITests/IPadFactoryUITests
 shard-6  SheepdogUITests/IPadPortraitKeyboardUITests
+shard-7  SheepdogUITests/FactorySayKeyboardUITests
+shard-7  SheepdogUITests/FactoryTaskAndGoalUITests
+shard-7  SheepdogUITests/FactorySettingsUITests
