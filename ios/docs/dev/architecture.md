@@ -483,7 +483,10 @@ section 6.
     `expandedAgents` with every card that has no question; expanded cards add
     "Earlier", up to 3 older messages, `Agent.earlierWorkerMessages`); a
     factory project board (`IPadDetail.factoryProject`, including another
-    computer's project directly per D12 without moving voice); or
+    computer's project directly per D12 without moving voice, laying out the
+    task list beside the layered dependency graph `FactoryTaskGraphView` over
+    Kit's `FactoryTaskGraph` at regular width and stacking at accessibility
+    text sizes; tapping any graph node pushes `FactoryTaskView`); or
     an agent's window as a pane (`AgentScreenView(pane:)` with a
     `PaneChrome`: its own header with the dot, name and space, ⋯, and
     Close instead of a pop). A shell pushes on the detail's own stack.
