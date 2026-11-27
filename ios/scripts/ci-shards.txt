@@ -66,7 +66,6 @@ shard-4  SheepdogUITests/CardLabelUITests
 shard-4  SheepdogUITests/ComputersUITests
 shard-4  SheepdogUITests/FactoryAgentsUITests
 shard-4  SheepdogUITests/FactoryProjectBoardUITests
-shard-4  SheepdogUITests/FactorySayKeyboardUITests
 shard-4  SheepdogUITests/FactoryNewProjectUITests
 shard-4  SheepdogUITests/RemoteAgentWindowUITests
 shard-4  SheepdogUITests/LinkStatusUITests
@@ -85,3 +84,4 @@ shard-4  SheepdogUITests/ReadmeRecordingUITests
 # they have a job of their own (shards 2 and 4 hit the 50-minute limit).
 shard-5  SheepdogUITests/FilesDemoUITests
 shard-5  SheepdogUITests/AgentAttentionLargestTextUITests
+shard-5  SheepdogUITests/FactorySayKeyboardUITests

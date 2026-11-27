@@ -50,10 +50,10 @@ final class FactorySettingsUITests: XCTestCase {
         tapWhenTappable(scrollToVisible(app, app.descendants(matching: .any)["flock.factory.proj-1"].firstMatch), "notes head")
         tapWhenTappable(scrollToVisible(app, app.buttons["factoryProject.settings"].firstMatch), "Settings")
 
-        XCTAssertTrue(app.staticTexts["For this project only."].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["For this project only. A change is read back to you and saved when you confirm."].waitForExistence(timeout: 10))
         let maxRunRow = scrollToVisible(app, app.descendants(matching: .any)["factorySettings.row.max_running"].firstMatch)
         XCTAssertTrue(maxRunRow.exists)
-        XCTAssertTrue(maxRunRow.staticTexts["3"].exists)
+        XCTAssertEqual(app.textFields["max running"].firstMatch.value as? String, "3")
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'default 3 · allowed 1–20'")).firstMatch.exists)
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'not set'")).firstMatch.exists, "empty value shows not set")
         XCTAssertFalse(app.staticTexts["max_running"].exists || app.staticTexts["models.worker"].exists, "raw setting keys must never appear")
@@ -75,8 +75,8 @@ final class FactorySettingsUITests: XCTestCase {
             waitUntil(10) { stub.requests("GET /events") >= 1 },
             "/events stream must connect before emitting factory.changed"
         )
-        let getsBefore = stub.requests("GET /api/factory/projects/proj-1/settings")
         stub.factorySettingsErrors["proj-1"] = (503, #"{"error":"herdr busy"}"#)
+        let getsBefore = stub.requests("GET /api/factory/projects/proj-1/settings")
         stub.emitFactoryChanged(project: "proj-1")
         XCTAssertTrue(
             waitUntil(10) { stub.requests("GET /api/factory/projects/proj-1/settings") > getsBefore },
@@ -138,7 +138,7 @@ final class FactorySettingsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["No settings available."].waitForExistence(timeout: 5))
     }
 
-    private func waitUntil(_ timeout: TimeInterval = 5, _ check: () -> Bool) -> Bool {
+    func waitUntil(_ timeout: TimeInterval = 5, _ check: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if check() { return true }

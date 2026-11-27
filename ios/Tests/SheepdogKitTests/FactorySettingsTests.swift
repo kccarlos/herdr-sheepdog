@@ -199,4 +199,63 @@ final class FactorySettingsTests: XCTestCase {
             }
         }
     }
+
+    func testAnswerErrorKeptNoticeAndParseFix() throws {
+        let row = try DaemonClient.decoder.decode(
+            FactorySettingRow.self,
+            from: Data(#"{"name":"max_running","label":"max running","value":"3","default":"3","min":1,"max":20}"#.utf8)
+        )
+        XCTAssertEqual(row.keptNotice(was: "3"), "Kept at 3. Nothing changed.")
+        XCTAssertEqual(row.keptNotice(was: "  "), "Kept at not set. Nothing changed.")
+        XCTAssertEqual(row.keptNotice(was: nil), "Kept at not set. Nothing changed.")
+
+        XCTAssertEqual(
+            FactorySettingRow.answerError(
+                "The daemon refused: out_of_range: max running 4 does not fit",
+                computerName: "Work Mac"
+            ),
+            "Not saved: another setting changed after you asked. max running 4 does not fit"
+        )
+        let expectedPair = "Not saved: Work Mac no longer knows this phone."
+            + " Pair this phone again in Settings ▸ Work Mac, then try again."
+        XCTAssertEqual(
+            FactorySettingRow.answerError(
+                "The daemon refused: proof_required: owner asks require a paired device session",
+                computerName: "Work Mac"
+            ),
+            expectedPair
+        )
+        for rejected in [
+            "The daemon refused: proof_rejected: AnswerProof is unknown, expired, or does not match this ask and option.",
+            "The daemon refused: proof_rejected: Owner answer proof must come from a paired device tap or live voice.",
+            "The daemon refused: proof_rejected: Owner answer proof requires tap or voice input from a paired device or live voice session.",
+        ] {
+            let msg = FactorySettingRow.answerError(rejected, computerName: "Work Mac")
+            XCTAssertEqual(msg, expectedPair)
+            XCTAssertFalse(msg.contains("AnswerProof") || msg.contains("proof_rejected"))
+        }
+        XCTAssertEqual(
+            FactorySettingRow.answerError(
+                "The daemon refused: unknown_setting: Unknown setting \"foo\".",
+                computerName: "Work Mac"
+            ),
+            "Unknown setting \"foo\"."
+        )
+        XCTAssertEqual(
+            FactorySettingRow.answerError("Not saved: plain message", computerName: "Work Mac"),
+            "Not saved: plain message"
+        )
+
+        let simple = FactorySettingRow.parseFix("run: codex login")
+        XCTAssertEqual(simple.command, "codex login")
+        XCTAssertEqual(simple.rest, "")
+
+        let withRest = FactorySettingRow.parseFix("run: claude auth login, then retry")
+        XCTAssertEqual(withRest.command, "claude auth login")
+        XCTAssertEqual(withRest.rest, ", then retry")
+
+        let plain = FactorySettingRow.parseFix("install Antigravity CLI (agy)")
+        XCTAssertNil(plain.command)
+        XCTAssertEqual(plain.rest, "install Antigravity CLI (agy)")
+    }
 }
