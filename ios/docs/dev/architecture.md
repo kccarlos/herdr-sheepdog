@@ -355,8 +355,12 @@ accessibility text sizes. The voice capsule stays in place.
   `FactoryTaskDetail` present the tasks, open asks, instruction status,
   Stop/Resume/New goal/Reopen controls (`FactoryGoalSheet`, shared
   `FactoryStartCheckRow` and `FactoryCommandCopyRow`) and the read-only task
-  view (`FactoryTaskView`, without worker/reviewer windows in v1). When a
-  running head has a coordinator pane, `FactoryCoordinatorView` and
+  view (`FactoryTaskView`, without worker/reviewer windows in v1). **+ ▸ New
+  factory project** presents `FactoryNewProjectSheet`
+  (`Presentation.newFactoryProject`), reuses `GET /api/spaces` and
+  `FactoryNewProjectForm`, runs start checks via `checkFactory`, and on
+  start dismisses into `FactoryProjectRoute` to push the new project's
+  board. When a running head has a coordinator pane, `FactoryCoordinatorView` and
   `FactoryCoordinatorWindow` open its live terminal through
   `AgentScreenView` (without the agent menu, Stop or Attach) and show the
   project's off-state recovery screen when the coordinator is not running.

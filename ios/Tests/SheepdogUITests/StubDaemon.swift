@@ -38,6 +38,12 @@ final class StubDaemon {
     /// How long a POST waits before its answer (a slow computer), so a
     /// second tap lands while the first is in flight.
     var postDelay: TimeInterval = 0
+    /// Optional response delay for `POST /api/factory/projects/check` alone.
+    var checkDelay: TimeInterval {
+        get { lock.withLock { _checkDelay } }
+        set { lock.withLock { _checkDelay = newValue } }
+    }
+    private var _checkDelay: TimeInterval = 0
     private let lock = NSLock()
     private var seen: [String] = []
     /// The lines typed so far (`POST /api/turn`'s `text`).
@@ -66,6 +72,25 @@ final class StubDaemon {
     var factoryGraphs: [String: String] = [:]
     /// Optional HTTP error `(status, json)` for graph requests by project id.
     var factoryGraphErrors: [String: (Int, String)] = [:]
+    /// Optional features array advertised by `GET /api/hello` in `.computer` mode.
+    var helloFeatures: [String]?
+    /// `GET /api/spaces` JSON or error `(status, json)` in `.computer` mode.
+    var spacesJSON: String? {
+        get { lock.withLock { _spacesJSON } }
+        set { lock.withLock { _spacesJSON = newValue } }
+    }
+    private var _spacesJSON: String?
+    var spacesError: (Int, String)? {
+        get { lock.withLock { _spacesError } }
+        set { lock.withLock { _spacesError = newValue } }
+    }
+    private var _spacesError: (Int, String)?
+    /// Simulates a computer whose daemon has no factory (`503 factory is not available`).
+    var factoryUnavailable: Bool {
+        get { lock.withLock { _factoryUnavailable } }
+        set { lock.withLock { _factoryUnavailable = newValue } }
+    }
+    private var _factoryUnavailable = false
     /// Settings JSON by project id (`""` for `GET /api/factory/settings`).
     var factorySettings: [String: String] = [:]
     var factorySettingsErrors: [String: (Int, String)] = [:]
@@ -75,6 +100,7 @@ final class StubDaemon {
     var sayHandler: ((String, String) -> (Int, String))?
     var stopHandler: ((String) -> (Int, String))?
     var startHandler: ((String) -> (Int, String))?
+    var checkHandler: ((String) -> (Int, String))?
     var proposeSettingHandler: ((String, String) -> (Int, String))?
     var answerHandler: ((String) -> (Int, String))?
     var askAnswerHandler: ((String, String) -> (Int, String))?
@@ -87,6 +113,7 @@ final class StubDaemon {
     private var says: [(project: String, body: String)] = []
     private var stops: [String] = []
     private var starts: [String] = []
+    private var checks: [String] = []
     private var proposals: [(project: String, body: String)] = []
     private var agentInputs: [(pane: String, body: String)] = []
 
@@ -99,6 +126,7 @@ final class StubDaemon {
     func sayBodies() -> [(project: String, body: String)] { lock.withLock { says } }
     func stopBodies() -> [String] { lock.withLock { stops } }
     func startBodies() -> [String] { lock.withLock { starts } }
+    func checkBodies() -> [String] { lock.withLock { checks } }
     func proposeBodies() -> [(project: String, body: String)] { lock.withLock { proposals } }
     func agentInputBodies() -> [(pane: String, body: String)] { lock.withLock { agentInputs } }
 
@@ -190,7 +218,8 @@ final class StubDaemon {
             return
         }
         let reply = response(for: path, method: method, body: body)
-        let delay = method == "POST" ? postDelay : 0
+        let delay = method == "POST" && path.hasPrefix("/api/factory/projects/check") && checkDelay > 0
+            ? checkDelay : (method == "POST" ? postDelay : 0)
         queue.asyncAfter(deadline: .now() + delay) {
             connection.send(content: reply, completion: .contentProcessed { _ in connection.cancel() })
         }
@@ -217,7 +246,12 @@ final class StubDaemon {
             return http(404, "application/json", #"{"error":"not found"}"#)
         case let .computer(name, agents, questions, history, idBase, reply, factory, pendingAction):
             if path.hasPrefix("/api/hello") {
-                return http(200, "application/json", #"{"name":"sheepdog","version":"v0.1.4","auth":"token","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"computer":{"id":"stub","name":""# + name + #""}}"#)
+                let feats = helloFeatures.map { #","features":["# + $0.map(Self.json).joined(separator: ",") + "]" } ?? ""
+                return http(200, "application/json", #"{"name":"sheepdog","version":"v0.1.4","auth":"token","ws":"/ws","audio":{"in_hz":16000,"out_hz":24000,"format":"pcm16le mono"},"computer":{"id":"stub","name":""# + name + #""}"# + feats + "}")
+            }
+            if method == "GET", path.hasPrefix("/api/spaces") {
+                if let err = spacesError { return http(err.0, "application/json", err.1) }
+                if let spaces = spacesJSON { return http(200, "application/json", spaces) }
             }
             if path.hasPrefix("/api/state") {
                 let voice = #""voice":{"mode":"off","status":"off","muted":false,"stalled":false,"client_connected":false}"#
@@ -300,9 +334,17 @@ final class StubDaemon {
     }
 
     private func factoryResponse(path: String, method: String, body: String, fallback: String?) -> Data {
+        if factoryUnavailable {
+            return http(503, "application/json", #"{"error":"factory is not available"}"#)
+        }
         let clean = String(path.prefix { $0 != "?" })
         if method == "GET", clean == "/api/factory/projects" {
             return http(200, "application/json", #"{"protocol":1,"projects":"# + (factoryState ?? fallback ?? "[]") + "}")
+        }
+        if method == "POST", clean == "/api/factory/projects/check" {
+            lock.withLock { checks.append(body) }
+            let (status, json) = checkHandler?(body) ?? (200, #"{"results":[]}"#)
+            return http(status, "application/json", json)
         }
         if method == "GET", clean == "/api/factory/asks" {
             if let err = lock.withLock({ factoryAsksError }) { return http(err.0, "application/json", err.1) }
@@ -361,7 +403,7 @@ final class StubDaemon {
     }
 
     private func http(_ status: Int, _ type: String, _ body: String) -> Data {
-        let reason = [200: "OK", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 409: "Conflict", 503: "Service Unavailable"][status] ?? "Error"
+        let reason = [200: "OK", 400: "Bad Request", 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 409: "Conflict", 502: "Bad Gateway", 503: "Service Unavailable"][status] ?? "Error"
         let bytes = Data(body.utf8)
         let head = "HTTP/1.1 \(status) \(reason)\r\nContent-Type: \(type)\r\nContent-Length: \(bytes.count)\r\nConnection: close\r\n\r\n"
         return Data(head.utf8) + bytes
