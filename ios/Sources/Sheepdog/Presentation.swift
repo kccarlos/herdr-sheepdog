@@ -12,6 +12,7 @@ enum Presentation: Identifiable, Equatable {
     case pairing(PairingStage)
     case card(ScreenCard)
     case newAgent
+    case newFactoryProject
     case spaces
     /// The capsule menu's connection row.
     case connection
@@ -29,6 +30,7 @@ enum Presentation: Identifiable, Equatable {
         case let .pairing(stage): stage.presentationID
         case let .card(card): "card.\(card.cardID)"
         case .newAgent: "newAgent"
+        case .newFactoryProject: "newFactoryProject"
         case .spaces: "spaces"
         case .connection: "connection"
         case let .primer(primer): "primer.\(primer.rawValue)"
