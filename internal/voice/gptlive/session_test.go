@@ -186,11 +186,19 @@ func testConfig() Config {
 
 func startSession(t *testing.T, cfg Config) (*Session, *fakeDialer, *recLog) {
 	t.Helper()
+	return startSessionWithClock(t, cfg, nil)
+}
+
+func startSessionWithClock(t *testing.T, cfg Config, now func() time.Time) (*Session, *fakeDialer, *recLog) {
+	t.Helper()
 	d := &fakeDialer{}
 	l := &recLog{}
 	s, err := newSession(cfg, l, d)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if now != nil {
+		s.now = now
 	}
 	if err := s.Start(context.Background()); err != nil {
 		t.Fatal(err)
