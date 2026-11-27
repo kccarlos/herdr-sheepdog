@@ -16,6 +16,8 @@ package factory
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -24,6 +26,17 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/factory/flow"
 	"github.com/kccarlos/herdr-sheepdog/internal/hc"
 )
+
+func lastCoordStartupPrompt(t *testing.T, runs []hc.RunParams) string {
+	t.Helper()
+	for i := len(runs) - 1; i >= 0; i-- {
+		if runs[i].Labels["sheepdog.role"] == flow.RoleCoordinator && len(runs[i].Argv) > 0 {
+			return strings.TrimPrefix(runs[i].Argv[len(runs[i].Argv)-1], "-i=")
+		}
+	}
+	t.Fatalf("no coordinator launch with startup prompt in runs %+v", runs)
+	return ""
+}
 
 func taskViewByRef(t *testing.T, gv GraphView, ref string) TaskView {
 	t.Helper()
@@ -659,12 +672,14 @@ func TestNewGoalClearsWhenAllTasksEndWithoutNewTasks(t *testing.T) {
 			}
 
 			// While coord2 is working on its initial turn, NewGoal stays true so J4 cannot cut it off.
+			startupPrompt := lastCoordStartupPrompt(t, h.runs)
 			h.setCoordWorking(coord2)
 			if !h.state().Project.NewGoal {
 				t.Fatal("NewGoal cleared while fresh coordinator was still working on its initial turn")
 			}
 
-			// coord2 finishes its initial turn without adding tasks -> NewGoal clears and J4 finishes.
+			// coord2 finishes its initial turn positively without adding tasks -> NewGoal clears and J4 finishes.
+			h.srv.SetScreen(coord2, completedWakeScreen("claude", startupPrompt, "Goal 2 is already satisfied by T1."))
 			h.coordIdleWithStatus(coord2, "idle")
 			if h.state().Project.NewGoal {
 				t.Fatal("NewGoal stayed true after fresh coordinator completed its Goal 2 turn with 0 new tasks")
@@ -856,6 +871,303 @@ func TestNewGoalEdgeCasesPreserved(t *testing.T) {
 			if st := h.state(); !st.Project.Finished || st.Project.NewGoal || h.eng.Projects()[0].State != "finished" {
 				t.Fatalf("after Stop/Resume with all tasks ended: Finished=%v NewGoal=%v state=%q",
 					st.Project.Finished, st.Project.NewGoal, h.eng.Projects()[0].State)
+			}
+		})
+	})
+}
+
+// TestDropCleanupPRCloseFailureStillLogsAskCancellation covers state-table row
+// S1b (PR #853 r2 Medium): when N1 cancels an ended task's open gate ask and a
+// later cleanup step (PR close) fails, the committed ask cancellation and its
+// EvAskCancel notification must also be recorded in the durable log rather than
+// leaving the N1 log line with an empty Decision.
+func TestDropCleanupPRCloseFailureStillLogsAskCancellation(t *testing.T) {
+	t.Parallel()
+	w := setupPassedGateWorld(t, `,"gate":"owner"`, nil)
+	w.pass() // N31 opens Merge/Hold gate ask for T1
+
+	openPre := openAsksForTask(w.state(), "T1")
+	if len(openPre) != 1 || openPre[0].Kind != flow.KindGate || openPre[0].AskedBy != flow.AskedByN31 {
+		t.Fatalf("precondition open asks = %+v, want 1 N31 gate ask", openPre)
+	}
+	askID := openPre[0].ID
+
+	sub := w.eng.Changes()
+	if err := w.eng.Report(w.coordTok, "task", json.RawMessage(`{"action":"drop","task":"T1","why":"superseded while GitHub close fails"}`)); err != nil {
+		t.Fatalf("task drop T1: %v", err)
+	}
+	preLogLen := len(readRawLogLines(t, w.paths.Log(w.id)))
+	writeGHFile(t, w.gh, "close_fail", "")
+
+	w.pass() // N1 cancels askID, then ClosePR fails
+
+	changes := drainChanges(sub)
+	st, lines := assertLogInvariants(t, w.paths.State(w.id), w.paths.Log(w.id))
+	idx := slices.IndexFunc(st.Asks, func(a flow.Ask) bool { return a.ID == askID })
+	if idx < 0 || st.Asks[idx].Status != flow.AskStatusCancelled {
+		t.Fatalf("gate ask %s after drop with close_fail = %+v, want status=%q", askID, st.Asks, flow.AskStatusCancelled)
+	}
+	if !hasCancelChangeForAsk(changes, askID, "T1") {
+		t.Errorf("Changes() missing EvAskCancel for (%s, T1): got %+v", askID, changes)
+	}
+
+	newLines := lines[preLogLen:]
+	hasCleanupErr := slices.ContainsFunc(newLines, func(l LogLine) bool {
+		return l.Task == "T1" && l.Rule == "N1" && strings.Contains(l.Why, "close failed")
+	})
+	if !hasCleanupErr {
+		t.Fatalf("expected N1 log entry recording PR close failure, got %+v", extractLogDecisions(newLines))
+	}
+	hasCancelDecision := slices.ContainsFunc(newLines, func(l LogLine) bool {
+		return l.Task == "T1" && (l.Rule == "N1" || l.Rule == "A4") && strings.Contains(l.Decision, "cancelled")
+	})
+	if !hasCancelDecision {
+		t.Errorf("durable log lost committed ask cancellation when PR close failed: new log lines = %+v", extractLogDecisions(newLines))
+	}
+
+	// Once PR close recovers after EnsureBackoff, N1 finishes cleanup without re-cancelling askID.
+	_ = os.Remove(filepath.Join(w.gh, "close_fail"))
+	retryLogLen := len(lines)
+	w.now = w.now.Add(2 * time.Minute)
+	w.pass()
+
+	retryChanges := drainChanges(sub)
+	stAfter, linesAfter := assertLogInvariants(t, w.paths.State(w.id), w.paths.Log(w.id))
+	if !flow.Done(stAfter.Tasks[0].Attempts[0].Acts, flow.AskCleanup) {
+		t.Errorf("cleanup did not finish after close_fail cleared: acts=%+v", stAfter.Tasks[0].Attempts[0].Acts)
+	}
+	if hasCancelChangeForAsk(retryChanges, askID, "T1") {
+		t.Errorf("retry pass emitted duplicate EvAskCancel for %s: %+v", askID, retryChanges)
+	}
+	for _, l := range linesAfter[retryLogLen:] {
+		if l.Task == "T1" && strings.Contains(l.Decision, "cancelled") {
+			t.Errorf("retry pass logged duplicate ask cancellation: %+v", extractLogDecisions(linesAfter[retryLogLen:]))
+		}
+	}
+}
+
+// TestNewGoalRequiresPositiveHandlingBeforeJ4Finish covers state-table rows S9d,
+// S9e, and S8b (PR #853 r2 High): with all old tasks ended, neither exhausting
+// an unconfirmed new_goal wake retry via J12 nor interrupting the J7 startup
+// prompt of a reopened project may clear NewGoal or let J4 finish the project
+// (or cancel open project-wide asks); positive handling of the new_goal wake or
+// reopened startup prompt must clear NewGoal and finish through J4.
+func TestNewGoalRequiresPositiveHandlingBeforeJ4Finish(t *testing.T) {
+	t.Parallel()
+
+	t.Run("exhausted_new_goal_wake_retry_does_not_clear_new_goal_or_finish", func(t *testing.T) {
+		t.Parallel()
+		h := newProjectHarness(t, "Goal 1")
+		h.pass() // J7 starts coord1
+		coord1 := h.state().Project.RunID
+		h.edit(func(s *flow.State) {
+			s.Tasks = []flow.Task{{ID: "T1", Title: "feat: goal 1", Done: &flow.Merged{MergedCommit: "m1"}}}
+		})
+		h.setCoordWorking(coord1)
+
+		if err := h.eng.Start(h.repo, "Goal 2: check edge case", 2); err != nil {
+			t.Fatalf("Start(Goal 2): %v", err)
+		}
+		h.edit(func(s *flow.State) {
+			s.Asks = append(s.Asks, flow.Ask{
+				ID: "ask-proj-gate", Project: h.id, Folder: h.repo, Kind: flow.KindGate, Gated: true,
+				Question: "Approve rollout window?", Options: []string{"Approve", "Hold"}, Recommend: "Approve",
+				AskedBy: flow.RoleCoordinator, RunID: coord1, Status: flow.AskStatusOpen, At: h.now,
+			})
+		})
+
+		h.coordIdleWithStatus(coord1, "idle") // J12 delivers new_goal wake #1
+		send1 := lastSendTo(t, h.srv.Requests(), coord1)
+		if !strings.Contains(send1, "Goal 2: check edge case") {
+			t.Fatalf("delivered wake #1 missing Goal 2:\n%s", send1)
+		}
+
+		// 1st delivery of new_goal is Esc-interrupted -> J12 retries new_goal (#2).
+		h.setCoordWorking(coord1)
+		h.srv.SetScreen(coord1, formatPromptEcho("❯", send1)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+		h.coordIdleWithStatus(coord1, "idle")
+		sends := sendsTo(t, h.srv.Requests(), coord1)
+		if len(sends) != 2 {
+			t.Fatalf("after 1st interrupted new_goal wake: sends=%d, want 2", len(sends))
+		}
+		send2 := sends[1]
+
+		// 2nd delivery of new_goal is also Esc-interrupted -> J12 exhausts retry.
+		// NewGoal was never positively handled, so NewGoal must stay true and J4 must not run.
+		h.setCoordWorking(coord1)
+		h.srv.SetScreen(coord1, formatPromptEcho("❯", send2)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+		h.coordIdleWithStatus(coord1, "idle")
+		h.now = h.now.Add(15 * time.Second)
+		h.pass()
+
+		st, _ := assertLogInvariants(t, h.paths.State(h.id), h.paths.Log(h.id))
+		if !st.Project.NewGoal {
+			t.Errorf("Project.NewGoal = false after exhausting interrupted new_goal wake retry, want true")
+		}
+		if st.Project.Finished {
+			t.Errorf("Project.Finished = true before coordinator positively handled Goal 2, want false")
+		}
+		if pv := h.eng.Projects()[0]; pv.State != "running" {
+			t.Errorf("Projects()[0].State = %q, want \"running\"", pv.State)
+		}
+		if st.Project.RunID != coord1 {
+			t.Errorf("Project.RunID = %q, want %q", st.Project.RunID, coord1)
+		}
+		if j4 := logRules(t, h.paths.Log(h.id), "J4"); len(j4) != 0 {
+			t.Errorf("J4 ran after exhausted new_goal wake retry: %+v", extractLogDecisions(j4))
+		}
+		for _, s := range sendsTo(t, h.srv.Requests(), coord1) {
+			if strings.Contains(strings.ToLower(s), "final journal") {
+				t.Errorf("J4 sent final journal prompt after exhausted new_goal retry: %q", s)
+			}
+		}
+		if len(st.Asks) != 1 || st.Asks[0].Status != flow.AskStatusOpen {
+			t.Errorf("project-wide ask after exhausted new_goal retry = %+v, want open", st.Asks)
+		}
+	})
+
+	t.Run("interrupted_reopen_startup_prompt_does_not_clear_new_goal_or_finish", func(t *testing.T) {
+		t.Parallel()
+		h := newProjectHarness(t, "Goal 1")
+		h.pass() // J7 starts coord1
+		coord1 := h.state().Project.RunID
+		h.edit(func(s *flow.State) {
+			s.Tasks = []flow.Task{{ID: "T1", Title: "feat: goal 1", Done: &flow.Merged{MergedCommit: "m1"}}}
+		})
+		h.finishThroughJ4(coord1)
+		j4Before := len(logRules(t, h.paths.Log(h.id), "J4"))
+
+		if err := h.eng.Start(h.repo, "Goal 2: audit reopened project", 2); err != nil {
+			t.Fatalf("Start(reopen Goal 2): %v", err)
+		}
+		h.now = h.now.Add(15 * time.Second)
+		h.pass() // J7 starts fresh coord2 with Goal 2 startup handoff prompt
+		coord2 := h.state().Project.RunID
+		if coord2 == "" || coord2 == coord1 || !h.state().Project.NewGoal {
+			t.Fatalf("after J7 start on reopen: coord2=%q (coord1=%q) NewGoal=%v, want fresh coord2 and NewGoal=true",
+				coord2, coord1, h.state().Project.NewGoal)
+		}
+		h.edit(func(s *flow.State) {
+			s.Asks = append(s.Asks, flow.Ask{
+				ID: "ask-reopen-gate", Project: h.id, Folder: h.repo, Kind: flow.KindGate, Gated: true,
+				Question: "Approve reopened rollout?", Options: []string{"Approve", "Hold"}, Recommend: "Approve",
+				AskedBy: flow.RoleCoordinator, RunID: coord2, Status: flow.AskStatusOpen, At: h.now,
+			})
+		})
+
+		startupPrompt := lastCoordStartupPrompt(t, h.runs)
+		if !strings.Contains(startupPrompt, "Goal 2: audit reopened project") {
+			t.Fatalf("J7 startup prompt missing Goal 2:\n%s", startupPrompt)
+		}
+
+		// coord2's initial startup prompt turn is Esc-interrupted and goes idle.
+		// NewGoal must stay true and J4 must not run or cancel open project asks.
+		h.setCoordWorking(coord2)
+		h.srv.SetScreen(coord2, formatPromptEcho("❯", startupPrompt)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+		h.coordIdleWithStatus(coord2, "idle")
+		h.now = h.now.Add(15 * time.Second)
+		h.pass()
+
+		st, _ := assertLogInvariants(t, h.paths.State(h.id), h.paths.Log(h.id))
+		if !st.Project.NewGoal {
+			t.Errorf("Project.NewGoal = false after interrupted J7 startup prompt, want true")
+		}
+		if st.Project.Finished {
+			t.Errorf("Project.Finished = true after interrupted J7 startup prompt, want false")
+		}
+		if pv := h.eng.Projects()[0]; pv.State != "running" {
+			t.Errorf("Projects()[0].State = %q, want \"running\"", pv.State)
+		}
+		if st.Project.RunID != coord2 {
+			t.Errorf("Project.RunID = %q, want %q", st.Project.RunID, coord2)
+		}
+		if j4After := logRules(t, h.paths.Log(h.id), "J4")[j4Before:]; len(j4After) != 0 {
+			t.Errorf("J4 ran after interrupted J7 startup prompt: %+v", extractLogDecisions(j4After))
+		}
+		for _, s := range sendsTo(t, h.srv.Requests(), coord2) {
+			if strings.Contains(strings.ToLower(s), "final journal") {
+				t.Errorf("J4 sent final journal prompt to coord2 after interrupted startup: %q", s)
+			}
+		}
+		if len(st.Asks) != 1 || st.Asks[0].Status != flow.AskStatusOpen {
+			t.Errorf("project-wide ask after interrupted startup = %+v, want open", st.Asks)
+		}
+	})
+
+	t.Run("positive_handling_clears_new_goal_and_finishes", func(t *testing.T) {
+		t.Parallel()
+
+		t.Run("confirmed_wake_retry_after_interruption", func(t *testing.T) {
+			t.Parallel()
+			h := newProjectHarness(t, "Goal 1")
+			h.pass() // J7 starts coord1
+			coord1 := h.state().Project.RunID
+			h.edit(func(s *flow.State) {
+				s.Tasks = []flow.Task{{ID: "T1", Title: "feat: goal 1", Done: &flow.Merged{MergedCommit: "m1"}}}
+			})
+			h.setCoordWorking(coord1)
+
+			if err := h.eng.Start(h.repo, "Goal 2: already covered", 2); err != nil {
+				t.Fatalf("Start(Goal 2): %v", err)
+			}
+			h.coordIdleWithStatus(coord1, "idle") // J12 delivers new_goal wake #1
+			send1 := lastSendTo(t, h.srv.Requests(), coord1)
+
+			// 1st delivery is Esc-interrupted -> J12 retries new_goal (#2).
+			h.setCoordWorking(coord1)
+			h.srv.SetScreen(coord1, formatPromptEcho("❯", send1)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+			h.coordIdleWithStatus(coord1, "idle")
+			send2 := lastSendTo(t, h.srv.Requests(), coord1)
+			if !h.state().Project.NewGoal {
+				t.Fatal("NewGoal cleared before retried wake completed")
+			}
+
+			// 2nd delivery completes positively with 0 new tasks -> NewGoal clears and J4 finishes.
+			h.setCoordWorking(coord1)
+			h.srv.SetScreen(coord1, completedWakeScreen("claude", send2, "Goal 2 is already covered by T1; no new tasks needed."))
+			h.coordIdleWithStatus(coord1, "idle")
+			if h.state().Project.NewGoal {
+				t.Fatal("NewGoal stayed true after confirmed new_goal retry turn with 0 new tasks")
+			}
+
+			h.finishThroughJ4(coord1)
+			st, _ := assertLogInvariants(t, h.paths.State(h.id), h.paths.Log(h.id))
+			if !st.Project.Finished || st.Project.RunID != "" || h.eng.Projects()[0].State != "finished" {
+				t.Fatalf("project did not finish after confirmed new_goal retry: Finished=%v RunID=%q state=%q",
+					st.Project.Finished, st.Project.RunID, h.eng.Projects()[0].State)
+			}
+		})
+
+		t.Run("confirmed_reopen_startup_prompt", func(t *testing.T) {
+			t.Parallel()
+			h := newProjectHarness(t, "Goal 1")
+			h.pass() // J7 starts coord1
+			coord1 := h.state().Project.RunID
+			h.edit(func(s *flow.State) {
+				s.Tasks = []flow.Task{{ID: "T1", Title: "feat: goal 1", Done: &flow.Merged{MergedCommit: "m1"}}}
+			})
+			h.finishThroughJ4(coord1)
+
+			if err := h.eng.Start(h.repo, "Goal 2: confirm already satisfied", 2); err != nil {
+				t.Fatalf("Start(reopen Goal 2): %v", err)
+			}
+			h.now = h.now.Add(15 * time.Second)
+			h.pass() // J7 starts coord2
+			coord2 := h.state().Project.RunID
+			startupPrompt := lastCoordStartupPrompt(t, h.runs)
+
+			h.setCoordWorking(coord2)
+			h.srv.SetScreen(coord2, completedWakeScreen("claude", startupPrompt, "Goal 2 is already satisfied by T1; nothing to add."))
+			h.coordIdleWithStatus(coord2, "idle")
+			if h.state().Project.NewGoal {
+				t.Fatal("NewGoal stayed true after confirmed J7 startup prompt with 0 new tasks")
+			}
+
+			h.finishThroughJ4(coord2)
+			st, _ := assertLogInvariants(t, h.paths.State(h.id), h.paths.Log(h.id))
+			if !st.Project.Finished || st.Project.RunID != "" || h.eng.Projects()[0].State != "finished" {
+				t.Fatalf("reopened project did not finish after confirmed startup prompt: Finished=%v RunID=%q state=%q",
+					st.Project.Finished, st.Project.RunID, h.eng.Projects()[0].State)
 			}
 		})
 	})
