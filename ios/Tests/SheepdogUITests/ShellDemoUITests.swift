@@ -67,11 +67,11 @@ final class ShellDemoUITests: XCTestCase {
         XCTAssertTrue(terminal.waitForExistence(timeout: 10), "the shell's prompt")
         sleep(1)
         shot("shell")
-        // A few scripted commands answer, about the sample project. Verify the
-        // keyboard is up and send keys to the focused terminal via typeText
-        // (software keyboard AX frames can sit off screen on some simulators).
-        XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10), "the shell's keyboard comes up")
-        typeWhenFocused(app.descendants(matching: .any).matching(identifier: "agentScreen.terminal").firstMatch, "ls\n")
+        // A few scripted commands answer, about the sample project. The
+        // terminal takes keys, not synthesized text: tap them.
+        for key in ["l", "s"] { app.keyboards.keys[key].tap() }
+        let ret = app.keyboards.buttons.matching(NSPredicate(format: "label ==[c] 'return'")).firstMatch
+        if ret.exists { ret.tap() } else { app.keyboards.keys.matching(NSPredicate(format: "label ==[c] 'return'")).firstMatch.tap() }
         let listed = app.descendants(matching: .any).matching(identifier: "agentScreen.terminal")
             .matching(NSPredicate(format: "value CONTAINS 'package.json'")).firstMatch
         if !listed.waitForExistence(timeout: 10) {
