@@ -55,6 +55,28 @@ func hasCancelChangeForAsk(changes []Change, askID, taskID string) bool {
 	})
 }
 
+func rawProjectJSON(t *testing.T, statePath string, omitKeys ...string) (string, map[string]any) {
+	t.Helper()
+	raw, err := os.ReadFile(statePath)
+	if err != nil {
+		t.Fatalf("read state %s: %v", statePath, err)
+	}
+	var doc struct {
+		Project map[string]any `json:"project"`
+	}
+	if err := json.Unmarshal(raw, &doc); err != nil {
+		t.Fatalf("unmarshal state %s: %v", statePath, err)
+	}
+	for _, k := range omitKeys {
+		delete(doc.Project, k)
+	}
+	b, err := json.Marshal(doc.Project)
+	if err != nil {
+		t.Fatalf("marshal project map: %v", err)
+	}
+	return string(b), doc.Project
+}
+
 // driveRestartWorldJ4Finish advances an idle coordinator after NewGoal should
 // have cleared through J4's final_journal turn, coordinator stop, and Finished=true.
 func driveRestartWorldJ4Finish(t *testing.T, w *restartWorld) {
@@ -660,9 +682,12 @@ func TestNewGoalClearsWhenAllTasksEndWithoutNewTasks(t *testing.T) {
 			})
 			h.finishThroughJ4(coord1)
 
-			// Reopen finished project with Goal 2; J7 starts fresh coord2.
+			// Reopen finished project with Goal 2: Start queues a new_goal wake for the current generation; J7 starts fresh coord2.
 			if err := h.eng.Start(h.repo, "Goal 2: verify already satisfied", 2); err != nil {
 				t.Fatalf("Start(reopen Goal 2): %v", err)
+			}
+			if !flow.HasNewGoalWake(h.state().Project.Wakes) {
+				t.Fatalf("after Start(reopen Goal 2): Wakes=%+v, want held new_goal wake", h.state().Project.Wakes)
 			}
 			h.now = h.now.Add(15 * time.Second)
 			h.pass() // J7 starts coord2
@@ -670,19 +695,28 @@ func TestNewGoalClearsWhenAllTasksEndWithoutNewTasks(t *testing.T) {
 			if coord2 == "" || !h.state().Project.NewGoal {
 				t.Fatalf("after J7 start on reopen: coord2=%q NewGoal=%v, want non-empty and NewGoal=true", coord2, h.state().Project.NewGoal)
 			}
+			if _, proj := rawProjectJSON(t, h.paths.State(h.id)); proj["new_goal_startup"] != nil {
+				t.Errorf("state.json project still carries removed new_goal_startup field: %v", proj)
+			}
 
-			// While coord2 is working on its initial turn, NewGoal stays true so J4 cannot cut it off.
+			// While coord2 completes its initial J7 startup handoff turn, no screen parsing of the handoff settles NewGoal;
+			// going idle after startup delivers the held new_goal wake via J12 while keeping NewGoal true.
 			startupPrompt := lastCoordStartupPrompt(t, h.runs)
 			h.setCoordWorking(coord2)
 			if !h.state().Project.NewGoal {
 				t.Fatal("NewGoal cleared while fresh coordinator was still working on its initial turn")
 			}
+			h.srv.SetScreen(coord2, completedWakeScreen("claude", startupPrompt, "Ready for Goal 2 wake."))
+			h.coordIdleWithStatus(coord2, "idle")
+			if !h.state().Project.NewGoal {
+				t.Fatal("NewGoal cleared from J7 startup handoff screen alone before new_goal wake was confirmed")
+			}
 
-			// coord2 finishes its initial turn positively without adding tasks -> NewGoal clears and J4 finishes.
-			h.srv.SetScreen(coord2, completedWakeScreen("claude", startupPrompt, "Goal 2 is already satisfied by T1."))
+			// coord2 confirms the delivered new_goal wake without adding tasks -> NewGoal clears and J4 finishes.
+			h.completeWakeTurn(coord2)
 			h.coordIdleWithStatus(coord2, "idle")
 			if h.state().Project.NewGoal {
-				t.Fatal("NewGoal stayed true after fresh coordinator completed its Goal 2 turn with 0 new tasks")
+				t.Fatal("NewGoal stayed true after fresh coordinator confirmed Goal 2 wake with 0 new tasks")
 			}
 			h.finishThroughJ4(coord2)
 			if st := h.state(); !st.Project.Finished || st.Project.RunID != "" {
@@ -1138,7 +1172,7 @@ func TestNewGoalRequiresPositiveHandlingBeforeJ4Finish(t *testing.T) {
 			}
 		})
 
-		t.Run("confirmed_reopen_startup_prompt", func(t *testing.T) {
+		t.Run("confirmed_reopen_new_goal_wake", func(t *testing.T) {
 			t.Parallel()
 			h := newProjectHarness(t, "Goal 1")
 			h.pass() // J7 starts coord1
@@ -1151,24 +1185,655 @@ func TestNewGoalRequiresPositiveHandlingBeforeJ4Finish(t *testing.T) {
 			if err := h.eng.Start(h.repo, "Goal 2: confirm already satisfied", 2); err != nil {
 				t.Fatalf("Start(reopen Goal 2): %v", err)
 			}
+			if !flow.HasNewGoalWake(h.state().Project.Wakes) {
+				t.Fatalf("after Start(reopen Goal 2): Wakes=%+v, want held new_goal wake", h.state().Project.Wakes)
+			}
 			h.now = h.now.Add(15 * time.Second)
 			h.pass() // J7 starts coord2
 			coord2 := h.state().Project.RunID
+			if _, proj := rawProjectJSON(t, h.paths.State(h.id)); proj["new_goal_startup"] != nil {
+				t.Errorf("state.json project still carries removed new_goal_startup field: %v", proj)
+			}
 			startupPrompt := lastCoordStartupPrompt(t, h.runs)
 
+			// Startup handoff turn completes and goes idle -> J12 delivers new_goal wake; NewGoal stays true until confirmed.
 			h.setCoordWorking(coord2)
-			h.srv.SetScreen(coord2, completedWakeScreen("claude", startupPrompt, "Goal 2 is already satisfied by T1; nothing to add."))
+			h.srv.SetScreen(coord2, completedWakeScreen("claude", startupPrompt, "Startup complete."))
+			h.coordIdleWithStatus(coord2, "idle")
+			if !h.state().Project.NewGoal {
+				t.Fatal("NewGoal cleared before reopened coordinator confirmed the J12 new_goal wake")
+			}
+
+			h.completeWakeTurn(coord2)
 			h.coordIdleWithStatus(coord2, "idle")
 			if h.state().Project.NewGoal {
-				t.Fatal("NewGoal stayed true after confirmed J7 startup prompt with 0 new tasks")
+				t.Fatal("NewGoal stayed true after confirmed new_goal wake on reopened project with 0 new tasks")
 			}
 
 			h.finishThroughJ4(coord2)
 			st, _ := assertLogInvariants(t, h.paths.State(h.id), h.paths.Log(h.id))
 			if !st.Project.Finished || st.Project.RunID != "" || h.eng.Projects()[0].State != "finished" {
-				t.Fatalf("reopened project did not finish after confirmed startup prompt: Finished=%v RunID=%q state=%q",
+				t.Fatalf("reopened project did not finish after confirmed new_goal wake: Finished=%v RunID=%q state=%q",
 					st.Project.Finished, st.Project.RunID, h.eng.Projects()[0].State)
 			}
 		})
+	})
+}
+
+// TestNewGoalGenerationSettlement covers the PR #853 round-3 redesign
+// (state-table rows S8a-r3, S8b-r3, S9f, S9g, S9h, S10b):
+//   - Each Start/New goal bumps a persisted goal generation on the project.
+//   - Superseded held new_goal wakes are replaced (never kept alongside or ahead of the newer goal).
+//   - A reply to an earlier goal's wake must never settle a newer goal generation.
+//   - Reopening a finished project carries the goal through the same wake/generation path
+//     (no NewGoalStartup screen parsing), so a later prompt after the startup reply still settles cleanly,
+//     while an interrupted startup + later unrelated reply + exhausted wake retry stays unsettled.
+//   - Coordinator commands in the current generation (task close, task drop, non-split task add)
+//     settle NewGoal even if the wake reply is interrupted twice, while J4 keeps its active-turn
+//     and pending-wake guards.
+//   - Commands recorded before the generation bump do not count toward the new generation.
+//   - Stop followed by same-goal Start keeps the persisted goal generation.
+func TestNewGoalGenerationSettlement(t *testing.T) {
+	t.Parallel()
+
+	t.Run("superseded_new_goal_before_delivery_replaces_wake_and_goal_2_cannot_finish_goal_3", func(t *testing.T) {
+		t.Parallel()
+		h := newProjectHarness(t, "Goal 1")
+		h.pass() // J7 starts coord1
+		coord1 := h.state().Project.RunID
+		h.edit(func(s *flow.State) {
+			s.Tasks = []flow.Task{{ID: "T1", Title: "feat: goal 1", Done: &flow.Merged{MergedCommit: "m1"}}}
+			s.Project.Wakes = []flow.Wake{{Key: "worker_note", Task: "T1", Why: "review note", Facts: "keep unrelated wake", At: h.now}}
+		})
+		h.setCoordWorking(coord1)
+
+		// Start Goal 2 while coord1 is busy, then mark the held new_goal wake Retried=true
+		// to verify superseding also resets retry state for Goal 3.
+		if err := h.eng.Start(h.repo, "Goal 2: superseded intermediate goal", 2); err != nil {
+			t.Fatalf("Start(Goal 2): %v", err)
+		}
+		h.edit(func(s *flow.State) {
+			for i := range s.Project.Wakes {
+				if s.Project.Wakes[i].Task == "" && s.Project.Wakes[i].Key == "new_goal" {
+					s.Project.Wakes[i].Retried = true
+				}
+			}
+		})
+
+		// Start Goal 3 before J12 can deliver Goal 2.
+		if err := h.eng.Start(h.repo, "Goal 3: final target goal", 2); err != nil {
+			t.Fatalf("Start(Goal 3): %v", err)
+		}
+
+		st := h.state()
+		var newGoalWakes []flow.Wake
+		hasWorkerNote := false
+		for _, w := range st.Project.Wakes {
+			if w.Task == "T1" && w.Key == "worker_note" {
+				hasWorkerNote = true
+			}
+			if w.Task == "" && w.Key == "new_goal" {
+				newGoalWakes = append(newGoalWakes, w)
+			}
+		}
+		if !hasWorkerNote {
+			t.Errorf("replacing superseded new_goal wake dropped unrelated T1:worker_note wake: %+v", st.Project.Wakes)
+		}
+		if len(newGoalWakes) != 1 {
+			t.Fatalf("held new_goal wakes = %+v, want exactly 1 replaced wake", newGoalWakes)
+		}
+		if !strings.Contains(newGoalWakes[0].Facts, "Goal 3: final target goal") || strings.Contains(newGoalWakes[0].Facts, "Goal 2") {
+			t.Errorf("held new_goal wake Facts = %q, want Goal 3 payload replacing Goal 2", newGoalWakes[0].Facts)
+		}
+		if newGoalWakes[0].Retried {
+			t.Errorf("replaced new_goal wake kept Retried=true from superseded wake: %+v", newGoalWakes[0])
+		}
+
+		// When coord1 goes idle, J12 must deliver Goal 3 (never Goal 2).
+		// On buggy code that kept Goal 2's wake, confirming that Goal 2 wake must still NOT settle Goal 3.
+		h.coordIdleWithStatus(coord1, "idle")
+		send1 := lastSendTo(t, h.srv.Requests(), coord1)
+		if !strings.Contains(send1, "Goal 3: final target goal") || strings.Contains(send1, "Goal 2") {
+			t.Errorf("delivered wake = %q, want Goal 3 only (Goal 2 was superseded)", send1)
+			h.completeWakeTurn(coord1)
+			h.coordIdleWithStatus(coord1, "idle")
+			if !h.state().Project.NewGoal {
+				t.Fatalf("confirming superseded Goal 2 wake falsely settled Goal 3 (NewGoal=false)")
+			}
+			return
+		}
+
+		// Confirming Goal 3's wake settles NewGoal and finishes through J4.
+		h.completeWakeTurn(coord1)
+		h.coordIdleWithStatus(coord1, "idle")
+		if h.state().Project.NewGoal {
+			t.Fatal("NewGoal stayed true after coordinator confirmed Goal 3 wake")
+		}
+		h.finishThroughJ4(coord1)
+		if st := h.state(); !st.Project.Finished || st.Project.RunID != "" {
+			t.Fatalf("project did not finish after Goal 3 wake confirmed: Finished=%v RunID=%q", st.Project.Finished, st.Project.RunID)
+		}
+	})
+
+	t.Run("stale_in_flight_goal_2_reply_cannot_settle_goal_3_or_goal_4", func(t *testing.T) {
+		t.Parallel()
+
+		t.Run("in_flight_goal_2_with_superseded_held_goal_3_delivers_goal_4", func(t *testing.T) {
+			t.Parallel()
+			h := newProjectHarness(t, "Goal 1")
+			h.pass() // J7 starts coord1
+			coord1 := h.state().Project.RunID
+			h.edit(func(s *flow.State) {
+				s.Tasks = []flow.Task{{ID: "T1", Title: "feat: goal 1", Done: &flow.Merged{MergedCommit: "m1"}}}
+			})
+			h.setCoordWorking(coord1)
+
+			if err := h.eng.Start(h.repo, "Goal 2: in-flight goal", 2); err != nil {
+				t.Fatalf("Start(Goal 2): %v", err)
+			}
+			h.coordIdleWithStatus(coord1, "idle") // J12 delivers Goal 2 wake
+			sendGoal2 := lastSendTo(t, h.srv.Requests(), coord1)
+			h.setCoordWorking(coord1)
+
+			// While Goal 2 is in flight, owner starts Goal 3 and then Goal 4 before coord1 finishes Goal 2's turn.
+			if err := h.eng.Start(h.repo, "Goal 3: superseded queued goal", 2); err != nil {
+				t.Fatalf("Start(Goal 3): %v", err)
+			}
+			if err := h.eng.Start(h.repo, "Goal 4: latest active goal", 2); err != nil {
+				t.Fatalf("Start(Goal 4): %v", err)
+			}
+
+			h.srv.SetScreen(coord1, completedWakeScreen("claude", sendGoal2, "Goal 2 was already covered by T1."))
+			h.coordIdleWithStatus(coord1, "idle")
+			if st := h.state(); !st.Project.NewGoal || st.Project.Finished || len(logRules(t, h.paths.Log(h.id), "J4")) != 0 {
+				t.Fatalf("Goal 2 reply settled Goal 4 early: NewGoal=%v Finished=%v j4=%+v",
+					st.Project.NewGoal, st.Project.Finished, logRules(t, h.paths.Log(h.id), "J4"))
+			}
+
+			sendNext := lastSendTo(t, h.srv.Requests(), coord1)
+			if !strings.Contains(sendNext, "Goal 4: latest active goal") || strings.Contains(sendNext, "Goal 3") {
+				t.Errorf("delivered wake after Goal 2 turn = %q, want Goal 4 (not superseded Goal 3)", sendNext)
+			}
+			h.setCoordWorking(coord1)
+			h.srv.SetScreen(coord1, formatPromptEcho("❯", sendNext)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+			h.coordIdleWithStatus(coord1, "idle")
+			sendRetry := lastSendTo(t, h.srv.Requests(), coord1)
+			h.setCoordWorking(coord1)
+			h.srv.SetScreen(coord1, formatPromptEcho("❯", sendRetry)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+			h.coordIdleWithStatus(coord1, "idle")
+			h.now = h.now.Add(15 * time.Second)
+			h.pass()
+
+			if st := h.state(); !st.Project.NewGoal || st.Project.Finished || len(logRules(t, h.paths.Log(h.id), "J4")) != 0 {
+				t.Fatalf("after Goal 4 wake exhausted, stale Goal 2 confirmation settled Goal 4: NewGoal=%v Finished=%v j4=%+v",
+					st.Project.NewGoal, st.Project.Finished, logRules(t, h.paths.Log(h.id), "J4"))
+			}
+		})
+
+		t.Run("confirmed_in_flight_wake_carrying_prior_generation_does_not_settle_current_generation", func(t *testing.T) {
+			t.Parallel()
+			h := newProjectHarness(t, "Goal 1")
+			h.pass() // J7 starts coord1
+			coord1 := h.state().Project.RunID
+			h.edit(func(s *flow.State) {
+				s.Tasks = []flow.Task{{ID: "T1", Title: "feat: goal 1", Done: &flow.Merged{MergedCommit: "m1"}}}
+			})
+			h.setCoordWorking(coord1)
+
+			// Goal 2 wake is delivered in flight; then Start(Goal 3) bumps the project generation.
+			if err := h.eng.Start(h.repo, "Goal 2: older generation", 2); err != nil {
+				t.Fatalf("Start(Goal 2): %v", err)
+			}
+			h.coordIdleWithStatus(coord1, "idle") // J12 delivers Goal 2 wake
+			sendGoal2 := lastSendTo(t, h.srv.Requests(), coord1)
+			h.setCoordWorking(coord1)
+
+			if err := h.eng.Start(h.repo, "Goal 3: current generation", 2); err != nil {
+				t.Fatalf("Start(Goal 3): %v", err)
+			}
+			// Isolate the generation check on CoordWakesInFlight itself: even if Wakes is empty,
+			// confirming Goal 2's in-flight new_goal wake must NOT settle Goal 3's generation.
+			h.edit(func(s *flow.State) {
+				s.Project.Wakes = nil
+			})
+
+			h.srv.SetScreen(coord1, completedWakeScreen("claude", sendGoal2, "Handled Goal 2."))
+			h.coordIdleWithStatus(coord1, "idle")
+			if st := h.state(); !st.Project.NewGoal || st.Project.Finished || len(logRules(t, h.paths.Log(h.id), "J4")) != 0 {
+				t.Fatalf("confirmed wake carrying Goal 2 generation settled Goal 3: NewGoal=%v Finished=%v j4=%+v",
+					st.Project.NewGoal, st.Project.Finished, logRules(t, h.paths.Log(h.id), "J4"))
+			}
+		})
+	})
+
+	t.Run("reopened_project_with_later_prompt_after_startup_reply", func(t *testing.T) {
+		t.Parallel()
+
+		t.Run("settles_via_generation_wake_instead_of_staying_stuck", func(t *testing.T) {
+			t.Parallel()
+			h := newProjectHarness(t, "Goal 1")
+			h.pass() // J7 starts coord1
+			coord1 := h.state().Project.RunID
+			h.edit(func(s *flow.State) {
+				s.Tasks = []flow.Task{{ID: "T1", Title: "feat: goal 1", Done: &flow.Merged{MergedCommit: "m1"}}}
+			})
+			h.finishThroughJ4(coord1)
+
+			// Reopen finished project with Goal 2.
+			if err := h.eng.Start(h.repo, "Goal 2: audit reopened state", 2); err != nil {
+				t.Fatalf("Start(reopen Goal 2): %v", err)
+			}
+			h.now = h.now.Add(15 * time.Second)
+			h.pass() // J7 starts fresh coord2
+			coord2 := h.state().Project.RunID
+			if _, proj := rawProjectJSON(t, h.paths.State(h.id)); proj["new_goal_startup"] != nil {
+				t.Errorf("state.json project still carries removed new_goal_startup field: %v", proj)
+			}
+
+			// Codex r2 Finding 2 repro: coord2 answers the J7 startup handoff AND handles a subsequent
+			// prompt + reply before the engine observes idle, so the startup handoff is no longer the newest prompt.
+			startupPrompt := lastCoordStartupPrompt(t, h.runs)
+			h.setCoordWorking(coord2)
+			screen := formatPromptEcho("❯", startupPrompt) +
+				"\n⏺ Goal 2 is already satisfied by T1.\n\n" +
+				"❯ Any leftover branches to worry about?\n\n" +
+				"⏺ None; repository is clean.\n\n" +
+				"✻ Cogitated for 4s · done 4:59 PM\n" +
+				"────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────\n"
+			h.srv.SetScreen(coord2, screen)
+			h.coordIdleWithStatus(coord2, "idle")
+
+			// Must not stay stuck idle with empty wake lists: J12 delivers the Goal 2 wake to coord2.
+			sends := sendsTo(t, h.srv.Requests(), coord2)
+			if len(sends) != 1 || !strings.Contains(sends[0], "Goal 2: audit reopened state") {
+				t.Fatalf("sends to coord2 after startup+follow-up idle = %q, want 1 J12 new_goal wake for Goal 2", sends)
+			}
+
+			// Confirming the Goal 2 wake settles NewGoal and finishes through J4.
+			h.completeWakeTurn(coord2)
+			h.coordIdleWithStatus(coord2, "idle")
+			if h.state().Project.NewGoal {
+				t.Fatal("NewGoal stayed true after reopened coordinator confirmed Goal 2 wake")
+			}
+			h.finishThroughJ4(coord2)
+			st, _ := assertLogInvariants(t, h.paths.State(h.id), h.paths.Log(h.id))
+			if !st.Project.Finished || st.Project.RunID != "" || h.eng.Projects()[0].State != "finished" {
+				t.Fatalf("reopened project stayed stuck instead of finishing: Finished=%v RunID=%q state=%q",
+					st.Project.Finished, st.Project.RunID, h.eng.Projects()[0].State)
+			}
+		})
+
+		t.Run("interrupted_startup_followed_by_unrelated_reply_and_exhausted_wake_does_not_settle", func(t *testing.T) {
+			t.Parallel()
+			h := newProjectHarness(t, "Goal 1")
+			h.pass() // J7 starts coord1
+			coord1 := h.state().Project.RunID
+			h.edit(func(s *flow.State) {
+				s.Tasks = []flow.Task{{ID: "T1", Title: "feat: goal 1", Done: &flow.Merged{MergedCommit: "m1"}}}
+			})
+			h.finishThroughJ4(coord1)
+			j4Before := len(logRules(t, h.paths.Log(h.id), "J4"))
+
+			if err := h.eng.Start(h.repo, "Goal 2: must not settle without evidence", 2); err != nil {
+				t.Fatalf("Start(reopen Goal 2): %v", err)
+			}
+			h.now = h.now.Add(15 * time.Second)
+			h.pass() // J7 starts fresh coord2
+			coord2 := h.state().Project.RunID
+			if _, proj := rawProjectJSON(t, h.paths.State(h.id)); proj["new_goal_startup"] != nil {
+				t.Errorf("state.json project still carries removed new_goal_startup field: %v", proj)
+			}
+			h.edit(func(s *flow.State) {
+				s.Asks = append(s.Asks, flow.Ask{
+					ID: "ask-reopen-r3", Project: h.id, Folder: h.repo, Kind: flow.KindGate, Gated: true,
+					Question: "Keep rollout held?", Options: []string{"Approve", "Hold"}, Recommend: "Hold",
+					AskedBy: flow.RoleCoordinator, RunID: coord2, Status: flow.AskStatusOpen, At: h.now,
+				})
+			})
+
+			// Interrupted startup handoff followed by a later unrelated prompt and reply.
+			startupPrompt := lastCoordStartupPrompt(t, h.runs)
+			h.setCoordWorking(coord2)
+			screen := formatPromptEcho("❯", startupPrompt) +
+				"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n\n" +
+				"❯ Status check?\n\n" +
+				"⏺ Still waiting.\n\n" +
+				"✻ Cogitated for 4s · done 4:59 PM\n" +
+				"────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────\n"
+			h.srv.SetScreen(coord2, screen)
+			h.coordIdleWithStatus(coord2, "idle")
+
+			// Exhaust any delivered new_goal wake retries via Esc interruptions as well.
+			for range 2 {
+				if sends := sendsTo(t, h.srv.Requests(), coord2); len(sends) > 0 && len(h.state().Project.CoordWakesInFlight) > 0 {
+					last := sends[len(sends)-1]
+					h.setCoordWorking(coord2)
+					h.srv.SetScreen(coord2, formatPromptEcho("❯", last)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+					h.coordIdleWithStatus(coord2, "idle")
+				}
+			}
+			h.now = h.now.Add(15 * time.Second)
+			h.pass()
+
+			st, _ := assertLogInvariants(t, h.paths.State(h.id), h.paths.Log(h.id))
+			if !st.Project.NewGoal || st.Project.Finished || h.eng.Projects()[0].State != "running" {
+				t.Errorf("after interrupted startup + exhausted wake: NewGoal=%v Finished=%v state=%q, want (true, false, \"running\")",
+					st.Project.NewGoal, st.Project.Finished, h.eng.Projects()[0].State)
+			}
+			if j4After := logRules(t, h.paths.Log(h.id), "J4")[j4Before:]; len(j4After) != 0 {
+				t.Errorf("J4 ran without current-generation evidence: %+v", extractLogDecisions(j4After))
+			}
+			if len(st.Asks) != 1 || st.Asks[0].Status != flow.AskStatusOpen {
+				t.Errorf("project-wide ask cancelled prematurely: %+v", st.Asks)
+			}
+		})
+	})
+
+	t.Run("coordinator_command_settles_new_goal_with_reply_interrupted_twice", func(t *testing.T) {
+		t.Parallel()
+
+		t.Run("task_close_with_reply_interrupted_twice", func(t *testing.T) {
+			t.Parallel()
+			w := newRestartWorld(t, "Goal 1: check helper")
+			w.pass() // J7 starts coord1
+			coord1 := w.state().Project.RunID
+			w.applyPlan()
+			w.waitIdle(coord1)
+			w.pass() // N11 creates worktree
+			w.pass() // N23 starts worker
+			w.waitIdle(w.workerID)
+
+			base := w.state().Tasks[0].Attempts[0].BaseCommit
+			if err := w.eng.Report(w.workTok, "ready", json.RawMessage(fmt.Sprintf(`{"head":%q,"nothing_to_change":"already exists"}`, base))); err != nil {
+				t.Fatalf("worker nothing-to-change: %v", err)
+			}
+			if err := w.eng.Start(w.repo, "Goal 2: close T1 even if reply interrupted", 2); err != nil {
+				t.Fatalf("Start(Goal 2): %v", err)
+			}
+
+			w.now = w.now.Add(15 * time.Second)
+			w.pass() // N8 queues nothing_to_change wake; J12 delivers [nothing_to_change, new_goal]
+			send1 := lastSendTo(t, w.srv.Requests(), coord1)
+
+			// Coordinator closes T1 during Goal 2's turn, but its terminal reply is interrupted.
+			w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+			if err := w.eng.Report(w.coordTok, "task", json.RawMessage(`{"action":"close","task":"T1","why":"Goal 2 confirmed nothing to change"}`)); err != nil {
+				t.Fatalf("task close T1: %v", err)
+			}
+			w.now = w.now.Add(5 * time.Second)
+			w.pass() // N1 cleans up closed T1 while coord1 is still working and wake batch is in flight
+
+			// J4 guard: active turn + in-flight wake must keep J4 from running mid-turn.
+			if st := w.state(); st.Project.Finished || st.Project.RunID != coord1 || len(logRules(t, w.paths.Log(w.id), "J4")) != 0 {
+				t.Fatalf("J4 fired while coordinator turn was still active: Finished=%v RunID=%q j4=%+v",
+					st.Project.Finished, st.Project.RunID, logRules(t, w.paths.Log(w.id), "J4"))
+			}
+
+			// 1st reply interrupted -> J12 retries the unconfirmed batch; J4 must still wait for pending wakes.
+			w.srv.SetScreen(coord1, formatPromptEcho("❯", send1)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+			w.waitIdle(coord1)
+			if st := w.state(); st.Project.Finished || len(logRules(t, w.paths.Log(w.id), "J4")) != 0 {
+				t.Fatalf("J4 fired before retried wake batch drained: Finished=%v j4=%+v",
+					st.Project.Finished, logRules(t, w.paths.Log(w.id), "J4"))
+			}
+
+			// 2nd reply also interrupted -> wake batch exhausts; task close in Goal 2's generation settles NewGoal.
+			send2 := lastSendTo(t, w.srv.Requests(), coord1)
+			w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+			w.srv.SetScreen(coord1, formatPromptEcho("❯", send2)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+			w.waitIdle(coord1)
+
+			driveRestartWorldJ4Finish(t, w)
+			st, _ := assertLogInvariants(t, w.paths.State(w.id), w.paths.Log(w.id))
+			if !st.Project.Finished || st.Project.NewGoal || st.Project.RunID != "" {
+				t.Fatalf("after task close with interrupted replies: Finished=%v NewGoal=%v RunID=%q, want (true, false, \"\")",
+					st.Project.Finished, st.Project.NewGoal, st.Project.RunID)
+			}
+		})
+
+		t.Run("task_drop_with_reply_interrupted_twice", func(t *testing.T) {
+			t.Parallel()
+			w := newRestartWorld(t, "Goal 1: initial feature")
+			w.pass() // J7 starts coord1
+			coord1 := w.state().Project.RunID
+			w.applyPlan()
+			w.waitIdle(coord1)
+			w.pass() // N11 T1
+			w.pass() // N23 T1 worker
+
+			if err := w.eng.Start(w.repo, "Goal 2: drop T1 even if reply interrupted", 2); err != nil {
+				t.Fatalf("Start(Goal 2): %v", err)
+			}
+			w.now = w.now.Add(15 * time.Second)
+			w.pass() // J12 delivers new_goal wake
+			send1 := lastSendTo(t, w.srv.Requests(), coord1)
+
+			w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+			if err := w.eng.Report(w.coordTok, "task", json.RawMessage(`{"action":"drop","task":"T1","why":"Goal 2 dropped T1"}`)); err != nil {
+				t.Fatalf("task drop T1: %v", err)
+			}
+			w.now = w.now.Add(5 * time.Second)
+			w.pass() // N1 cleans up T1 while coord1 is still working
+			if st := w.state(); st.Project.Finished || len(logRules(t, w.paths.Log(w.id), "J4")) != 0 {
+				t.Fatalf("J4 fired mid-turn after task drop: Finished=%v j4=%+v", st.Project.Finished, logRules(t, w.paths.Log(w.id), "J4"))
+			}
+
+			w.srv.SetScreen(coord1, formatPromptEcho("❯", send1)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+			w.waitIdle(coord1)
+			send2 := lastSendTo(t, w.srv.Requests(), coord1)
+			w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+			w.srv.SetScreen(coord1, formatPromptEcho("❯", send2)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+			w.waitIdle(coord1)
+
+			driveRestartWorldJ4Finish(t, w)
+			if st := w.state(); !st.Project.Finished || st.Project.NewGoal {
+				t.Fatalf("after task drop with interrupted replies: Finished=%v NewGoal=%v, want (true, false)", st.Project.Finished, st.Project.NewGoal)
+			}
+		})
+	})
+
+	t.Run("command_recorded_before_generation_bump_does_not_count", func(t *testing.T) {
+		t.Parallel()
+		w := newRestartWorld(t, "Goal 1: setup commands")
+		w.pass() // J7 starts coord1
+		coord1 := w.state().Project.RunID
+		w.applyPlan() // plan apply T1 in Goal 1's generation
+		w.waitIdle(coord1)
+		w.pass() // N11 T1
+		w.pass() // N23 starts worker for T1
+		w.waitIdle(w.workerID)
+
+		// Record plan amend (non-split T2 & T3), task close (T1), and task drop (T2) under Goal 1 BEFORE bumping generation.
+		base := w.state().Tasks[0].Attempts[0].BaseCommit
+		if err := w.eng.Report(w.workTok, "ready", json.RawMessage(fmt.Sprintf(`{"head":%q,"nothing_to_change":"done in base"}`, base))); err != nil {
+			t.Fatalf("T1 nothing-to-change: %v", err)
+		}
+		amend := `{"why":"Goal 1 sibling tasks","tasks":[` +
+			`{"id":"T2","estimate_lines":50,"title":"feat: to drop in Goal 1",` + testPlanJSON + `},` +
+			`{"id":"T3","estimate_lines":50,"title":"feat: kept parked across bump",` + testPlanJSON + `}` +
+			`]}`
+		if err := w.eng.Report(w.coordTok, "plan amend", []byte(amend)); err != nil {
+			t.Fatalf("plan amend Goal 1: %v", err)
+		}
+		if err := w.eng.Report(w.coordTok, "task", json.RawMessage(`{"action":"park","task":"T3","why":"hold T3 until Goal 2"}`)); err != nil {
+			t.Fatalf("task park T3: %v", err)
+		}
+		if err := w.eng.Report(w.coordTok, "task", json.RawMessage(`{"action":"close","task":"T1","why":"closed under Goal 1"}`)); err != nil {
+			t.Fatalf("task close T1: %v", err)
+		}
+		if err := w.eng.Report(w.coordTok, "task", json.RawMessage(`{"action":"drop","task":"T2","why":"dropped under Goal 1"}`)); err != nil {
+			t.Fatalf("task drop T2: %v", err)
+		}
+		w.pass() // N1 cleans up T1 and T2
+
+		// Bump generation to Goal 2, then let T3 merge via PR (not a coordinator command) and exhaust Goal 2's wake retries.
+		if err := w.eng.Start(w.repo, "Goal 2: prior commands must not settle me", 2); err != nil {
+			t.Fatalf("Start(Goal 2): %v", err)
+		}
+		w.now = w.now.Add(15 * time.Second)
+		w.pass() // J12 delivers Goal 2 wake (#1)
+		send1 := lastSendTo(t, w.srv.Requests(), coord1)
+		w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+		w.srv.SetScreen(coord1, formatPromptEcho("❯", send1)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+		w.waitIdle(coord1) // J12 delivers retry (#2)
+		send2 := lastSendTo(t, w.srv.Requests(), coord1)
+		w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+		w.srv.SetScreen(coord1, formatPromptEcho("❯", send2)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+		w.waitIdle(coord1) // J12 exhausts Goal 2 wake; Wakes and CoordWakesInFlight are now empty
+
+		// Simulate T3 having merged on GitHub (not a coordinator command) in a sub-check on a clone of state,
+		// first verifying NewGoal is still true with T3 open, and then verifying that only a post-bump command settles it.
+		if !w.state().Project.NewGoal {
+			t.Fatalf("Goal 1 commands (plan apply, plan amend, task close, task drop) falsely cleared Goal 2's NewGoal")
+		}
+
+		// Now Start Goal 3 while all tasks end via T3's PR merge first? Even more direct:
+		// Coordinator starts an active turn (with empty wake lists!) and drops T3 in Goal 2's generation.
+		// While coord1 is still working, J4's active-turn guard must hold even though Wakes and CoordWakesInFlight are empty!
+		w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+		w.srv.SetScreen(coord1, "working "+w.now.Format(time.RFC3339Nano))
+		w.now = w.now.Add(5 * time.Second)
+		w.pass() // R27 -> PhaseWorking
+		if err := w.eng.Report(w.coordTok, "task", json.RawMessage(`{"action":"drop","task":"T3","why":"dropped in Goal 2"}`)); err != nil {
+			t.Fatalf("task drop T3 in Goal 2: %v", err)
+		}
+		w.now = w.now.Add(5 * time.Second)
+		w.pass() // N1 cleans up T3 while coord1 is still PhaseWorking (Wakes & CoordWakesInFlight empty)
+		if st := w.state(); st.Project.Finished || len(logRules(t, w.paths.Log(w.id), "J4")) != 0 {
+			t.Fatalf("J4 ran during active coordinator turn when wake lists were empty: Finished=%v j4=%+v",
+				st.Project.Finished, logRules(t, w.paths.Log(w.id), "J4"))
+		}
+
+		// Once coord1 goes idle, T3's Goal 2 drop settles NewGoal; then bumping to Goal 3 with all tasks ended
+		// proves T1/T2 (Goal 1) and T3 (Goal 2) commands do NOT count for Goal 3!
+		w.waitIdle(coord1)
+		if w.state().Project.NewGoal {
+			t.Fatalf("NewGoal stayed true after coordinator dropped T3 in Goal 2's generation and went idle")
+		}
+		if err := w.eng.Start(w.repo, "Goal 3: Goal 1 and Goal 2 commands must not count", 2); err != nil {
+			t.Fatalf("Start(Goal 3): %v", err)
+		}
+		w.now = w.now.Add(15 * time.Second)
+		w.pass() // J12 delivers Goal 3 wake (#1)
+		g3Send1 := lastSendTo(t, w.srv.Requests(), coord1)
+		w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+		w.srv.SetScreen(coord1, formatPromptEcho("❯", g3Send1)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+		w.waitIdle(coord1)
+		g3Send2 := lastSendTo(t, w.srv.Requests(), coord1)
+		w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+		w.srv.SetScreen(coord1, formatPromptEcho("❯", g3Send2)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+		w.waitIdle(coord1)
+		w.now = w.now.Add(15 * time.Second)
+		w.pass()
+
+		if st := w.state(); !st.Project.NewGoal || st.Project.Finished || len(logRules(t, w.paths.Log(w.id), "J4")) != 0 {
+			t.Fatalf("pre-bump commands settled Goal 3 after wake exhaustion: NewGoal=%v Finished=%v j4=%+v",
+				st.Project.NewGoal, st.Project.Finished, logRules(t, w.paths.Log(w.id), "J4"))
+		}
+	})
+
+	t.Run("stop_and_same_goal_resume_keeps_persisted_generation", func(t *testing.T) {
+		t.Parallel()
+		w := newRestartWorld(t, "Goal 1")
+		w.pass() // J7 starts coord1
+		coord1 := w.state().Project.RunID
+		w.applyPlan()
+		amend := `{"why":"add parked T2","tasks":[{"id":"T2","estimate_lines":50,"title":"feat: parked task",` + testPlanJSON + `}]}`
+		if err := w.eng.Report(w.coordTok, "plan amend", []byte(amend)); err != nil {
+			t.Fatalf("plan amend T2: %v", err)
+		}
+		if err := w.eng.Report(w.coordTok, "task", json.RawMessage(`{"action":"park","task":"T2","why":"keep project unfinished"}`)); err != nil {
+			t.Fatalf("task park T2: %v", err)
+		}
+		if err := w.eng.Report(w.coordTok, "task", json.RawMessage(`{"action":"drop","task":"T1","why":"drop T1 in Goal 1"}`)); err != nil {
+			t.Fatalf("task drop T1: %v", err)
+		}
+		w.waitIdle(coord1)
+		w.pass() // N1 cleans up T1
+
+		if err := w.eng.Stop(w.id); err != nil {
+			t.Fatalf("Stop after Goal 1: %v", err)
+		}
+		goal1Proj, _ := rawProjectJSON(t, w.paths.State(w.id), "goal")
+
+		// Resume Goal 1 (starting coord2), then bump to Goal 2, confirm Goal 2's wake, and record a Goal 2 command.
+		if err := w.eng.Start(w.repo, "Goal 1", 2); err != nil {
+			t.Fatalf("Start(resume Goal 1): %v", err)
+		}
+		w.now = w.now.Add(15 * time.Second)
+		w.pass() // J7 starts coord2 on resumed Goal 1
+		coord2 := w.state().Project.RunID
+		w.waitIdle(coord2)
+
+		if err := w.eng.Start(w.repo, "Goal 2", 2); err != nil {
+			t.Fatalf("Start(Goal 2): %v", err)
+		}
+		w.now = w.now.Add(15 * time.Second)
+		w.pass() // J12 delivers Goal 2 wake to idle coord2
+		sendG2 := lastSendTo(t, w.srv.Requests(), coord2)
+		w.srv.SetStatus(coord2, &hc.Status{App: "claude-code", State: "working"})
+		amendG2 := `{"why":"Goal 2 task","tasks":[{"id":"T3","estimate_lines":50,"title":"feat: goal 2 temp",` + testPlanJSON + `}]}`
+		if err := w.eng.Report(w.coordTok, "plan amend", []byte(amendG2)); err != nil {
+			t.Fatalf("plan amend T3: %v", err)
+		}
+		if err := w.eng.Report(w.coordTok, "task", json.RawMessage(`{"action":"drop","task":"T3","why":"drop T3 in Goal 2"}`)); err != nil {
+			t.Fatalf("task drop T3: %v", err)
+		}
+		w.srv.SetScreen(coord2, completedWakeScreen("claude", sendG2, "Handled Goal 2."))
+		w.waitIdle(coord2)
+		w.pass() // N1 cleans up T3
+
+		if err := w.eng.Stop(w.id); err != nil {
+			t.Fatalf("Stop #1 on Goal 2: %v", err)
+		}
+		goal2Stop1Full, _ := rawProjectJSON(t, w.paths.State(w.id))
+		goal2Stop1NoGoal, _ := rawProjectJSON(t, w.paths.State(w.id), "goal")
+		if goal2Stop1NoGoal == goal1Proj {
+			t.Errorf("persisted project state did not bump goal generation from Goal 1 to Goal 2 (or Stop cleared it): %s", goal2Stop1NoGoal)
+		}
+
+		// Resume with the SAME goal ("Goal 2") and stop again: persisted generation must be kept unchanged.
+		if err := w.eng.Start(w.repo, "Goal 2", 2); err != nil {
+			t.Fatalf("Start(resume same Goal 2): %v", err)
+		}
+		if err := w.eng.Stop(w.id); err != nil {
+			t.Fatalf("Stop #2 on Goal 2: %v", err)
+		}
+		goal2Stop2Full, _ := rawProjectJSON(t, w.paths.State(w.id))
+		if goal2Stop2Full != goal2Stop1Full {
+			t.Errorf("Stop + same-goal Start mutated persisted project generation:\nbefore: %s\nafter:  %s", goal2Stop1Full, goal2Stop2Full)
+		}
+
+		// Resume Goal 2, end T2, then start Goal 3: because generation was kept at Goal 2's value,
+		// Goal 3 bumps past both Goal 1 and Goal 2 so their recorded commands cannot settle Goal 3.
+		if err := w.eng.Start(w.repo, "Goal 2", 2); err != nil {
+			t.Fatalf("Start(resume Goal 2 again): %v", err)
+		}
+		w.now = w.now.Add(15 * time.Second)
+		w.pass() // J7 starts coord3
+		coord3 := w.state().Project.RunID
+		if err := w.eng.Report(w.coordTok, "task", json.RawMessage(`{"action":"drop","task":"T2","why":"drop T2 in Goal 2"}`)); err != nil {
+			t.Fatalf("task drop T2: %v", err)
+		}
+		w.pass() // N1 cleans up T2
+		if err := w.eng.Start(w.repo, "Goal 3", 2); err != nil {
+			t.Fatalf("Start(Goal 3): %v", err)
+		}
+		w.waitIdle(coord3) // J12 delivers Goal 3 wake (#1)
+		g3Send1 := lastSendTo(t, w.srv.Requests(), coord3)
+		w.srv.SetStatus(coord3, &hc.Status{App: "claude-code", State: "working"})
+		w.srv.SetScreen(coord3, formatPromptEcho("❯", g3Send1)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+		w.waitIdle(coord3)
+		g3Send2 := lastSendTo(t, w.srv.Requests(), coord3)
+		w.srv.SetStatus(coord3, &hc.Status{App: "claude-code", State: "working"})
+		w.srv.SetScreen(coord3, formatPromptEcho("❯", g3Send2)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+		w.waitIdle(coord3)
+		w.now = w.now.Add(15 * time.Second)
+		w.pass()
+
+		if st := w.state(); !st.Project.NewGoal || st.Project.Finished {
+			t.Fatalf("after Stop/Resume + Goal 3 wake exhaustion: NewGoal=%v Finished=%v, want (true, false)",
+				st.Project.NewGoal, st.Project.Finished)
+		}
 	})
 }
