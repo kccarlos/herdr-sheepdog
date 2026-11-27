@@ -880,4 +880,3 @@ test('undelivered goal shows one plain line on a running project, prefills New g
   assert.ok(!projectBar(page.doc).textContent.includes(undeliveredMsg), 'stopped project must not show undelivered goal notice');
 });
 
-

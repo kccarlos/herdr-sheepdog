@@ -67,6 +67,16 @@ func NewGoalSettled(p Project, tasks []Task, confirmedWake bool) bool {
 	return confirmedWake && p.Run != nil && p.Run.State == PhaseIdle && p.Run.Turn > 0 && p.Run.Status != "error"
 }
 
+// GoalUndelivered reports whether a running project's pending new goal has no
+// queued or in-flight delivery and no handling evidence in the current generation.
+func GoalUndelivered(p Project, tasks []Task) bool {
+	return p.Started && !p.Finished && p.NewGoal && p.GoalGen > 0 &&
+		!HasNewGoalWakeGen(p.Wakes, p.GoalGen) &&
+		!HasNewGoalWakeGen(p.CoordWakesInFlight, p.GoalGen) &&
+		p.GoalCmdGen != p.GoalGen &&
+		!NewGoalSettled(p, tasks, false)
+}
+
 // IsCoordR29 reports whether r ended as stuck at a dialog via R29 (J10).
 func IsCoordR29(r *RunRecord) bool {
 	return r != nil && r.State == PhaseEnded && r.Result == EndStuck && !r.BlockedSince.IsZero()

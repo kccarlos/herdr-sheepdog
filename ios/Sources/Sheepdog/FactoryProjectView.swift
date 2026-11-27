@@ -130,7 +130,7 @@ struct FactoryProjectView: View {
         .navigationTitle(head.name)
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(onDismiss == nil ? .visible : .hidden, for: .navigationBar)
-        .task(id: "\(computer?.factoryChanges[head.id] ?? 0):\(head.state.rawValue):\(head.goal)") { await load() }
+        .task(id: "\(computer?.factoryChanges[head.id] ?? 0):\(head.state.rawValue):\(head.goal):\(head.goalUndelivered)") { await load() }
         .onChange(of: head.state) { feedback = nil }
     }
 

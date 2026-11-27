@@ -518,7 +518,9 @@ $('board').addEventListener('click', (e) => {
     const a = pa.dataset.pa;
     if (a === 'stop' || a === 'newgoal') {
       if (a === 'newgoal' && paUI.mode === 'newgoal') return paUI.checks && paUI.goal.trim() ? runProjectAction('newgoal') : $('pa-goal')?.focus({ preventScroll: true });
-      Object.assign(paUI, emptyPA(), { mode: a }); if (askUI.pending?.kind === 'project') clearPair(); render();
+      const pr = data?.projects.find((x) => x.id === data.p);
+      const goal = a === 'newgoal' && projectState(pr) === 'running' && pr?.goal_undelivered ? (pr.goal || '') : '';
+      Object.assign(paUI, emptyPA(), { mode: a, goal }); if (askUI.pending?.kind === 'project') clearPair(); render();
       return (a === 'stop' ? paBar()?.querySelector('button[data-pa="stop-no"]') : $('pa-goal'))?.focus({ preventScroll: true });
     }
     if (a === 'stop-no' || a === 'ng-cancel') {

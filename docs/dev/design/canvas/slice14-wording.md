@@ -118,6 +118,7 @@ strings; a test's expected string is the **Text** column
 | `ac.stopped.p` | sentence | Stopped. No agent is running. Resume goes on with the same goal. |  |
 | `ac.fin.p` | sentence | Finished. To go on, reopen it with a new goal. |  |
 | `ac.fin.live` | sentence | Finished. An agent is still running. | finished and live |
+| `ac.goal.undel` | status | The coordinator did not get the new goal. Give it the goal again. | running project whose current new-goal delivery was exhausted; shown on the web and app project boards above the actions, and **New goal** opens prefilled with the current goal; disappears once settled |
 | `stop.q` | question | Stop this project? | the confirm, in place under the buttons |
 | `stop.what` | sentence | Its running agents end now. Resume goes on with the same goal. | running |
 | `stop.what.fin` | sentence | Its last running agent ends now. The project stays finished. | finished and live |
