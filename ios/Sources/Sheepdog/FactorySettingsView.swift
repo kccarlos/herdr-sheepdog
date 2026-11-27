@@ -14,6 +14,7 @@ struct FactorySettingsView: View {
     @State private var feedback: [String: (text: String, isError: Bool, done: Bool, fix: String?)] = [:]
     @State private var busyRows: Set<String> = []
     @State private var showAll = false
+    @State private var editingModels: FactorySettingRow?
 
     private var computer: ComputerModel? { model.fleet.model(computerID) }
     private var head: FactoryProjectHead {
@@ -65,6 +66,18 @@ struct FactorySettingsView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbar(.visible, for: .navigationBar)
         .task(id: reloadKey) { await load() }
+        .onChange(of: editingModels?.name) { old, new in
+            if new == nil, let old { focusedRow = old }
+        }
+        .sheet(item: $editingModels) { row in
+            FactoryModelsEditor(
+                row: row,
+                computerName: computer?.name ?? "your computer",
+                linkUsable: computer?.link.isUsable == true
+            ) {
+                try await propose(row: row, value: $0)
+            }
+        }
     }
 
     private func allSettingsFold(count: Int) -> some View {
@@ -105,7 +118,7 @@ struct FactorySettingsView: View {
                         .foregroundStyle(Theme.muted)
                 }
                 if !ax { Spacer(minLength: 4) }
-                rowControl(row, current: current, locked: ask != nil || sending)
+                rowControl(row, current: current, locked: ask != nil || sending, hasAsk: ask != nil)
             }
             if row.isModels { Text(row.metaLine).font(.caption).foregroundStyle(Theme.muted) }
             if row.problem != nil || row.isChanged || row.note?.isEmpty == false {
@@ -137,27 +150,31 @@ struct FactorySettingsView: View {
         OptionFlow(spacing: 8) {
             if dirty {
                 Button(sending ? "Asking…" : "Change") {
-                    Task { await propose(row: row, value: current) }
+                    Task { _ = try? await propose(row: row, value: current) }
                 }
                 .buttonStyle(PillButtonStyle(prominent: true, fullWidth: false))
                 .disabled(sending)
-                .accessibilityLabel(sending ? "Asking…" : "Change \(row.label)")
+                .accessibilityLabel(sending ? "Asking… \(row.label)" : "Change \(row.label)")
             }
             if row.isChanged {
                 Button(sending ? "Asking…" : "Back to the default") {
-                    Task { await propose(row: row, value: row.defaultValue) }
+                    Task { _ = try? await propose(row: row, value: row.defaultValue) }
                 }
                 .buttonStyle(PillButtonStyle(fullWidth: false))
                 .disabled(sending)
                 .accessibilityLabel(
-                    sending ? "Asking…" : "Set \(row.label) back to the default, \(row.displayDefault)"
+                    sending
+                        ? "Asking… \(row.label)"
+                        : "Set \(row.label) back to the default, \(row.displayDefault)"
                 )
             }
         }
     }
 
     @ViewBuilder
-    private func rowControl(_ row: FactorySettingRow, current: String, locked: Bool) -> some View {
+    private func rowControl(
+        _ row: FactorySettingRow, current: String, locked: Bool, hasAsk: Bool
+    ) -> some View {
         let binding = Binding(
             get: { drafts[row.name] ?? current },
             set: {
@@ -166,7 +183,13 @@ struct FactorySettingsView: View {
             }
         )
         let ax = dynamicTypeSize.isAccessibilitySize
-        if row.isNumber {
+        if row.isModels, !hasAsk {
+            Button("Edit") { editingModels = row }
+                .foregroundStyle(Theme.primaryText)
+                .frame(minHeight: 44).contentShape(Rectangle())
+                .accessibilityLabel("Edit \(row.label)")
+                .accessibilityFocused($focusedRow, equals: row.name)
+        } else if row.isNumber {
             let num = Int(current) ?? row.min
             HStack(spacing: 0) {
                 Button("−") { binding.wrappedValue = String(max(row.min, min(row.max, num - 1))) }
@@ -268,6 +291,9 @@ struct FactorySettingsView: View {
             guard !Task.isCancelled else { return }
             loaded = .success(rows)
             if let openAsks { asks = openAsks }
+            if let editing = editingModels, openAsk(for: editing.name) != nil {
+                editingModels = nil
+            }
         } catch {
             guard !Task.isCancelled else { return }
             if FactoryProjectBoard.isProjectGone(error) {
@@ -278,8 +304,11 @@ struct FactorySettingsView: View {
         }
     }
 
-    private func propose(row: FactorySettingRow, value: String) async {
-        guard let computer else { return }
+    @discardableResult
+    private func propose(row: FactorySettingRow, value: String) async throws -> FactoryAsk {
+        guard let computer else {
+            throw DaemonError.unreachable(endpoint: "", detail: "Not connected.")
+        }
         busyRows.insert(row.name)
         feedback[row.name] = nil
         defer { busyRows.remove(row.name) }
@@ -295,16 +324,20 @@ struct FactorySettingsView: View {
             drafts[row.name] = nil
             AccessibilityNotification.Announcement(ask.question).post()
             Task { await computer.refresh() }
+            return ask
         } catch {
             if FactoryProjectBoard.isProjectGone(error) {
                 onGone()
-                return
+                throw error
             }
             let msg = FactorySettingRow.errorMessage(
                 error, computerName: computer.name, linkUsable: computer.link.isUsable
             )
-            feedback[row.name] = (msg, true, false, (error as? FactoryRefusal)?.fix)
-            AccessibilityNotification.Announcement(msg).post()
+            if !row.isModels {
+                feedback[row.name] = (msg, true, false, (error as? FactoryRefusal)?.fix)
+                AccessibilityNotification.Announcement(msg).post()
+            }
+            throw error
         }
     }
 
@@ -317,9 +350,10 @@ struct FactorySettingsView: View {
             let expire: Bool
             switch computer.phase(pending.id) {
             case .answered:
-                text = optionIndex == 1
-                    ? "Saved. The engine uses it from now on."
-                    : row.keptNotice(was: ask.set?.was)
+                let saved = row.isModels
+                    ? "Saved. The next agent started for this role uses it. Running agents keep their model."
+                    : "Saved. The engine uses it from now on."
+                text = optionIndex == 1 ? saved : row.keptNotice(was: ask.set?.was)
                 done = true
                 expire = optionIndex == 1
             case let .gone(msg):
@@ -351,7 +385,7 @@ struct FactorySettingsView: View {
     }
 }
 
-private extension View {
+extension View {
     func factoryCard(border: Color = Theme.line) -> some View {
         padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
