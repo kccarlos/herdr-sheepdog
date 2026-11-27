@@ -216,19 +216,24 @@ final class FactorySettingsTests: XCTestCase {
             ),
             "Not saved: another setting changed after you asked. max running 4 does not fit"
         )
-        let pairMsg = FactorySettingRow.answerError(
-            "The daemon refused: proof_required: owner asks require a paired device session",
-            computerName: "Work Mac"
-        )
-        XCTAssertTrue(pairMsg.contains("Not saved: Work Mac no longer knows this phone"))
-        XCTAssertFalse(pairMsg.contains("proof_required"))
+        let expectedPair = "Not saved: Work Mac no longer knows this phone."
+            + " Pair this phone again in Settings ▸ Work Mac, then try again."
         XCTAssertEqual(
             FactorySettingRow.answerError(
-                "The daemon refused: proof_rejected: AnswerProof is unknown, expired, or does not match.",
+                "The daemon refused: proof_required: owner asks require a paired device session",
                 computerName: "Work Mac"
             ),
-            "AnswerProof is unknown, expired, or does not match."
+            expectedPair
         )
+        for rejected in [
+            "The daemon refused: proof_rejected: AnswerProof is unknown, expired, or does not match this ask and option.",
+            "The daemon refused: proof_rejected: Owner answer proof must come from a paired device tap or live voice.",
+            "The daemon refused: proof_rejected: Owner answer proof requires tap or voice input from a paired device or live voice session.",
+        ] {
+            let msg = FactorySettingRow.answerError(rejected, computerName: "Work Mac")
+            XCTAssertEqual(msg, expectedPair)
+            XCTAssertFalse(msg.contains("AnswerProof") || msg.contains("proof_rejected"))
+        }
         XCTAssertEqual(
             FactorySettingRow.answerError(
                 "The daemon refused: unknown_setting: Unknown setting \"foo\".",

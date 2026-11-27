@@ -141,6 +141,10 @@ extension FactorySettingsUITests {
         XCTAssertTrue(stub.proposeBodies().contains { $0.project == "proj-1" && $0.body.contains("max_running") && $0.body.contains("\"4\"") })
 
         tapWhenTappable(scrollToVisible(app, app.buttons["Keep current"].firstMatch), "Keep current")
+        XCTAssertTrue(
+            app.staticTexts["Kept at 3. Nothing changed."].waitForExistence(timeout: 5),
+            "Keep current must show rb.kept notice on screen"
+        )
         XCTAssertTrue(stub.answerBodies().contains { $0.contains("fask-ask-rule-1") })
 
         tapWhenTappable(scrollToVisible(app, incrementButton(app, name: "max_running", label: "max running")), "+ max running again")
@@ -244,17 +248,30 @@ extension FactorySettingsUITests {
             stub?.pendingActionState = nil
             return (409, #"{"code":"already_closed","error":"Ask \"ask-rule-1\" is already cancelled."}"#)
         }
+        let answersBefore = stub.answerBodies().count
         tapWhenTappable(saveBtn, "Save first tap (delayed 409)")
         // Rapid second tap while the first answer is still in flight (`computer.answer` returns `nil`).
         if saveBtn.exists { saveBtn.tap() }
+        XCTAssertTrue(
+            waitUntil(5) { stub.answerBodies().count > answersBefore },
+            "first Save tap must reach StubDaemon before checking duplicate-tap drop"
+        )
         usleep(300_000)
+        XCTAssertEqual(
+            stub.answerBodies().count,
+            answersBefore + 1,
+            "duplicate tap while answer is in flight must be dropped"
+        )
         XCTAssertFalse(
             app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Saved.' OR label CONTAINS 'Kept at'")).firstMatch.exists,
             "duplicate tap while answer is in flight must never flash 'Saved…'"
         )
-        // Wait for the delayed 409 reply to finish and settle.
-        usleep(1_600_000)
+        // Wait positively for the delayed 409 (.gone) reply to settle on screen.
+        let goneNotice = app.staticTexts["That question was already answered or has gone."].firstMatch
+        XCTAssertTrue(goneNotice.waitForExistence(timeout: 10), "409 Conflict (.gone) must settle the row to the gone notice")
         stub.postDelay = 0
+        XCTAssertFalse(saveBtn.exists, "409 Conflict (.gone) must dismiss the open read-back card")
+        XCTAssertEqual(stub.answerBodies().count, answersBefore + 1, "only one answer POST may be sent across the duplicate tap")
         XCTAssertFalse(
             app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'Saved.' OR label CONTAINS 'Kept at'")).firstMatch.exists,
             "409 Conflict (.gone) must never claim 'Saved…'"

@@ -138,7 +138,7 @@ final class FactorySettingsUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["No settings available."].waitForExistence(timeout: 5))
     }
 
-    private func waitUntil(_ timeout: TimeInterval = 5, _ check: () -> Bool) -> Bool {
+    func waitUntil(_ timeout: TimeInterval = 5, _ check: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
             if check() { return true }
