@@ -224,9 +224,21 @@ public struct FactorySettingRow: Decodable, Equatable, Identifiable, Sendable {
     public var isNumber: Bool { !isModels && !isChoice && max >= min && (min != 0 || max != 0) }
     public var isChanged: Bool { value != defaultValue && problem == nil }
     public var displayDefault: String { defaultValue.nonEmpty ?? "not set" }
-    public var displayValue: String { value.nonEmpty ?? "not set" }
+    public var displayValue: String {
+        guard isModels else { return value.nonEmpty ?? "not set" }
+        let formatted = FactoryModelCandidate.parse(value)
+            .map { "\($0.cli) · \($0.model) · \($0.effort)" }
+            .joined(separator: ", ")
+        return formatted.nonEmpty ?? "not set"
+    }
 
     public var metaLine: String {
+        if isModels {
+            let formatted = FactoryModelCandidate.format(
+                FactoryModelCandidate.parse(defaultValue), separator: " then "
+            )
+            return "default \(formatted.nonEmpty ?? "not set")"
+        }
         if isNumber { return "default \(displayDefault) · allowed \(min)–\(max)" }
         if isChoice {
             let list = allowed.map { $0.nonEmpty ?? "not set" }.joined(separator: ", ")
@@ -244,7 +256,16 @@ public struct FactorySettingRow: Decodable, Equatable, Identifiable, Sendable {
     }
 
     public func keptNotice(was: String?) -> String {
-        "Kept at \(was?.trimmed.nonEmpty ?? "not set"). Nothing changed."
+        let shown: String
+        if isModels {
+            let formatted = FactoryModelCandidate.format(
+                FactoryModelCandidate.parse(was ?? ""), separator: " then "
+            )
+            shown = formatted.nonEmpty ?? "not set"
+        } else {
+            shown = was?.trimmed.nonEmpty ?? "not set"
+        }
+        return "Kept at \(shown). Nothing changed."
     }
 
     public static func errorMessage(_ error: Error, computerName: String, linkUsable: Bool = true) -> String {
