@@ -100,6 +100,16 @@ func LoadState(path string) (flow.State, error) {
 			p.CoordWakesInFlight[i].Retried = true
 		}
 	}
+	if err == nil && p.NewGoal && p.GoalGen == 0 {
+		// Older states persisted NewGoal without a goal generation or queued wake.
+		p.GoalGen = 1
+		p.Wakes = slices.DeleteFunc(p.Wakes, func(w flow.Wake) bool {
+			return w.Task == "" && w.Key == "new_goal" && w.GoalGen == 0
+		})
+		if p.Goal != "" {
+			replaceProjectWake(&s, flow.Wake{Key: "new_goal", Why: "owner gave a new goal", Facts: "goal: " + p.Goal, GoalGen: p.GoalGen, At: time.Now().UTC()})
+		}
+	}
 	return s, err
 }
 
