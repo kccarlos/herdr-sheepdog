@@ -311,4 +311,79 @@ final class IPadUITests: XCTestCase {
         XCTAssertEqual(element(app, "computer.sidebarVoiceMarker.fixture-1").label, "Move the voice to Work Mac")
         XCTAssertLessThan(element(app, "computerLabel.sidebar.fixture-1").frame.minY, element(app, "computerLabel.sidebar.fixture-2").frame.minY, "Work Mac stays above Home Mac after moving the voice")
     }
+
+    /// iPadOS 26/27 Windowed Apps / Stage Manager: the system window-controls
+    /// pill must never overlap the sidebar title, the detail header's Show
+    /// sidebar / All agents controls, or the compact top bar's Conversation
+    /// switcher.
+    func testWindowedControlsClearHeaders() throws {
+        let agents = #"[{"pane_id":"p-1","alias":"ordinary-qa","kind":"claude","state":"working","workspace_label":"webapp"}]"#
+        let stub = try StubDaemon(.computer(name: "Work Mac", agents: agents, questions: "[]", factory: "[]"))
+        let host = try stub.start()
+        defer { stub.stop() }
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogComputers", "Work Mac=\(host)"]
+        app.launch()
+        XCTAssertTrue(element(app, "sidebar.agent.ordinary-qa").waitForExistence(timeout: 15))
+
+        let sb = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let screenW = max(sb.frame.width, sb.frame.height)
+        let screenH = min(sb.frame.width, sb.frame.height)
+        func dragCorner(to target: CGPoint) {
+            let win = app.windows.firstMatch.frame
+            let start = sb.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: win.maxX - 6, dy: win.maxY - 6))
+            let end = sb.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: target.x, dy: target.y))
+            start.press(forDuration: 0.15, thenDragTo: end, withVelocity: .default, thenHoldForDuration: 0.1)
+            sleep(2)
+        }
+        defer {
+            for _ in 0 ..< 2 where app.windows.firstMatch.frame.width < screenW - 20 {
+                dragCorner(to: CGPoint(x: screenW - 4, y: screenH - 4))
+            }
+        }
+
+        shot("windowed-full")
+
+        // Regular windowed (~898x781 on 1180x820).
+        dragCorner(to: CGPoint(x: screenW - (screenW - 898) / 2, y: screenH - 35))
+        let wc = sb.buttons["window-controls:com.github.kccarlos.herdr-sheepdog-ios"].firstMatch
+        guard wc.waitForExistence(timeout: 3) else {
+            throw XCTSkip("Windowed Apps / Stage Manager controls did not appear on this simulator")
+        }
+        let title = app.staticTexts["Sheepdog"].firstMatch
+        XCTAssertTrue(title.waitForExistence(timeout: 5))
+        XCTAssertFalse(wc.frame.intersects(title.frame), "window controls \(wc.frame) must not overlap sidebar title \(title.frame)")
+        XCTAssertGreaterThanOrEqual(title.frame.width, 95, "sidebar title must not truncate in windowed mode")
+        shot("windowed-898")
+
+        // Regular windowed with sidebar hidden (Conversation).
+        tapWhenTappable(element(app, "sidebar.hide"), "Hide sidebar")
+        let showSidebar = element(app, "sidebar.show")
+        XCTAssertTrue(showSidebar.waitForExistence(timeout: 5))
+        XCTAssertFalse(wc.frame.intersects(showSidebar.frame), "window controls \(wc.frame) must not overlap Show sidebar \(showSidebar.frame)")
+        shot("windowed-898-hidden")
+
+        // Regular windowed with sidebar hidden (All agents).
+        tapWhenTappable(showSidebar, "Show sidebar")
+        tapWhenTappable(element(app, "sidebar.allAgents"), "All agents")
+        tapWhenTappable(element(app, "sidebar.hide"), "Hide sidebar on All agents")
+        let allTitle = element(app, "allAgents.title")
+        XCTAssertTrue(allTitle.waitForExistence(timeout: 5))
+        XCTAssertFalse(wc.frame.intersects(showSidebar.frame), "window controls must not overlap Show sidebar on All agents")
+        XCTAssertFalse(wc.frame.intersects(allTitle.frame), "window controls \(wc.frame) must not overlap All agents header \(allTitle.frame)")
+        shot("windowed-898-allagents-hidden")
+
+        // Return to Conversation and resize to compact windowed (~375x820).
+        tapWhenTappable(showSidebar, "Show sidebar before compact resize")
+        tapWhenTappable(element(app, "sidebar.conversation"), "Conversation")
+        dragCorner(to: CGPoint(x: screenW - (screenW - 375) / 2, y: screenH - 5))
+        let convSegment = element(app, "main.pane.conversation")
+        XCTAssertTrue(convSegment.waitForExistence(timeout: 10), "narrow window switches to compact TopBar")
+        XCTAssertFalse(wc.frame.intersects(convSegment.frame), "window controls \(wc.frame) must not overlap Conversation control \(convSegment.frame)")
+        let agentsSegment = element(app, "main.pane.flock")
+        XCTAssertTrue(agentsSegment.exists)
+        XCTAssertFalse(wc.frame.intersects(agentsSegment.frame), "window controls must not overlap Agents control")
+        shot("windowed-375")
+    }
 }
