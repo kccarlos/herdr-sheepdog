@@ -171,8 +171,9 @@ docs/dev/design/app-factory.md section 4): `DaemonState.factory`
 (`FactoryProjectHead`, nil from a daemon with no projects),
 `PendingAction.factory` (`FactoryAskMeta` on a `fask-` card), and the reads
 `DaemonClient.factoryProjects()`, `factoryGraph(projectID:)`,
-`factoryAsks()`, `factorySettings(projectID:)` (`FactorySettingRow`),
-and `proposeFactorySetting(projectID:name:value:)` (`FactoryRefusal`). An unknown project state word reads as `.unknown`.
+`factoryAsks()`, `factorySettings(projectID:)` (`FactorySettingRow`,
+`FactoryModelCandidate`), and `proposeFactorySetting(projectID:name:value:)`
+(`FactoryRefusal`). An unknown project state word reads as `.unknown`.
 `DaemonState.factory` is nil for an omitted or non-array value and skips
 malformed heads in an array. A card with malformed factory metadata keeps the
 card and reads `PendingAction.factory` as nil. The factory routes return
@@ -365,8 +366,12 @@ accessibility text sizes. The voice capsule stays in place.
   `AgentScreenView` (without the agent menu, Stop or Attach) and show the
   project's off-state recovery screen when the coordinator is not running.
   From `FactoryProjectView`, **Settings** pushes `FactorySettingsView`
-  (available on running, stopped and finished projects) to show the
-  project's settings from `GET /api/factory/projects/{id}/settings`.
+  (available on running, stopped and finished projects) and presents
+  `FactoryModelsEditor` for per-role model candidates; proposals go through
+  `POST /api/factory/projects/{id}/settings`, refusal fixes render in
+  `FactoryFixView` (built on `FactoryCommandCopyRow`), and changes confirm
+  through the read-back ask via `ComputerModel.answer`
+  (`POST /api/pending/answer`).
 - **Agent window** (`AgentScreenView`). "Open window" on an Agents card
   (a `NavigationLink` to `AgentWindowRoute` on the main `NavigationStack`),
   or in the sheet behind a strip chip, pushes the agent's live terminal;

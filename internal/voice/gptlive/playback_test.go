@@ -10,22 +10,51 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
 
+func waitEvent(t *testing.T, s *Session, what string, match func(voice.Event) bool) voice.Event {
+	t.Helper()
+	timer := time.NewTimer(3 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case ev, ok := <-s.Events():
+			if !ok {
+				t.Fatalf("events closed while waiting for %s", what)
+			}
+			if match(ev) {
+				return ev
+			}
+		case <-timer.C:
+			t.Fatalf("timed out waiting for %s", what)
+		}
+	}
+}
+
 // openWithReply opens a session and serves a reply: per word, ms of
 // voiced 24 kHz audio followed by its transcript fragment.
 func openWithReply(t *testing.T, s *Session, d *fakeDialer, words []string, perWordMs int) *fakeConn {
 	t.Helper()
 	s.ClientAttached(true)
 	_ = s.SendAudio(tone(3000, 640))
-	waitFor(t, "open", s.Live)
+	waitEvent(t, s, "open", func(ev voice.Event) bool {
+		st, ok := ev.(voice.EventStatus)
+		return ok && st.Status == voice.StatusConnected && st.Reason == ReasonLive
+	})
 	c := d.last()
+	if len(words) == 0 {
+		return c
+	}
+	audioDelta := b64(tone(4000, perWordMs*24))
 	for _, w := range words {
-		c.server(map[string]any{"type": evOutputAudioDelta, "delta": b64(tone(4000, perWordMs*24))})
+		c.server(map[string]any{"type": evOutputAudioDelta, "delta": audioDelta})
 		c.server(map[string]any{"type": evOutputTranscript, "delta": w + " "})
 	}
-	waitFor(t, "reply received", func() bool {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		return strings.Contains(s.outText, words[len(words)-1])
+	seen := 0
+	waitEvent(t, s, "reply received", func(ev voice.Event) bool {
+		tr, ok := ev.(voice.EventTranscript)
+		if ok && tr.Dir == voice.DirOut && !tr.Final {
+			seen++
+		}
+		return seen == len(words)
 	})
 	return c
 }
@@ -63,25 +92,18 @@ func TestGPTLiveInterruptPushWaitsForClientDrained(t *testing.T) {
 // TestGPTLiveCutTranscript: the client flushed 40 % into the reply; the
 // session emits the heard words as a cut transcript.
 func TestGPTLiveCutTranscript(t *testing.T) {
-	s, d, l := startSession(t, testConfig())
+	// Freeze the session clock so tickLoop's SpeechHold cannot split the
+	// synthetic reply across two playback runs under CPU load.
+	t0 := time.Date(2026, 11, 26, 12, 0, 0, 0, time.UTC)
+	s, d, l := startSessionWithClock(t, testConfig(), func() time.Time { return t0 })
 	words := strings.Fields("one two three four five six seven eight nine ten")
 	openWithReply(t, s, d, words, 100)
 	s.ClientPlayback(voice.PlaybackStarted, 0)
 	s.ClientPlayback(voice.PlaybackFlushed, 400)
-	var cut voice.EventTranscript
-	waitFor(t, "cut transcript", func() bool {
-		for {
-			select {
-			case ev := <-s.Events():
-				if tr, ok := ev.(voice.EventTranscript); ok && tr.Cut != nil {
-					cut = tr
-					return true
-				}
-			default:
-				return false
-			}
-		}
-	})
+	cut := waitEvent(t, s, "cut transcript", func(ev voice.Event) bool {
+		tr, ok := ev.(voice.EventTranscript)
+		return ok && tr.Cut != nil
+	}).(voice.EventTranscript)
 	if cut.Text != "one two three four" || cut.Cut.RunMs != 1000 || cut.Cut.HeardMs != 400 {
 		t.Fatalf("cut %+v %+v", cut, cut.Cut)
 	}

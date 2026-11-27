@@ -115,14 +115,8 @@ struct FactoryStartCheckRow: View {
             }
             .accessibilityElement(children: .combine)
             if let detail = check.detail?.trimmedOrNil { Text(detail).foregroundStyle(Theme.muted) }
-            if check.status != "ok" {
-                if let cmd = check.commandFix {
-                    Text("Fix, in a terminal\(computerName?.trimmedOrNil.map { " on \($0)" } ?? ""):").fontWeight(.semibold)
-                    FactoryCommandCopyRow(command: cmd.command)
-                    if let rest = cmd.rest { Text(rest).foregroundStyle(Theme.muted) }
-                } else if let fix = check.fix?.trimmedOrNil {
-                    Text("Fix: ").fontWeight(.semibold) + Text(fix).foregroundStyle(Theme.muted)
-                }
+            if check.status != "ok", let fix = check.fix?.trimmedOrNil {
+                FactoryFixView(fix: fix, computerName: computerName)
             }
         }
         .font(.footnote).padding(framed ? 10 : 0).frame(maxWidth: .infinity, alignment: .leading)
