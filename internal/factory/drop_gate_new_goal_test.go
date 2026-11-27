@@ -1710,12 +1710,15 @@ func TestNewGoalGenerationSettlement(t *testing.T) {
 		if w.state().Project.NewGoal {
 			t.Fatalf("NewGoal stayed true after coordinator dropped T3 in Goal 2's generation and went idle")
 		}
+		j4Before := len(logRules(t, w.paths.Log(w.id), "J4"))
 		if err := w.eng.Start(w.repo, "Goal 3: Goal 1 and Goal 2 commands must not count", 2); err != nil {
 			t.Fatalf("Start(Goal 3): %v", err)
 		}
-		w.now = w.now.Add(15 * time.Second)
-		w.pass() // J12 delivers Goal 3 wake (#1)
+		w.waitIdle(coord1) // finish Goal 2's J4 final_journal turn so J12 delivers Goal 3 wake (#1)
 		g3Send1 := lastSendTo(t, w.srv.Requests(), coord1)
+		if !strings.Contains(g3Send1, "Goal 3: Goal 1 and Goal 2 commands must not count") {
+			t.Fatalf("expected Goal 3 wake (#1) delivery, got %q", g3Send1)
+		}
 		w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
 		w.srv.SetScreen(coord1, formatPromptEcho("❯", g3Send1)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
 		w.waitIdle(coord1)
@@ -1726,9 +1729,9 @@ func TestNewGoalGenerationSettlement(t *testing.T) {
 		w.now = w.now.Add(15 * time.Second)
 		w.pass()
 
-		if st := w.state(); !st.Project.NewGoal || st.Project.Finished || len(logRules(t, w.paths.Log(w.id), "J4")) != 0 {
+		if st, j4After := w.state(), logRules(t, w.paths.Log(w.id), "J4")[j4Before:]; !st.Project.NewGoal || st.Project.Finished || len(j4After) != 0 {
 			t.Fatalf("pre-bump commands settled Goal 3 after wake exhaustion: NewGoal=%v Finished=%v j4=%+v",
-				st.Project.NewGoal, st.Project.Finished, logRules(t, w.paths.Log(w.id), "J4"))
+				st.Project.NewGoal, st.Project.Finished, j4After)
 		}
 	})
 
