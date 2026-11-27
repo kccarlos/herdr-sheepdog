@@ -101,6 +101,8 @@ final class SceneUI {
     var columns: NavigationSplitViewVisibility = .all
     /// A shell pushed over the detail.
     var detailPath = NavigationPath()
+    /// Incremented when re-selecting the current detail to pop pushed child views.
+    var detailReset = 0
     /// Of two panes, the one keys and ⌘ shortcuts act on.
     var focusedPane = 0
     /// The first of two panes' share of the room.

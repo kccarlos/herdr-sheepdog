@@ -149,7 +149,7 @@ private struct AgentWindowView: View {
             actionsAvailable: computer == nil && model.agentActionsAvailable,
             filesAvailable: computer == nil && model.filesAvailable,
             others: computer == nil
-                ? model.flock.running.filter { $0.paneID != agent.paneID }
+                ? model.agentsModel.factoryList.agents.running.filter { $0.paneID != agent.paneID }
                     .map { .init(paneID: $0.paneID, name: $0.displayName, blocked: $0.state == .blocked) }
                 : [],
             handshake: computer == nil ? model.linkModel.handshake : .idle,

@@ -57,6 +57,10 @@ import (
 // before any job of that backend has finished.
 const defaultInvestigateETA = 30 * time.Second
 
+// minInvestigateETA floors a recorded estimate so the acknowledgement
+// never reports a 0-second wait to the orchestrator.
+const minInvestigateETA = time.Second
+
 // investigateSummaryRunes bounds the one line the ledger keeps of an
 // answer (the full text stays in the record for the delivery turn and
 // for recall).
@@ -233,6 +237,9 @@ func (s *Supervisor) startInvestigation(ctx context.Context, paneID string, req 
 	if backend == "" {
 		backend = s.investigatorBackend()
 	}
+	// Compute the estimate before starting the goroutine so a fast job
+	// cannot finish first and fold its own duration into its own ETA.
+	eta := s.investigateETA(backend)
 	s.log.Log(logSource, "investigation.started", paneID, map[string]any{
 		"id": inv.ID, "agent": aliasOr(row.Alias), "source": inv.Source, "backend": backend,
 		"question": inv.Question, "follow_up_of": inv.FollowUpOf, "resumed": plan.session != "", "forked": plan.fork,
@@ -249,7 +256,7 @@ func (s *Supervisor) startInvestigation(ctx context.Context, paneID string, req 
 			Timeout: s.cfg.InvestigateMax, Slot: "investigation:" + inv.PaneID,
 		}, plan.transcript)
 	}()
-	return brain.InvestigationStart{Job: inv.ID, ETASeconds: int(s.investigateETA(backend).Seconds())}, nil
+	return brain.InvestigationStart{Job: inv.ID, ETASeconds: int(eta.Seconds())}, nil
 }
 
 // investigationPlan is how one job runs: which source, on which backend
@@ -700,21 +707,27 @@ func (s *Supervisor) restoreInvestigations() {
 }
 
 // investigateETA is the estimate the acknowledgement carries: the median
-// of that backend's finished jobs, or defaultInvestigateETA before there
-// are any (backends differ enough that one's history says little about
-// the other's).
+// of that backend's finished jobs with a positive duration (floored to
+// minInvestigateETA), or defaultInvestigateETA before there are any
+// (backends differ enough that one's history says little about the
+// other's).
 func (s *Supervisor) investigateETA(backend string) time.Duration {
 	var durs []time.Duration
 	for _, inv := range s.investigations() {
 		if inv.Status == state.InvestigationDone && inv.Finished != nil && (backend == "" || inv.Backend == backend) {
-			durs = append(durs, inv.Finished.Sub(inv.Started))
+			if d := inv.Finished.Sub(inv.Started); d > 0 {
+				durs = append(durs, d)
+			}
 		}
 	}
 	if len(durs) == 0 {
 		return defaultInvestigateETA
 	}
 	sort.Slice(durs, func(i, j int) bool { return durs[i] < durs[j] })
-	return durs[len(durs)/2]
+	if med := durs[len(durs)/2]; med >= minInvestigateETA {
+		return med
+	}
+	return minInvestigateETA
 }
 
 // investigatorBackend names the backend investigations will use, for the
