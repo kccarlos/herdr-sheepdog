@@ -16,6 +16,7 @@ import (
 	"github.com/kccarlos/herdr-sheepdog/internal/brain/braintest"
 	"github.com/kccarlos/herdr-sheepdog/internal/cli"
 	"github.com/kccarlos/herdr-sheepdog/internal/herdr"
+	"github.com/kccarlos/herdr-sheepdog/internal/logging"
 	"github.com/kccarlos/herdr-sheepdog/internal/state"
 	"github.com/kccarlos/herdr-sheepdog/internal/voice"
 )
@@ -503,41 +504,98 @@ func TestInvestigationETA(t *testing.T) {
 	})
 
 	t.Run("computed before goroutine starts", func(t *testing.T) {
-		for i := range 25 {
-			f := &fakeInvestigator{answer: "ok", backend: "codex"}
-			h := newInvestigationHarness(t, f)
-			// Immediate completion on a frozen clock (dur = 0) must still return
-			// the 30 s default, never 0 from racing with its own completion.
-			first := start(t, h, "why?", "", "why")
-			if first.ETASeconds != int(defaultInvestigateETA.Seconds()) {
-				t.Fatalf("iter %d: first ETASeconds = %d, want %d", i, first.ETASeconds, int(defaultInvestigateETA.Seconds()))
-			}
-			waitFor(t, func() bool { return len(h.pusher.all()) == 1 }, "first delivery")
-			// A follow-up after a 0-duration job also falls back to default (not 0).
-			second := start(t, h, "more?", first.Job, "more")
-			if second.ETASeconds != int(defaultInvestigateETA.Seconds()) {
-				t.Fatalf("iter %d: second ETASeconds = %d, want %d", i, second.ETASeconds, int(defaultInvestigateETA.Seconds()))
-			}
-			waitFor(t, func() bool { return len(h.pusher.all()) == 2 }, "second delivery")
+		f := &fakeInvestigator{answer: "ok", backend: "codex", gate: make(chan struct{})}
+		h := newInvestigationHarness(t, f)
+		var hookFired bool
+		var hookErr error
+		h.sup.log = &logHook{
+			next: h.log,
+			typ:  "investigation.started",
+			fn: func() {
+				hookFired = true
+				started := h.clock.Now()
+				finished := started.Add(5 * time.Second)
+				hookErr = h.sup.appendInvestigation(state.Investigation{
+					ID: "inv-completed-during-start", PaneID: "w5:p1", Alias: "auth", Backend: "codex",
+					Status: state.InvestigationDone, Started: started, Finished: &finished,
+				})
+			},
 		}
 
+		// startInvestigation must compute eta before logging investigation.started
+		// and launching the goroutine, so a completion recorded at or after launch
+		// cannot pollute this start's ETA.
+		first := start(t, h, "why?", "", "why")
+		if !hookFired {
+			t.Fatal("investigation.started log hook did not fire")
+		}
+		if hookErr != nil {
+			t.Fatalf("appendInvestigation in log hook: %v", hookErr)
+		}
+		if first.ETASeconds != int(defaultInvestigateETA.Seconds()) {
+			t.Fatalf("first ETASeconds = %d, want %d (must be computed before launch)", first.ETASeconds, int(defaultInvestigateETA.Seconds()))
+		}
+
+		close(f.gate)
+		waitFor(t, func() bool { return len(h.pusher.all()) == 1 }, "first delivery")
+
+		// The 5 s completion injected at launch is now in history and governs the next start.
+		second := start(t, h, "again?", "", "again")
+		if second.ETASeconds != 5 {
+			t.Fatalf("second ETASeconds = %d, want 5", second.ETASeconds)
+		}
+		waitFor(t, func() bool { return len(h.pusher.all()) == 2 }, "second delivery")
+	})
+
+	t.Run("frozen clock immediate completion", func(t *testing.T) {
+		f := &fakeInvestigator{answer: "ok", backend: "codex"}
+		h := newInvestigationHarness(t, f)
+		// Immediate completion on a frozen clock (dur = 0) must still return
+		// the 30 s default, never 0 from racing with its own completion.
+		first := start(t, h, "why?", "", "why")
+		if first.ETASeconds != int(defaultInvestigateETA.Seconds()) {
+			t.Fatalf("first ETASeconds = %d, want %d", first.ETASeconds, int(defaultInvestigateETA.Seconds()))
+		}
+		waitFor(t, func() bool { return len(h.pusher.all()) == 1 }, "first delivery")
+		// A follow-up after a 0-duration job also falls back to default (not 0).
+		second := start(t, h, "more?", first.Job, "more")
+		if second.ETASeconds != int(defaultInvestigateETA.Seconds()) {
+			t.Fatalf("second ETASeconds = %d, want %d", second.ETASeconds, int(defaultInvestigateETA.Seconds()))
+		}
+		waitFor(t, func() bool { return len(h.pusher.all()) == 2 }, "second delivery")
+	})
+
+	t.Run("advancing clock immediate completion", func(t *testing.T) {
 		// Even with a positive duration, a job that finishes immediately cannot
 		// fold its own duration into its own start ETA; only the next job sees it.
-		for i := range 25 {
-			h := newInvestigationHarness(t, nil)
-			h.sup.investigator = advancingInvestigator{clk: h.clock, dur: 5 * time.Second}
-			first := start(t, h, "why?", "", "why")
-			if first.ETASeconds != int(defaultInvestigateETA.Seconds()) {
-				t.Fatalf("iter %d: first ETASeconds = %d, want %d (must not include own 5s completion)", i, first.ETASeconds, int(defaultInvestigateETA.Seconds()))
-			}
-			waitFor(t, func() bool { return len(h.pusher.all()) == 1 }, "first delivery")
-			second := start(t, h, "again?", "", "again")
-			if second.ETASeconds != 5 {
-				t.Fatalf("iter %d: second ETASeconds = %d, want 5", i, second.ETASeconds)
-			}
-			waitFor(t, func() bool { return len(h.pusher.all()) == 2 }, "second delivery")
+		h := newInvestigationHarness(t, nil)
+		h.sup.investigator = advancingInvestigator{clk: h.clock, dur: 5 * time.Second}
+		first := start(t, h, "why?", "", "why")
+		if first.ETASeconds != int(defaultInvestigateETA.Seconds()) {
+			t.Fatalf("first ETASeconds = %d, want %d (must not include own 5s completion)", first.ETASeconds, int(defaultInvestigateETA.Seconds()))
 		}
+		waitFor(t, func() bool { return len(h.pusher.all()) == 1 }, "first delivery")
+		second := start(t, h, "again?", "", "again")
+		if second.ETASeconds != 5 {
+			t.Fatalf("second ETASeconds = %d, want 5", second.ETASeconds)
+		}
+		waitFor(t, func() bool { return len(h.pusher.all()) == 2 }, "second delivery")
 	})
+}
+
+// logHook runs fn once when an event of type typ is logged, then forwards to next.
+type logHook struct {
+	next logging.Logger
+	once sync.Once
+	typ  string
+	fn   func()
+}
+
+func (l *logHook) Log(source, typ, paneID string, payload any) {
+	if typ == l.typ {
+		l.once.Do(l.fn)
+	}
+	l.next.Log(source, typ, paneID, payload)
 }
 
 type advancingInvestigator struct {
