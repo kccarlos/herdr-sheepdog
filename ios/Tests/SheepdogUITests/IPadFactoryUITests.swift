@@ -1,9 +1,10 @@
 import XCTest
 
-/// iPad UI tests for app-factory PR 13a against `StubDaemon`:
+/// iPad UI tests for app-factory PR 13 against `StubDaemon`:
 /// factory projects in the iPad sidebar and All agents, selecting one to show
-/// the board, D12 remote computer board without moving voice, empty and error
-/// states with plain fix text, and VoiceOver labels via identifiers only.
+/// the board with list + graph side by side, tapping a graph node to open
+/// `FactoryTaskView`, D12 remote computer board without moving voice, empty and
+/// error states with plain fix text, and VoiceOver labels via identifiers only.
 final class IPadFactoryUITests: XCTestCase {
     private let environment = ProcessInfo.processInfo.environment
 
@@ -55,7 +56,7 @@ final class IPadFactoryUITests: XCTestCase {
 
     private static let sampleAsk = #"{"id":"fask-del-1","pane_id":"factory:proj-1","kind":"answer_prompt","agent":"notes","question":"Delete the old notes table?","summary":"Delete the old notes table?","factory":{"project":"proj-1","task":"T10","kind":"delete"},"options":[{"index":1,"label":"Keep it","default":true,"recommended":true},{"index":2,"label":"Delete it"}]}"#
 
-    func testSidebarListsFactoryProjectsOpensBoardAndNavigatesToTask() throws {
+    func testSidebarListsFactoryProjectsOpensBoardWithGraphAndNavigatesToTask() throws {
         let heads = #"""
         [{"id":"proj-1","name":"notes","goal":"A notes page with search","state":"running","counts":{"working":2,"owner_answer":1,"done":4},"folder":"~/code/notes","coordinator_pane":"coord-notes-1"},
          {"id":"proj-2","name":"photos","goal":"Faster thumbnails","state":"stopped","counts":{"done":2,"queued":4},"folder":"~/code/photos"},
@@ -80,19 +81,50 @@ final class IPadFactoryUITests: XCTestCase {
         XCTAssertLessThan(photosRow.frame.minY, paymentsRow.frame.minY)
         XCTAssertFalse(element(app, "sidebar.factory.proj-3").exists)
         XCTAssertFalse(element(app, "sidebar.agent.worker-t8").exists)
-        shot("13a-sidebar")
 
         tapWhenTappable(notesRow, "notes in iPad sidebar")
         XCTAssertTrue(notesRow.isSelected)
 
         let board = element(app, "factoryProject.board")
+        let graph = element(app, "factoryProject.graph")
         XCTAssertTrue(board.waitForExistence(timeout: 15))
-        let taskT8 = scrollToVisible(app, element(app, "factoryProject.task.T8"))
+        XCTAssertTrue(graph.waitForExistence(timeout: 10))
+        XCTAssertEqual(graph.label, "task graph: 7 tasks in 3 layers")
+
+        let taskT8 = element(app, "factoryProject.task.T8")
         XCTAssertTrue(taskT8.exists)
-        scrollToTop(app)
+        XCTAssertLessThanOrEqual(taskT8.frame.maxX, graph.frame.minX + 2, "task list and graph sit side by side")
         XCTAssertEqual(element(app, "factoryProject.say.field").label, "Tell the notes factory")
         XCTAssertEqual(element(app, "factoryProject.coordinator").label, "Open the notes coordinator's window")
-        shot("13a-board")
+        let nodeT7 = element(app, "factoryProject.graph.node.T7")
+        let nodeT10 = element(app, "factoryProject.graph.node.T10")
+        XCTAssertEqual(nodeT7.label, "T7, Search, working, after T1 and T4")
+        XCTAssertEqual(element(app, "factoryProject.graph.node.T6").label, "T6, Storage, split")
+        XCTAssertEqual(nodeT10.label, "T10, Import, waiting on you, after T4")
+        XCTAssertTrue(
+            element(app, "factoryProject.graph.layer.0").exists
+                && element(app, "factoryProject.graph.layer.1").exists
+                && element(app, "factoryProject.graph.layer.2").exists,
+            "graph groups nodes into per-layer containers for layer-by-layer VoiceOver order"
+        )
+        XCTAssertLessThanOrEqual(
+            nodeT7.frame.maxX, graph.frame.maxX - 1,
+            "third layer node T7 fits inside the graph card without right-edge clipping"
+        )
+        XCTAssertLessThanOrEqual(
+            nodeT10.frame.maxX, graph.frame.maxX - 1,
+            "third layer node T10 fits inside the graph card without right-edge clipping"
+        )
+        shot("13b-board-graph")
+
+        let droppedNode = element(app, "factoryProject.graph.node.T9")
+        XCTAssertEqual(droppedNode.label, "T9, Export to PDF, dropped")
+        tapWhenTappable(droppedNode, "T9 node in graph")
+        let taskView = element(app, "factoryTask.view")
+        XCTAssertTrue(taskView.waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, "factoryTask.lastDecision").exists)
+        tapWhenTappable(app.navigationBars.buttons.element(boundBy: 0), "Back from graph task to notes board")
+        XCTAssertTrue(board.waitForExistence(timeout: 10))
 
         // Tap a dropped task in Done to push FactoryTaskView, verify its toolbar Back button pops cleanly,
         // and verify re-tapping the selected project in the sidebar also pops back to the board.
@@ -100,7 +132,6 @@ final class IPadFactoryUITests: XCTestCase {
         tapWhenTappable(doneFold, "Done fold on board")
         let taskT9 = revealAboveCapsule(app, scrollToVisible(app, element(app, "factoryProject.task.T9")))
         tapWhenTappable(taskT9, "task T9 on board")
-        let taskView = element(app, "factoryTask.view")
         XCTAssertTrue(taskView.waitForExistence(timeout: 10))
         XCTAssertTrue(element(app, "factoryTask.lastDecision").exists)
         tapWhenTappable(app.navigationBars.buttons.element(boundBy: 0), "Back to notes board")
@@ -145,8 +176,6 @@ final class IPadFactoryUITests: XCTestCase {
         XCTAssertTrue(element(app, "flock.factory.proj-notes").waitForExistence(timeout: 10))
         XCTAssertFalse(element(app, "flock.agent.coord-notes").exists)
         XCTAssertFalse(element(app, "flock.factory.proj-done").exists)
-        shot("13a-all-agents")
-
         let doneFold = scrollToVisible(app, app.buttons["flock.section.done"].firstMatch)
         let doneFoldLabel = doneFold.label
         tapWhenTappable(doneFold, "Done fold")
@@ -169,8 +198,9 @@ final class IPadFactoryUITests: XCTestCase {
         let titleLabel = allTitle.label
 
         tapWhenTappable(homeSidebar, "Home Mac photos in sidebar")
-        XCTAssertTrue(element(app, "factoryProject.board").waitForExistence(timeout: 15))
-        XCTAssertTrue(scrollToVisible(app, element(app, "factoryProject.task.T2")).exists)
+        let homeGraph = element(app, "factoryProject.graph")
+        XCTAssertTrue(homeGraph.waitForExistence(timeout: 15))
+        XCTAssertEqual(homeGraph.label, "task graph: 2 tasks in 2 layers")
         XCTAssertEqual(element(app, "computer.sidebarVoiceMarker.fixture-1").label, "Voice is on Work Mac")
 
         continueAfterFailure = true
@@ -197,11 +227,11 @@ final class IPadFactoryUITests: XCTestCase {
 
         tapWhenTappable(emptyProj, "scratch in sidebar")
         XCTAssertTrue(element(app, "factoryProject.board").waitForExistence(timeout: 15))
+        XCTAssertFalse(element(app, "factoryProject.graph").exists)
         XCTAssertEqual(element(app, "factoryProject.alert.cause").label, "The scratch coordinator is not running: claude coordinator is signed out")
         XCTAssertEqual(element(app, "factoryProject.alert.fix").label, "Fix: sign in to claude at this Mac")
         XCTAssertEqual(element(app, "factoryProject.emptyTasks.heading").label, "no tasks yet")
         XCTAssertEqual(element(app, "factoryProject.emptyTasks.detail").label, "The coordinator has not planned this project yet.")
-        shot("13a-empty-board")
 
         tapWhenTappable(element(app, "sidebar.factory.proj-err"), "broken in sidebar")
         let errHeading = element(app, "factoryProject.loadError.heading")
@@ -214,7 +244,7 @@ final class IPadFactoryUITests: XCTestCase {
         let retryBtn = app.buttons["factoryProject.retry"].firstMatch
         XCTAssertEqual(retryBtn.label, "Try again")
         tapWhenTappable(retryBtn, "Try again")
-        XCTAssertTrue(element(app, "factoryProject.board").waitForExistence(timeout: 15))
+        XCTAssertTrue(element(app, "factoryProject.graph").waitForExistence(timeout: 15))
 
         tapWhenTappable(app.buttons["factoryProject.resume"].firstMatch, "Resume broken")
         let actionErr = element(app, "factoryProject.actionError")
@@ -229,11 +259,44 @@ final class IPadFactoryUITests: XCTestCase {
         XCTAssertEqual(element(zeroApp, "sidebar.empty.message").label, "No agents running.")
         tapWhenTappable(element(zeroApp, "sidebar.allAgents"), "All agents empty")
         XCTAssertTrue(element(zeroApp, "flock.empty").waitForExistence(timeout: 10))
-        shot("13a-empty-state")
 
         let offlineApp = launch(computers: "Work Mac=\(zeroHost)", extra: ["-sheepdogNoNetwork"])
         tapWhenTappable(element(offlineApp, "sidebar.allAgents"), "All agents offline")
         XCTAssertTrue(element(offlineApp, "flock.noNetwork").waitForExistence(timeout: 15))
+    }
+
+    func testBoardGraphAtLargestText() throws {
+        let heads = #"""
+        [{"id":"proj-1","name":"notes","goal":"A notes page with search","state":"running",
+          "counts":{"working":2,"owner_answer":1,"done":4},"folder":"~/code/notes",
+          "coordinator_pane":"coord-notes-1"}]
+        """#
+        let stub = try StubDaemon(.computer(name: "Work Mac", agents: "[]", questions: "[]", factory: heads))
+        stub.factoryGraphs["proj-1"] = Self.sampleGraph
+        let host = try stub.start()
+        defer { stub.stop() }
+
+        let app = launch(
+            computers: "Work Mac=\(host)",
+            extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        )
+        let notesRow = element(app, "sidebar.factory.proj-1")
+        XCTAssertTrue(notesRow.waitForExistence(timeout: 15))
+        tapWhenTappable(notesRow, "notes at AX5")
+        let graph = scrollToVisible(app, element(app, "factoryProject.graph"))
+        XCTAssertEqual(graph.label, "task graph: 7 tasks in 3 layers")
+        let doneFold = app.buttons["factoryProject.doneFold"].firstMatch
+        XCTAssertTrue(doneFold.exists)
+        XCTAssertLessThanOrEqual(
+            doneFold.frame.maxY, graph.frame.minY + 2,
+            "at AX5 the graph must stack below the task list"
+        )
+        XCTAssertLessThan(
+            abs(doneFold.frame.minX - graph.frame.minX), 8,
+            "at AX5 the graph aligns with the full-width task column"
+        )
+        XCTAssertTrue(scrollToVisible(app, element(app, "factoryProject.graph.node.T7")).exists)
+        shot("13b-board-graph-ax5")
     }
 
     func testSecondaryComputerWithoutFactoryProjectsKeepsTwoColumnGridAndOnlineTotals() throws {
