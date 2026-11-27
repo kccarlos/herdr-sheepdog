@@ -66,23 +66,61 @@ struct FactoryTaskView: View {
     private func stepColor(_ s: String) -> Color { s == "done" ? Theme.done : s == "now" ? Theme.working : s == "ended" ? Theme.idle : Theme.muted }
 }
 
+struct FactoryCommandCopyRow: View {
+    let command: String
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @State private var copied = false
+
+    var body: some View {
+        let layout = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout(spacing: 8))
+        layout {
+            Text(command).font(.footnote.monospaced()).textSelection(.enabled)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 8).padding(.vertical, 6)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Theme.fill, in: .rect(cornerRadius: Theme.Radius.small))
+            Button(copied ? "Copied" : "Copy") {
+                UIPasteboard.general.string = command
+                copied = true
+                AccessibilityNotification.Announcement("Copied").post()
+                Task {
+                    try? await Task.sleep(for: .seconds(2))
+                    copied = false
+                }
+            }
+            .buttonStyle(.bordered).tint(Theme.ink).frame(minHeight: 44)
+            .accessibilityLabel(copied ? "Copied \(command)" : "Copy the command \(command)")
+        }
+    }
+}
+
 struct FactoryStartCheckRow: View {
     let check: FactoryStartCheck
     let computerName: String?
+    var framed = true
 
     var body: some View {
         let mark: (String, Color) = check.status == "ok" ? ("checkmark", Theme.done) : check.status == "warn" ? ("exclamationmark.triangle", Theme.primaryText) : check.status == "fail" ? ("xmark", Theme.danger) : ("minus", Theme.muted)
         VStack(alignment: .leading, spacing: 5) {
-            HStack(spacing: 6) { HStack(spacing: 3) { Image(systemName: mark.0).accessibilityHidden(true); Text(check.statusWord) }.fontWeight(.semibold).foregroundStyle(mark.1); Text(check.name).fontWeight(.semibold) }
-            if check.status != "ok" {
-                if let detail = check.detail?.trimmedOrNil { Text(detail).foregroundStyle(Theme.muted) }
-                if let fix = check.fix?.trimmedOrNil {
-                    FactoryFixView(fix: fix, computerName: computerName)
+            OptionFlow(spacing: 6) {
+                HStack(spacing: 3) {
+                    Image(systemName: mark.0).accessibilityHidden(true)
+                    Text(check.statusWord)
                 }
+                .fontWeight(.semibold).foregroundStyle(mark.1)
+                Text(check.name).fontWeight(.semibold)
+            }
+            .accessibilityElement(children: .combine)
+            if let detail = check.detail?.trimmedOrNil { Text(detail).foregroundStyle(Theme.muted) }
+            if check.status != "ok", let fix = check.fix?.trimmedOrNil {
+                FactoryFixView(fix: fix, computerName: computerName)
             }
         }
-        .font(.footnote).padding(10).frame(maxWidth: .infinity, alignment: .leading)
-        .background(Theme.card, in: .rect(cornerRadius: 10)).overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.line))
+        .font(.footnote).padding(framed ? 10 : 0).frame(maxWidth: .infinity, alignment: .leading)
+        .background(framed ? Theme.card : .clear, in: .rect(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(framed ? Theme.line : .clear))
     }
 }
 

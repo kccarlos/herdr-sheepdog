@@ -18,7 +18,7 @@ public enum FactoryProjectState: String, Codable, Equatable, Sendable {
 }
 
 /// The open alert of a project: shown as the daemon wrote it.
-public struct FactoryProjectAlert: Codable, Equatable, Sendable {
+public struct FactoryProjectAlert: Codable, Equatable, Hashable, Sendable {
     public var kind: String
     public var cause: String
     public var fix: String?
@@ -31,7 +31,7 @@ public struct FactoryProjectAlert: Codable, Equatable, Sendable {
 }
 
 /// One entry of `/api/state`'s `factory` (Go `ProjectHead`).
-public struct FactoryProjectHead: Codable, Equatable, Identifiable, Sendable {
+public struct FactoryProjectHead: Codable, Equatable, Hashable, Identifiable, Sendable {
     public var id: String
     public var name: String
     public var goal: String
@@ -327,6 +327,8 @@ extension FactoryDefaultEmpty: Encodable where Value: Encodable {
     }
 }
 
+extension FactoryDefaultEmpty: Hashable where Value: Hashable {}
+
 private extension KeyedDecodingContainer {
     func decode<Value: FactoryEmptyValue>(_ type: FactoryDefaultEmpty<Value>.Type, forKey key: Key) throws -> FactoryDefaultEmpty<Value> {
         try decodeIfPresent(type, forKey: key) ?? FactoryDefaultEmpty(Value())
@@ -341,6 +343,12 @@ public struct FactoryStartCheck: Decodable, Equatable, Sendable {
         self.name = name; self.status = status; self.detail = detail; self.fix = fix
     }
     public var statusWord: String { ["ok": "pass", "warn": "warning", "skip": "skipped"][status] ?? status }
+    public var commandFix: (command: String, rest: String?)? {
+        guard let raw = fix?.trimmed.nonEmpty else { return nil }
+        let (command, rest) = FactorySettingRow.parseFix(raw)
+        guard let command else { return nil }
+        return (command, (rest.hasPrefix(",") ? String(rest.dropFirst()).trimmed : rest).nonEmpty)
+    }
 }
 
 /// A 400 start refusal carrying the daemon's start-check results.
@@ -394,6 +402,14 @@ extension DaemonClient {
 
     /// Start, resume, give a new goal, or reopen a project via `POST /api/factory/projects/start`.
     public func startFactory(folder: String, goal: String) async throws { try await factoryPost("/api/factory/projects/start", ["folder": folder, "goal": goal]) }
+    /// `POST /api/factory/projects/check` — runs start checks on the daemon's computer.
+    public func checkFactory(folder: String) async throws -> [FactoryStartCheck] {
+        struct Reply: Decodable { let results: [FactoryStartCheck] }
+        let body = try JSONSerialization.data(withJSONObject: ["folder": folder], options: .withoutEscapingSlashes)
+        var req = try request(encodedPath: "/api/factory/projects/check", method: "POST", body: body)
+        req.timeoutInterval = max(DaemonClient.actionTimeout.map { $0 + 5 } ?? 0, 45)
+        return try await factoryReply(Reply.self, request: req, what: "the start checks").results
+    }
     public func resumeFactory(folder: String, goal: String) async throws { try await startFactory(folder: folder, goal: goal) }
     public func sayFactory(projectID: String, text: String) async throws { try await factoryPost("/api/factory/projects/\(factoryPathSegment(projectID))/say", ["text": text]) }
     public func stopFactory(projectID: String) async throws { try await factoryPost("/api/factory/projects/stop", ["project": projectID]) }

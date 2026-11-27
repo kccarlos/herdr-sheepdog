@@ -972,7 +972,8 @@ is no docs PR at the end. Sizes are net lines without tests.
 | 9 | `feat(ios): the project board, the text box, stop and resume, and the coordinator's window` | 2, 5, 8 | ~275 |
 | 10 | `feat(ios): the task view, new goal and reopen` | 9 | ~200 |
 | 11 | `feat(ios): settings and models per role` | 9 | ~290 |
-| 12 | `feat(ios): new project from the + menu, with start checks` | 8, 11 | ~280 |
+| 12a | `feat(ios): new-project form model, check route, and AX5 check rows` | 8, 10 | 145 |
+| 12b | `feat(ios): new factory project sheet from the + menu` (starts with the daemon defaults and keeps the full folder list; the models rows follow PR 11) | 12a | 290 |
 | 13 | `feat(ios): the iPad list and graph` | 9, 10 | ~270 |
 
 Every PR has a hard cap of 300 net lines; one that would pass it stops
