@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"slices"
 	"strings"
 	"testing"
@@ -1838,5 +1839,822 @@ func TestNewGoalGenerationSettlement(t *testing.T) {
 			t.Fatalf("after Stop/Resume + Goal 3 wake exhaustion: NewGoal=%v Finished=%v, want (true, false)",
 				st.Project.NewGoal, st.Project.Finished)
 		}
+	})
+}
+
+type legacyUpgradeWorld struct {
+	*restartWorld
+	runs []hc.RunParams
+}
+
+func newLegacyUpgradeWorld(t *testing.T) *legacyUpgradeWorld {
+	t.Helper()
+	w := newRestartWorld(t, "Goal 1: bootstrap")
+	lw := &legacyUpgradeWorld{restartWorld: w}
+	prev := w.srv.OnRun
+	w.srv.OnRun = func(term hc.Terminal, p hc.RunParams) {
+		lw.runs = append(lw.runs, p)
+		if prev != nil {
+			prev(term, p)
+		}
+	}
+	return lw
+}
+
+// writeLegacyStateFixture writes a literal pre-generation state.json (verifying
+// that rawJSON has no generation or startup keys and decodes strictly into
+// flow.State) alongside matching log.jsonl entries 1..Seq.
+func writeLegacyStateFixture(t *testing.T, statePath, logPath, projectID, rawJSON string) {
+	t.Helper()
+	for _, forbidden := range []string{"goal_gen", "goal_cmd_gen", "new_goal_startup"} {
+		if strings.Contains(rawJSON, forbidden) {
+			t.Fatalf("legacy state.json fixture must not contain %q:\n%s", forbidden, rawJSON)
+		}
+	}
+	var strict flow.State
+	if err := decodeStrict([]byte(rawJSON), &strict); err != nil {
+		t.Fatalf("legacy state.json fixture failed strict decode against flow.State: %v\n%s", err, rawJSON)
+	}
+	if err := writeAtomic(statePath, []byte(rawJSON+"\n")); err != nil {
+		t.Fatalf("write legacy state.json: %v", err)
+	}
+	_ = os.Remove(logPath)
+	baseAt := time.Date(2026, 11, 20, 9, 30, 0, 0, time.UTC)
+	for seq := int64(1); seq <= strict.Seq; seq++ {
+		if err := AppendLog(logPath, LogLine{
+			Seq:      seq,
+			At:       baseAt.Add(time.Duration(seq) * time.Second),
+			Project:  projectID,
+			By:       "owner",
+			Rule:     "start",
+			Decision: "started",
+			Why:      "legacy fixture",
+		}); err != nil {
+			t.Fatalf("seed legacy log.jsonl seq %d: %v", seq, err)
+		}
+	}
+}
+
+// TestLegacyPendingGoalUpgrade covers PR #853 round 4 (Codex r3 Findings 1 & 2;
+// state-table rows S11a–S13c):
+//   - Loading a legacy state.json with NewGoal==false leaves the state unchanged
+//     (GoalGen==0, no synthesized new_goal wake).
+//   - Loading a legacy state.json with NewGoal==true and GoalGen==0 normalises
+//     GoalGen to a nonzero generation, drops any unversioned held new_goal wake,
+//     preserves unrelated held wakes, and queues the persisted current goal as a
+//     generation-tagged new_goal wake; repeated loads (before or after SaveState,
+//     and once the wake is in flight) do not bump GoalGen again.
+//   - Neither an unversioned wake (GoalGen==0) nor a zero project generation
+//     (Project.GoalGen==0) is ever settlement evidence.
+//   - Codex Repro 1: a legacy state with Goal 3 persisted and an unversioned Goal 2
+//     new_goal wake (held or already in flight) never lets Goal 2 settle Goal 3;
+//     it delivers Goal 3 and settles only on Goal 3's confirmed wake or a qualifying command.
+//   - Codex Repro 2: a legacy state with new_goal:true and empty wake lists
+//     (reopened without a live coordinator) upgrades to a nonzero generation with a
+//     generation-tagged new_goal wake, a same-goal Start also ends with a nonzero
+//     generation, and the project settles only on the new wake's confirmed delivery
+//     or a qualifying coordinator command.
+func TestLegacyPendingGoalUpgrade(t *testing.T) {
+	t.Parallel()
+
+	const legacyMergedTaskJSON = `{
+      "id": "T1",
+      "title": "feat: initial legacy task",
+      "brief": "Add demo.go.",
+      "outcomes": [{"text": "demo exists", "proved_by": "manual: demo.go"}],
+      "for_whom": "owner",
+      "if_skipped": "demo missing",
+      "smallest": "one file",
+      "not_doing": "extra commands",
+      "estimate_lines": 50,
+      "done": {"merged_commit": "m1"},
+      "last_row": "N1",
+      "attempts": []
+    }`
+
+	const legacyParkedTaskJSON = `{
+      "id": "T1",
+      "title": "feat: open legacy task",
+      "brief": "Add demo.go.",
+      "outcomes": [{"text": "demo exists", "proved_by": "manual: demo.go"}],
+      "for_whom": "owner",
+      "if_skipped": "demo missing",
+      "smallest": "one file",
+      "not_doing": "extra commands",
+      "estimate_lines": 50,
+      "parked": true,
+      "attempts": []
+    }`
+
+	t.Run("load_state_normalises_pending_legacy_goal_keeps_non_pending_unchanged_and_is_idempotent", func(t *testing.T) {
+		t.Parallel()
+
+		t.Run("legacy_new_goal_false_loads_unchanged", func(t *testing.T) {
+			t.Parallel()
+			paths := Paths{DataDir: t.TempDir()}
+
+			runningPath := paths.State("proj-legacy-running")
+			runningJSON := `{
+  "seq": 3,
+  "project": {
+    "id": "proj-legacy-running",
+    "folder": "/tmp/legacy-running",
+    "repo_url": "https://github.com/example/demo",
+    "goal": "Goal 1: steady legacy run",
+    "started": true,
+    "wakes": [
+      {
+        "key": "worker_failed",
+        "task": "T1",
+        "why": "N5: worker exited",
+        "facts": "title \"feat: open legacy task\"",
+        "at": "2026-11-20T09:50:00Z"
+      }
+    ]
+  },
+  "settings": {
+    "review_rounds": 2,
+    "max_rounds": 5,
+    "plan_review_rounds": 0,
+    "idle_grace_seconds": 20,
+    "max_running": 2
+  },
+  "tasks": [` + legacyParkedTaskJSON + `]
+}`
+			writeLegacyStateFixture(t, runningPath, paths.Log("proj-legacy-running"), "proj-legacy-running", runningJSON)
+
+			gotRunning, err := LoadState(runningPath)
+			if err != nil {
+				t.Fatalf("LoadState(running): %v", err)
+			}
+			wantSettings := flow.DefaultSettings()
+			wantSettings.ReviewRounds, wantSettings.MaxRounds, wantSettings.PlanReviewRounds, wantSettings.IdleGraceSeconds, wantSettings.MaxRunning = 2, 5, 0, 20, 2
+			wantRunning := flow.State{
+				Seq: 3,
+				Project: flow.Project{
+					ID:      "proj-legacy-running",
+					Folder:  "/tmp/legacy-running",
+					RepoURL: "https://github.com/example/demo",
+					Goal:    "Goal 1: steady legacy run",
+					Started: true,
+					Wakes: []flow.Wake{{
+						Key:   "worker_failed",
+						Task:  "T1",
+						Why:   "N5: worker exited",
+						Facts: `title "feat: open legacy task"`,
+						At:    time.Date(2026, 11, 20, 9, 50, 0, 0, time.UTC),
+					}},
+				},
+				Settings: wantSettings,
+				Tasks: []flow.Task{{
+					ID:            "T1",
+					Title:         "feat: open legacy task",
+					Brief:         "Add demo.go.",
+					Outcomes:      []flow.Outcome{{Text: "demo exists", ProvedBy: "manual: demo.go"}},
+					ForWhom:       "owner",
+					IfSkipped:     "demo missing",
+					Smallest:      "one file",
+					NotDoing:      "extra commands",
+					EstimateLines: 50,
+					Parked:        true,
+					Attempts:      []flow.Attempt{},
+				}},
+			}
+			if !reflect.DeepEqual(gotRunning, wantRunning) {
+				t.Fatalf("legacy NewGoal=false running state mutated on load:\n got: %+v\nwant: %+v", gotRunning, wantRunning)
+			}
+
+			finishedPath := paths.State("proj-legacy-finished")
+			finishedJSON := `{
+  "seq": 6,
+  "project": {
+    "id": "proj-legacy-finished",
+    "folder": "/tmp/legacy-finished",
+    "goal": "Goal 1: completed legacy run",
+    "finished": true,
+    "wait_key": "J4:Finished: all tasks ended"
+  },
+  "settings": {
+    "plan_review_rounds": 0,
+    "max_running": 2
+  },
+  "tasks": [` + legacyMergedTaskJSON + `]
+}`
+			writeLegacyStateFixture(t, finishedPath, paths.Log("proj-legacy-finished"), "proj-legacy-finished", finishedJSON)
+			gotFinished, err := LoadState(finishedPath)
+			if err != nil {
+				t.Fatalf("LoadState(finished): %v", err)
+			}
+			if gotFinished.Project.NewGoal || gotFinished.Project.GoalGen != 0 || gotFinished.Project.GoalCmdGen != 0 || !gotFinished.Project.Finished || len(gotFinished.Project.Wakes) != 0 {
+				t.Fatalf("legacy finished NewGoal=false state mutated on load: %+v", gotFinished.Project)
+			}
+		})
+
+		t.Run("legacy_new_goal_true_upgrades_and_repeated_loads_do_not_rebump", func(t *testing.T) {
+			t.Parallel()
+			paths := Paths{DataDir: t.TempDir()}
+
+			statePath := paths.State("proj-legacy-pending")
+			legacyPendingJSON := `{
+  "seq": 5,
+  "project": {
+    "id": "proj-legacy-pending",
+    "folder": "/tmp/legacy-pending",
+    "goal": "Goal 3: upgraded current goal",
+    "started": true,
+    "new_goal": true,
+    "new_goal_tasks": 1,
+    "wakes": [
+      {
+        "key": "new_goal",
+        "why": "owner gave a new goal",
+        "facts": "goal: Goal 2: stale unversioned wake",
+        "at": "2026-11-20T09:58:00Z",
+        "retried": true
+      },
+      {
+        "key": "worker_note",
+        "task": "T1",
+        "why": "N8: worker note",
+        "facts": "preserve unrelated wake",
+        "at": "2026-11-20T09:57:00Z"
+      }
+    ]
+  },
+  "settings": {
+    "plan_review_rounds": 0,
+    "max_running": 2
+  },
+  "tasks": [` + legacyMergedTaskJSON + `]
+}`
+			writeLegacyStateFixture(t, statePath, paths.Log("proj-legacy-pending"), "proj-legacy-pending", legacyPendingJSON)
+
+			st1, err := LoadState(statePath)
+			if err != nil {
+				t.Fatalf("LoadState #1: %v", err)
+			}
+			if !st1.Project.NewGoal || st1.Project.GoalGen == 0 {
+				t.Fatalf("LoadState #1: NewGoal=%v GoalGen=%d, want NewGoal=true and GoalGen>0", st1.Project.NewGoal, st1.Project.GoalGen)
+			}
+			var newGoalWakes []flow.Wake
+			keptUnrelated := false
+			for _, w := range st1.Project.Wakes {
+				if w.Task == "T1" && w.Key == "worker_note" {
+					keptUnrelated = true
+				}
+				if w.Task == "" && w.Key == "new_goal" {
+					newGoalWakes = append(newGoalWakes, w)
+				}
+			}
+			if !keptUnrelated {
+				t.Errorf("LoadState dropped unrelated T1:worker_note wake: %+v", st1.Project.Wakes)
+			}
+			if len(newGoalWakes) != 1 {
+				t.Fatalf("LoadState project new_goal wakes = %+v, want 1 generation-tagged wake", newGoalWakes)
+			}
+			ug := newGoalWakes[0]
+			if ug.GoalGen != st1.Project.GoalGen || ug.GoalGen == 0 {
+				t.Errorf("upgraded new_goal wake GoalGen = %d, want Project.GoalGen (%d > 0)", ug.GoalGen, st1.Project.GoalGen)
+			}
+			if ug.Retried {
+				t.Errorf("upgraded new_goal wake kept Retried=true from stale legacy wake: %+v", ug)
+			}
+			if !strings.Contains(ug.Facts, "Goal 3: upgraded current goal") || strings.Contains(ug.Facts, "Goal 2") {
+				t.Errorf("upgraded new_goal wake Facts = %q, want persisted Goal 3 without stale Goal 2", ug.Facts)
+			}
+
+			// Repeated load of the raw legacy file returns the same initial generation.
+			st2, err := LoadState(statePath)
+			if err != nil {
+				t.Fatalf("LoadState #2: %v", err)
+			}
+			if st2.Project.GoalGen != st1.Project.GoalGen {
+				t.Fatalf("repeated LoadState before save changed GoalGen: got %d, want %d", st2.Project.GoalGen, st1.Project.GoalGen)
+			}
+
+			// Once saved with its nonzero generation, repeated loads must NOT bump GoalGen again
+			// or re-synthesize a held new_goal wake after J12 moves the wake in flight.
+			if err := SaveState(statePath, st1); err != nil {
+				t.Fatalf("SaveState(st1): %v", err)
+			}
+			for i := range 2 {
+				reloaded, err := LoadState(statePath)
+				if err != nil {
+					t.Fatalf("LoadState after save #%d: %v", i+1, err)
+				}
+				if reloaded.Project.GoalGen != st1.Project.GoalGen {
+					t.Fatalf("LoadState after save #%d bumped GoalGen from %d to %d", i+1, st1.Project.GoalGen, reloaded.Project.GoalGen)
+				}
+			}
+
+			inFlightState := st1
+			inFlightState.Project.CoordWakesInFlight = []flow.Wake{ug}
+			inFlightState.Project.Wakes = slices.DeleteFunc(slices.Clone(st1.Project.Wakes), func(w flow.Wake) bool {
+				return w.Task == "" && w.Key == "new_goal"
+			})
+			if err := SaveState(statePath, inFlightState); err != nil {
+				t.Fatalf("SaveState(inFlightState): %v", err)
+			}
+			afterDeliver, err := LoadState(statePath)
+			if err != nil {
+				t.Fatalf("LoadState(inFlightState): %v", err)
+			}
+			if afterDeliver.Project.GoalGen != st1.Project.GoalGen || flow.HasNewGoalWake(afterDeliver.Project.Wakes) {
+				t.Fatalf("LoadState on already-upgraded state with in-flight wake mutated GoalGen=%d or re-queued held wake=%+v (want GoalGen=%d, no held new_goal)",
+					afterDeliver.Project.GoalGen, afterDeliver.Project.Wakes, st1.Project.GoalGen)
+			}
+		})
+	})
+
+	t.Run("unversioned_wake_and_zero_generation_never_settle_new_goal", func(t *testing.T) {
+		t.Parallel()
+		unversioned := []flow.Wake{{Key: "new_goal", Why: "owner gave a new goal", Facts: "goal: Goal 2", GoalGen: 0}}
+		if flow.HasNewGoalWakeGen(unversioned, 0) {
+			t.Errorf("HasNewGoalWakeGen(unversioned GoalGen=0, gen=0) = true, want false")
+		}
+		if flow.HasNewGoalWakeGen(unversioned, 1) {
+			t.Errorf("HasNewGoalWakeGen(unversioned GoalGen=0, gen=1) = true, want false")
+		}
+
+		endedTasks := []flow.Task{{ID: "T1", Title: "feat: done", Done: &flow.Merged{MergedCommit: "m1"}}}
+		zeroGenProj := flow.Project{
+			ID:           "proj-zero",
+			Goal:         "Goal 2",
+			Started:      true,
+			NewGoal:      true,
+			NewGoalTasks: 1,
+			GoalGen:      0,
+			GoalCmdGen:   0,
+			Run:          &flow.RunRecord{Role: flow.RoleCoordinator, State: flow.PhaseIdle, Status: "idle", Turn: 1},
+		}
+		if flow.NewGoalSettled(zeroGenProj, endedTasks, true) {
+			t.Errorf("NewGoalSettled with GoalGen=0 and confirmedWake=true = true, want false")
+		}
+		if flow.NewGoalSettled(zeroGenProj, endedTasks, false) {
+			t.Errorf("NewGoalSettled with GoalGen=0 and GoalCmdGen=0 = true, want false")
+		}
+	})
+
+	t.Run("codex_repro_1_legacy_goal_2_wake_cannot_settle_goal_3_after_upgrade", func(t *testing.T) {
+		t.Parallel()
+
+		t.Run("held_unversioned_goal_2_wake_dropped_and_project_settles_only_after_goal_3_confirmed", func(t *testing.T) {
+			t.Parallel()
+			w := newLegacyUpgradeWorld(t)
+			w.pass() // J7 launches live coordinator in hctest
+			pre := w.state()
+			coord1 := pre.Project.RunID
+			w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+
+			// Simulate daemon upgrade onto a literal legacy state.json written by origin/main:
+			// Goal 3 is persisted on Project, while Wakes still holds Goal 2's unversioned new_goal wake.
+			w.restart()
+			legacyJSON := fmt.Sprintf(`{
+  "seq": 4,
+  "project": {
+    "id": %q,
+    "folder": %q,
+    "repo_url": "https://github.com/example/demo",
+    "goal": "Goal 3: final target after upgrade",
+    "started": true,
+    "run_id": %q,
+    "run_token_sha256": %q,
+    "run": {
+      "ID": %q,
+      "Address": %q,
+      "Role": "coordinator",
+      "CLI": "claude",
+      "Model": %q,
+      "State": "working",
+      "Status": "working",
+      "CreatedMS": %d,
+      "Turn": 0,
+      "StartedAt": "2026-11-20T09:59:00Z",
+      "StatusSince": "2026-11-20T09:59:30Z",
+      "LastActivity": "2026-11-20T09:59:50Z",
+      "StatusReported": true
+    },
+    "acts": [
+      {"key": "coordinator", "result": "done", "at": "2026-11-20T09:40:00Z"}
+    ],
+    "new_goal": true,
+    "new_goal_tasks": 1,
+    "wakes": [
+      {
+        "key": "new_goal",
+        "why": "owner gave a new goal",
+        "facts": "goal: Goal 2: stale legacy held wake",
+        "at": "2026-11-20T09:59:10Z"
+      },
+      {
+        "key": "worker_note",
+        "task": "T1",
+        "why": "N8: note",
+        "facts": "keep unrelated wake across upgrade",
+        "at": "2026-11-20T09:59:05Z"
+      }
+    ]
+  },
+  "settings": {
+    "plan_review_rounds": 0,
+    "idle_grace_seconds": 20,
+    "max_running": 2
+  },
+  "tasks": [%s]
+}`, w.id, w.repo, coord1, pre.Project.RunTokenHash, pre.Project.Run.ID, coord1, pre.Project.Run.Model, pre.Project.Run.CreatedMS, legacyMergedTaskJSON)
+			writeLegacyStateFixture(t, w.paths.State(w.id), w.paths.Log(w.id), w.id, legacyJSON)
+
+			// Coordinator finishes its pre-existing turn and goes idle -> J12 delivers held wakes.
+			w.waitIdle(coord1)
+			send1 := lastSendTo(t, w.srv.Requests(), coord1)
+			if !strings.Contains(send1, "Goal 3: final target after upgrade") || strings.Contains(send1, "Goal 2") {
+				t.Errorf("J12 delivered stale legacy Goal 2 wake instead of upgraded Goal 3:\n%s", send1)
+				w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+				w.srv.SetScreen(coord1, completedWakeScreen("claude", send1, "Handled stale Goal 2."))
+				w.waitIdle(coord1)
+				if st := w.state(); !st.Project.NewGoal || st.Project.GoalGen == 0 {
+					t.Fatalf("confirmed legacy Goal 2 wake settled project goal %q with GoalGen=%d (NewGoal=%v)",
+						st.Project.Goal, st.Project.GoalGen, st.Project.NewGoal)
+				}
+				return
+			}
+			if !strings.Contains(send1, "keep unrelated wake across upgrade") {
+				t.Errorf("upgraded wake batch lost unrelated T1:worker_note wake:\n%s", send1)
+			}
+			if st := w.state(); st.Project.GoalGen == 0 {
+				t.Fatalf("Project.GoalGen = 0 after upgrading legacy pending goal, want > 0")
+			}
+
+			// Unconfirmed delivery (#1 Esc-interrupted) must NOT settle Goal 3 or run J4.
+			w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+			w.srv.SetScreen(coord1, formatPromptEcho("❯", send1)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+			w.waitIdle(coord1) // J12 retries Goal 3 wake (#2)
+			if st := w.state(); !st.Project.NewGoal || st.Project.Finished || len(logRules(t, w.paths.Log(w.id), "J4")) != 0 {
+				t.Fatalf("interrupted upgraded Goal 3 wake settled early: NewGoal=%v Finished=%v j4=%+v",
+					st.Project.NewGoal, st.Project.Finished, logRules(t, w.paths.Log(w.id), "J4"))
+			}
+
+			// Confirmed delivery (#2) of the upgraded Goal 3 wake clears NewGoal and finishes via J4.
+			send2 := lastSendTo(t, w.srv.Requests(), coord1)
+			w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+			w.srv.SetScreen(coord1, completedWakeScreen("claude", send2, "Goal 3 is already satisfied by T1."))
+			w.waitIdle(coord1)
+
+			driveRestartWorldJ4Finish(t, w.restartWorld)
+			st, _ := assertLogInvariants(t, w.paths.State(w.id), w.paths.Log(w.id))
+			if !st.Project.Finished || st.Project.NewGoal || st.Project.GoalGen == 0 || st.Project.RunID != "" {
+				t.Fatalf("final upgraded Goal 3 state = (Finished=%v, NewGoal=%v, GoalGen=%d, RunID=%q), want (true, false, >0, \"\")",
+					st.Project.Finished, st.Project.NewGoal, st.Project.GoalGen, st.Project.RunID)
+			}
+		})
+
+		t.Run("in_flight_unversioned_goal_2_wake_cannot_settle_goal_3_after_upgrade", func(t *testing.T) {
+			t.Parallel()
+			w := newLegacyUpgradeWorld(t)
+			w.pass() // J7 launches live coordinator in hctest
+			pre := w.state()
+			coord1 := pre.Project.RunID
+
+			sentGoal2 := "Wake: #4 1 task wake(s) wait on you.\n" +
+				"- project: owner gave a new goal. goal: Goal 2: legacy in-flight wake. (wake new_goal at 2026-11-20T09:59:10Z)\n" +
+				"Settings that differ from their default: max_running=2, plan_review_rounds=0."
+			w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+
+			w.restart()
+			legacyInFlightJSON := fmt.Sprintf(`{
+  "seq": 4,
+  "project": {
+    "id": %q,
+    "folder": %q,
+    "goal": "Goal 3: supersedes in-flight legacy Goal 2",
+    "started": true,
+    "run_id": %q,
+    "run_token_sha256": %q,
+    "run": {
+      "ID": %q,
+      "Address": %q,
+      "Role": "coordinator",
+      "CLI": "claude",
+      "Model": %q,
+      "State": "working",
+      "Status": "working",
+      "CreatedMS": %d,
+      "Turn": 0,
+      "StartedAt": "2026-11-20T09:59:00Z",
+      "StatusSince": "2026-11-20T09:59:20Z",
+      "LastActivity": "2026-11-20T09:59:40Z",
+      "LastSentAt": "2026-11-20T09:59:10Z",
+      "StatusReported": true
+    },
+    "acts": [
+      {"key": "coordinator", "result": "done", "at": "2026-11-20T09:40:00Z"}
+    ],
+    "new_goal": true,
+    "new_goal_tasks": 1,
+    "coord_wake_at": "2026-11-20T09:59:10Z",
+    "coord_last_wake_at": "2026-11-20T09:59:10Z",
+    "coord_wake_seq": 4,
+    "coord_wake_turn": 0,
+    "coord_wakes_in_flight": [
+      {
+        "key": "new_goal",
+        "why": "owner gave a new goal",
+        "facts": "goal: Goal 2: legacy in-flight wake",
+        "at": "2026-11-20T09:59:10Z"
+      }
+    ]
+  },
+  "settings": {
+    "plan_review_rounds": 0,
+    "idle_grace_seconds": 20,
+    "max_running": 2
+  },
+  "tasks": [%s]
+}`, w.id, w.repo, coord1, pre.Project.RunTokenHash, pre.Project.Run.ID, coord1, pre.Project.Run.Model, pre.Project.Run.CreatedMS, legacyMergedTaskJSON)
+			writeLegacyStateFixture(t, w.paths.State(w.id), w.paths.Log(w.id), w.id, legacyInFlightJSON)
+
+			// Coordinator completes the in-flight unversioned Goal 2 wake turn and goes idle:
+			// must NOT settle Goal 3 or run J4; instead J12 must deliver upgraded Goal 3.
+			w.srv.SetScreen(coord1, completedWakeScreen("claude", sentGoal2, "Goal 2 handled."))
+			w.waitIdle(coord1)
+
+			stMid := w.state()
+			if !stMid.Project.NewGoal || stMid.Project.Finished || stMid.Project.GoalGen == 0 || len(logRules(t, w.paths.Log(w.id), "J4")) != 0 {
+				t.Fatalf("confirmed unversioned in-flight Goal 2 wake settled Goal 3: NewGoal=%v Finished=%v GoalGen=%d j4=%+v",
+					stMid.Project.NewGoal, stMid.Project.Finished, stMid.Project.GoalGen, logRules(t, w.paths.Log(w.id), "J4"))
+			}
+
+			sendGoal3 := lastSendTo(t, w.srv.Requests(), coord1)
+			if !strings.Contains(sendGoal3, "Goal 3: supersedes in-flight legacy Goal 2") {
+				t.Fatalf("expected J12 to deliver upgraded Goal 3 wake after in-flight Goal 2 finished, got:\n%s", sendGoal3)
+			}
+			w.srv.SetStatus(coord1, &hc.Status{App: "claude-code", State: "working"})
+			w.srv.SetScreen(coord1, completedWakeScreen("claude", sendGoal3, "Goal 3 confirmed."))
+			w.waitIdle(coord1)
+
+			driveRestartWorldJ4Finish(t, w.restartWorld)
+			stFinal, _ := assertLogInvariants(t, w.paths.State(w.id), w.paths.Log(w.id))
+			if !stFinal.Project.Finished || stFinal.Project.NewGoal || stFinal.Project.GoalGen == 0 {
+				t.Fatalf("final state after Goal 3 confirmation = (Finished=%v, NewGoal=%v, GoalGen=%d), want (true, false, >0)",
+					stFinal.Project.Finished, stFinal.Project.NewGoal, stFinal.Project.GoalGen)
+			}
+		})
+	})
+
+	t.Run("codex_repro_2_legacy_pending_goal_with_empty_wakes_and_same_goal_start", func(t *testing.T) {
+		t.Parallel()
+
+		reopenedLegacyJSON := func(id, repo, goal, taskJSON string) string {
+			return fmt.Sprintf(`{
+  "seq": 3,
+  "project": {
+    "id": %q,
+    "folder": %q,
+    "repo_url": "https://github.com/example/demo",
+    "goal": %q,
+    "started": true,
+    "run": {
+      "ID": "legacy-coord-1",
+      "Address": "coord-old",
+      "Role": "coordinator",
+      "CLI": "claude",
+      "Model": "opus",
+      "State": "ended",
+      "Result": "stopped",
+      "Turn": 2,
+      "StartedAt": "2026-11-20T09:10:00Z",
+      "EndedAt": "2026-11-20T09:35:00Z",
+      "StatusReported": true
+    },
+    "new_goal": true,
+    "new_goal_tasks": 1
+  },
+  "settings": {
+    "plan_review_rounds": 0,
+    "idle_grace_seconds": 20,
+    "max_running": 2
+  },
+  "tasks": [%s]
+}`, id, repo, goal, taskJSON)
+		}
+
+		t.Run("reopened_legacy_project_with_empty_wakes_synthesizes_wake_and_settles_on_confirmed_delivery", func(t *testing.T) {
+			t.Parallel()
+			w := newLegacyUpgradeWorld(t)
+			w.restart()
+			const goal = "Goal 2: reopened legacy goal with empty wakes"
+			writeLegacyStateFixture(t, w.paths.State(w.id), w.paths.Log(w.id), w.id, reopenedLegacyJSON(w.id, w.repo, goal, legacyMergedTaskJSON))
+
+			w.pass() // J7 starts fresh coord2 with handoff prompt
+			stAfterJ7 := w.state()
+			coord2 := stAfterJ7.Project.RunID
+			if coord2 == "" {
+				t.Fatalf("J7 did not start fresh coordinator on legacy reopened project")
+			}
+			if stAfterJ7.Project.GoalGen == 0 || !flow.HasNewGoalWakeGen(stAfterJ7.Project.Wakes, stAfterJ7.Project.GoalGen) {
+				t.Fatalf("legacy reopened project after J7 lacks generation-tagged new_goal wake: GoalGen=%d NewGoal=%v Wakes=%+v InFlight=%+v",
+					stAfterJ7.Project.GoalGen, stAfterJ7.Project.NewGoal, stAfterJ7.Project.Wakes, stAfterJ7.Project.CoordWakesInFlight)
+			}
+
+			// Completing J7's startup handoff (plus a follow-up prompt) must NOT settle NewGoal by itself;
+			// going idle must deliver the synthesized generation-tagged new_goal wake via J12.
+			startupPrompt := lastCoordStartupPrompt(t, w.runs)
+			w.srv.SetStatus(coord2, &hc.Status{App: "claude-code", State: "working"})
+			w.srv.SetScreen(coord2, formatPromptEcho("❯", startupPrompt)+
+				"\n⏺ Ready after handoff.\n\n❯ Any open workers?\n\n⏺ None.\n\n✻ Cogitated for 3s · done 4:59 PM\n"+
+				"────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────\n")
+			w.waitIdle(coord2)
+			if st := w.state(); !st.Project.NewGoal || st.Project.Finished || len(logRules(t, w.paths.Log(w.id), "J4")) != 0 {
+				t.Fatalf("startup handoff reply settled legacy NewGoal before wake confirmation: NewGoal=%v Finished=%v j4=%+v",
+					st.Project.NewGoal, st.Project.Finished, logRules(t, w.paths.Log(w.id), "J4"))
+			}
+
+			sends := sendsTo(t, w.srv.Requests(), coord2)
+			if len(sends) != 1 || !strings.Contains(sends[0], goal) {
+				t.Fatalf("sends to coord2 after startup idle = %q, want 1 synthesized J12 new_goal wake for %q", sends, goal)
+			}
+
+			// Esc-interrupting delivery #1 keeps NewGoal true; confirming retry #2 settles NewGoal and finishes through J4.
+			w.srv.SetStatus(coord2, &hc.Status{App: "claude-code", State: "working"})
+			w.srv.SetScreen(coord2, formatPromptEcho("❯", sends[0])+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+			w.waitIdle(coord2)
+			if st := w.state(); !st.Project.NewGoal || st.Project.Finished {
+				t.Fatalf("interrupted wake settled legacy NewGoal: NewGoal=%v Finished=%v", st.Project.NewGoal, st.Project.Finished)
+			}
+
+			sendRetry := lastSendTo(t, w.srv.Requests(), coord2)
+			w.srv.SetStatus(coord2, &hc.Status{App: "claude-code", State: "working"})
+			w.srv.SetScreen(coord2, completedWakeScreen("claude", sendRetry, "Goal 2 is already covered by T1."))
+			w.waitIdle(coord2)
+
+			driveRestartWorldJ4Finish(t, w.restartWorld)
+			stFinal, _ := assertLogInvariants(t, w.paths.State(w.id), w.paths.Log(w.id))
+			if !stFinal.Project.Finished || stFinal.Project.NewGoal || stFinal.Project.GoalGen == 0 || stFinal.Project.RunID != "" {
+				t.Fatalf("final reopened legacy state = (Finished=%v, NewGoal=%v, GoalGen=%d, RunID=%q), want (true, false, >0, \"\")",
+					stFinal.Project.Finished, stFinal.Project.NewGoal, stFinal.Project.GoalGen, stFinal.Project.RunID)
+			}
+		})
+
+		t.Run("legacy_pending_goal_settles_on_qualifying_command_when_wake_replies_interrupted", func(t *testing.T) {
+			t.Parallel()
+			w := newLegacyUpgradeWorld(t)
+			w.restart()
+			const goal = "Goal 2: drop T1 on upgraded legacy project"
+			writeLegacyStateFixture(t, w.paths.State(w.id), w.paths.Log(w.id), w.id, reopenedLegacyJSON(w.id, w.repo, goal, legacyParkedTaskJSON))
+
+			w.pass() // J7 starts coord2
+			coord2 := w.state().Project.RunID
+			if coord2 == "" || w.state().Project.GoalGen == 0 {
+				t.Fatalf("after J7 on legacy open-task project: coord2=%q GoalGen=%d, want live coord2 and GoalGen>0", coord2, w.state().Project.GoalGen)
+			}
+
+			startupPrompt := lastCoordStartupPrompt(t, w.runs)
+			w.srv.SetStatus(coord2, &hc.Status{App: "claude-code", State: "working"})
+			w.srv.SetScreen(coord2, completedWakeScreen("claude", startupPrompt, "Startup complete."))
+			w.waitIdle(coord2) // J12 delivers synthesized new_goal wake (#1)
+			send1 := lastSendTo(t, w.srv.Requests(), coord2)
+
+			// Coordinator runs qualifying command `task drop T1` in the upgraded generation,
+			// while both wake replies (#1 and J12 retry #2) are Esc-interrupted.
+			w.srv.SetStatus(coord2, &hc.Status{App: "claude-code", State: "working"})
+			if err := w.eng.Report(w.coordTok, "task", json.RawMessage(`{"action":"drop","task":"T1","why":"dropped under upgraded Goal 2"}`)); err != nil {
+				t.Fatalf("task drop T1: %v", err)
+			}
+			w.now = w.now.Add(5 * time.Second)
+			w.pass() // N1 cleans up T1 while coord2 is still working (J4 active-turn & in-flight wake guards hold)
+			if st := w.state(); st.Project.Finished || len(logRules(t, w.paths.Log(w.id), "J4")) != 0 {
+				t.Fatalf("J4 fired mid-turn before coordinator went idle and wakes drained: Finished=%v j4=%+v",
+					st.Project.Finished, logRules(t, w.paths.Log(w.id), "J4"))
+			}
+
+			w.srv.SetScreen(coord2, formatPromptEcho("❯", send1)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+			w.waitIdle(coord2) // J12 retries unconfirmed wake (#2)
+			if st := w.state(); st.Project.Finished || len(logRules(t, w.paths.Log(w.id), "J4")) != 0 {
+				t.Fatalf("J4 fired while retried wake was still pending: Finished=%v j4=%+v",
+					st.Project.Finished, logRules(t, w.paths.Log(w.id), "J4"))
+			}
+
+			send2 := lastSendTo(t, w.srv.Requests(), coord2)
+			w.srv.SetStatus(coord2, &hc.Status{App: "claude-code", State: "working"})
+			w.srv.SetScreen(coord2, formatPromptEcho("❯", send2)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+			w.waitIdle(coord2) // wake retries exhaust; GoalCmdGen == GoalGen > 0 settles NewGoal
+
+			driveRestartWorldJ4Finish(t, w.restartWorld)
+			stFinal, _ := assertLogInvariants(t, w.paths.State(w.id), w.paths.Log(w.id))
+			if !stFinal.Project.Finished || stFinal.Project.NewGoal || stFinal.Project.GoalGen == 0 {
+				t.Fatalf("after qualifying command on upgraded legacy goal: Finished=%v NewGoal=%v GoalGen=%d, want (true, false, >0)",
+					stFinal.Project.Finished, stFinal.Project.NewGoal, stFinal.Project.GoalGen)
+			}
+		})
+
+		t.Run("same_goal_start_on_legacy_pending_goal_ends_with_nonzero_generation_and_settles_only_when_handled", func(t *testing.T) {
+			t.Parallel()
+
+			t.Run("settled_by_confirmed_wake", func(t *testing.T) {
+				t.Parallel()
+				w := newLegacyUpgradeWorld(t)
+				w.restart()
+				const goal = "Goal 2: same-goal start on legacy pending goal"
+				writeLegacyStateFixture(t, w.paths.State(w.id), w.paths.Log(w.id), w.id, reopenedLegacyJSON(w.id, w.repo, goal, legacyMergedTaskJSON))
+
+				if err := w.eng.Start(w.repo, goal, 2); err != nil {
+					t.Fatalf("Start(same legacy pending goal): %v", err)
+				}
+				st1 := w.state()
+				if st1.Project.GoalGen == 0 || !st1.Project.NewGoal || !flow.HasNewGoalWakeGen(st1.Project.Wakes, st1.Project.GoalGen) {
+					t.Fatalf("after same-goal Start on legacy pending goal: GoalGen=%d NewGoal=%v Wakes=%+v, want GoalGen>0, NewGoal=true, generation-tagged new_goal wake",
+						st1.Project.GoalGen, st1.Project.NewGoal, st1.Project.Wakes)
+				}
+
+				// Repeating same-goal Start once already upgraded must not bump GoalGen again.
+				if err := w.eng.Start(w.repo, goal, 2); err != nil {
+					t.Fatalf("Start(same goal #2): %v", err)
+				}
+				if st2 := w.state(); st2.Project.GoalGen != st1.Project.GoalGen {
+					t.Fatalf("second same-goal Start bumped GoalGen from %d to %d", st1.Project.GoalGen, st2.Project.GoalGen)
+				}
+
+				w.now = w.now.Add(15 * time.Second)
+				w.pass() // J7 starts coord2
+				coord2 := w.state().Project.RunID
+				startupPrompt := lastCoordStartupPrompt(t, w.runs)
+				w.srv.SetStatus(coord2, &hc.Status{App: "claude-code", State: "working"})
+				w.srv.SetScreen(coord2, completedWakeScreen("claude", startupPrompt, "Ready."))
+				w.waitIdle(coord2) // J12 delivers new_goal wake
+				if !w.state().Project.NewGoal {
+					t.Fatalf("NewGoal cleared before wake confirmation after same-goal Start")
+				}
+
+				sentWake := lastSendTo(t, w.srv.Requests(), coord2)
+				w.srv.SetStatus(coord2, &hc.Status{App: "claude-code", State: "working"})
+				w.srv.SetScreen(coord2, completedWakeScreen("claude", sentWake, "Confirmed Goal 2."))
+				w.waitIdle(coord2)
+
+				driveRestartWorldJ4Finish(t, w.restartWorld)
+				stFinal, _ := assertLogInvariants(t, w.paths.State(w.id), w.paths.Log(w.id))
+				if !stFinal.Project.Finished || stFinal.Project.NewGoal || stFinal.Project.GoalGen != st1.Project.GoalGen {
+					t.Fatalf("final state after same-goal Start wake confirmation: Finished=%v NewGoal=%v GoalGen=%d (want %d)",
+						stFinal.Project.Finished, stFinal.Project.NewGoal, stFinal.Project.GoalGen, st1.Project.GoalGen)
+				}
+			})
+
+			t.Run("exhausted_wake_stays_unsettled_until_qualifying_command", func(t *testing.T) {
+				t.Parallel()
+				w := newLegacyUpgradeWorld(t)
+				w.restart()
+				const goal = "Goal 2: same-goal start needs command when wake exhausted"
+				writeLegacyStateFixture(t, w.paths.State(w.id), w.paths.Log(w.id), w.id, reopenedLegacyJSON(w.id, w.repo, goal, legacyMergedTaskJSON))
+
+				if err := w.eng.Start(w.repo, goal, 2); err != nil {
+					t.Fatalf("Start(same legacy pending goal): %v", err)
+				}
+				if st := w.state(); st.Project.GoalGen == 0 {
+					t.Fatalf("same-goal Start left GoalGen=0 on legacy pending goal")
+				}
+
+				w.now = w.now.Add(15 * time.Second)
+				w.pass() // J7 starts coord2
+				coord2 := w.state().Project.RunID
+				startupPrompt := lastCoordStartupPrompt(t, w.runs)
+				w.srv.SetStatus(coord2, &hc.Status{App: "claude-code", State: "working"})
+				w.srv.SetScreen(coord2, completedWakeScreen("claude", startupPrompt, "Ready."))
+				w.waitIdle(coord2) // J12 delivers new_goal wake (#1)
+
+				for range 2 {
+					sent := lastSendTo(t, w.srv.Requests(), coord2)
+					w.srv.SetStatus(coord2, &hc.Status{App: "claude-code", State: "working"})
+					w.srv.SetScreen(coord2, formatPromptEcho("❯", sent)+"\n  ⎿ \u00a0Interrupted · What should Claude do instead?\n❯ \n")
+					w.waitIdle(coord2)
+				}
+				w.now = w.now.Add(15 * time.Second)
+				w.pass()
+
+				if st := w.state(); !st.Project.NewGoal || st.Project.Finished || len(logRules(t, w.paths.Log(w.id), "J4")) != 0 {
+					t.Fatalf("exhausted wake settled upgraded legacy goal without command: NewGoal=%v Finished=%v j4=%+v",
+						st.Project.NewGoal, st.Project.Finished, logRules(t, w.paths.Log(w.id), "J4"))
+				}
+
+				// A qualifying coordinator command (`plan amend` adding non-split T2, then dropping T2) settles NewGoal.
+				w.srv.SetStatus(coord2, &hc.Status{App: "claude-code", State: "working"})
+				w.srv.SetScreen(coord2, "working "+w.now.Format(time.RFC3339Nano))
+				w.now = w.now.Add(5 * time.Second)
+				w.pass() // R27 -> PhaseWorking
+				amend := `{"why":"handle Goal 2","tasks":[{"id":"T2","estimate_lines":50,"title":"feat: goal 2 work",` + testPlanJSON + `}]}`
+				if err := w.eng.Report(w.coordTok, "plan amend", []byte(amend)); err != nil {
+					t.Fatalf("plan amend T2: %v", err)
+				}
+				if err := w.eng.Report(w.coordTok, "task", json.RawMessage(`{"action":"drop","task":"T2","why":"no longer needed"}`)); err != nil {
+					t.Fatalf("task drop T2: %v", err)
+				}
+				w.waitIdle(coord2)
+
+				driveRestartWorldJ4Finish(t, w.restartWorld)
+				stFinal, _ := assertLogInvariants(t, w.paths.State(w.id), w.paths.Log(w.id))
+				if !stFinal.Project.Finished || stFinal.Project.NewGoal || stFinal.Project.GoalGen == 0 {
+					t.Fatalf("final state after qualifying command = (Finished=%v, NewGoal=%v, GoalGen=%d), want (true, false, >0)",
+						stFinal.Project.Finished, stFinal.Project.NewGoal, stFinal.Project.GoalGen)
+				}
+			})
+		})
 	})
 }
