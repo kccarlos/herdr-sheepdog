@@ -438,6 +438,88 @@ final class IPadFactoryUITests: XCTestCase {
         XCTAssertEqual(doneFoldLabel, "Done (1)")
     }
 
+    func testAllAgentsShowsEmptyStateWhenOnlyExitedAgentsExist() throws {
+        let agents = #"""
+        [{"pane_id":"p-old","alias":"old","kind":"claude","state":"exited","workspace_label":"webapp"},
+         {"pane_id":"p-stale","alias":"stale","kind":"codex","state":"unknown","workspace_label":"webapp"}]
+        """#
+        let stub = try StubDaemon(.computer(name: "Work Mac", agents: agents, questions: "[]", factory: "[]"))
+        let host = try stub.start()
+        defer { stub.stop() }
+
+        let app = launch(computers: "Work Mac=\(host)")
+        XCTAssertTrue(element(app, "sidebar.empty").waitForExistence(timeout: 15))
+        tapWhenTappable(element(app, "sidebar.allAgents"), "All agents")
+        XCTAssertTrue(
+            element(app, "allAgents.empty").waitForExistence(timeout: 10),
+            "All agents must show its empty state when only exited or unknown agents exist"
+        )
+        XCTAssertTrue(app.staticTexts["No agents running."].exists)
+        XCTAssertFalse(element(app, "allAgents.showAll").exists)
+        XCTAssertFalse(element(app, "allAgents.grid").exists)
+    }
+
+    func testPaneSplitAndSwitchMenusExcludeFactoryCoordinatorAndWorkerPanes() throws {
+        let heads = #"""
+        [{"id":"proj-1","name":"notes","goal":"A notes page with search","state":"running",
+          "counts":{"working":2,"done":3},"folder":"~/code/notes","coordinator_pane":"coord-notes-1"}]
+        """#
+        let agents = #"""
+        [{"pane_id":"p-pay","alias":"payments","kind":"claude","state":"working","workspace_label":"webapp"},
+         {"pane_id":"p-api","alias":"api","kind":"codex","state":"idle","workspace_label":"webapp"},
+         {"pane_id":"p-w8","alias":"worker-t8","kind":"codex","state":"working","workspace_label":"notes",
+          "labels":{"sheepdog.project":"proj-1","sheepdog.role":"worker"}},
+         {"pane_id":"coord-notes-1","alias":"coord-notes","kind":"claude","state":"blocked","workspace_label":"notes"}]
+        """#
+        let coordDialog = #"""
+        {"id":"ap-coord","pane_id":"coord-notes-1","kind":"answer_prompt","agent":"notes",
+         "question":"Allow gh pr list?","command":"gh pr list",
+         "options":[{"index":1,"label":"Yes","default":true},{"index":2,"label":"No"}]}
+        """#
+        let stub = try StubDaemon(.computer(
+            name: "Work Mac", agents: agents, questions: "[\(coordDialog)]",
+            factory: heads, pendingAction: coordDialog
+        ))
+        let host = try stub.start()
+        defer { stub.stop() }
+
+        let app = launch(computers: "Work Mac=\(host)")
+        let paymentsRow = element(app, "sidebar.agent.payments")
+        XCTAssertTrue(paymentsRow.waitForExistence(timeout: 15))
+        tapWhenTappable(paymentsRow, "payments in sidebar")
+        XCTAssertTrue(element(app, "agentScreen.header").waitForExistence(timeout: 10))
+
+        // Split menu must offer ordinary agents and exclude factory worker and coordinator panes.
+        let splitButton = element(app, "pane.split")
+        let apiSplit = app.collectionViews.buttons["api"].firstMatch
+        for _ in 0 ..< 3 where !apiSplit.exists {
+            tapWhenTappable(splitButton, "Split menu")
+            _ = apiSplit.waitForExistence(timeout: 5)
+        }
+        XCTAssertTrue(apiSplit.exists, "ordinary agent api appears in Split menu")
+        let splitHasCoord = app.collectionViews.buttons["coord-notes"].exists
+            || element(app, "pane.split.coord-notes").exists
+        let splitHasWorker = app.collectionViews.buttons["worker-t8"].exists
+            || element(app, "pane.split.worker-t8").exists
+        closeMenu(app, item: "api")
+
+        // Agent actions Switch agent submenu must likewise exclude factory worker and coordinator panes.
+        tapWhenTappable(element(app, "agentScreen.menu"), "Agent actions menu")
+        let switchMenu = app.collectionViews.buttons["Switch agent"].firstMatch
+        XCTAssertTrue(switchMenu.waitForExistence(timeout: 5), "Switch agent submenu appears")
+        tapWhenTappable(switchMenu, "Switch agent submenu")
+        let apiSwitch = app.collectionViews.buttons["api"].firstMatch
+        XCTAssertTrue(apiSwitch.waitForExistence(timeout: 5), "ordinary agent api appears in Switch agent")
+        let switchHasCoord = app.collectionViews.buttons["coord-notes"].exists
+        let switchHasWorker = app.collectionViews.buttons["worker-t8"].exists
+
+        continueAfterFailure = true
+        XCTAssertFalse(splitHasCoord, "blocked factory coordinator must not appear in Split menu")
+        XCTAssertFalse(splitHasWorker, "factory worker must not appear in Split menu")
+        XCTAssertFalse(switchHasCoord, "blocked factory coordinator must not appear in Switch agent menu")
+        XCTAssertFalse(switchHasWorker, "factory worker must not appear in Switch agent menu")
+    }
+
     private func waitUntil(_ timeout: TimeInterval = 5, _ check: () -> Bool) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
