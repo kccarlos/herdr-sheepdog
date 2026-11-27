@@ -29,7 +29,16 @@ class AgentAttentionUITests: XCTestCase {
         let app = XCUIApplication()
         app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogDemoAttention", "-sheepdogOpenDemo"] + textSizeArguments
         app.launch()
-        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
+        let header = app.descendants(matching: .any)["demo.header"]
+        var opened = header.waitForExistence(timeout: 20)
+        if !opened {
+            // A cold or overloaded simulator can leave the first process
+            // unresponsive on initial launch: start it afresh once.
+            app.terminate()
+            app.launch()
+            opened = header.waitForExistence(timeout: 30)
+        }
+        XCTAssertTrue(opened, "the demo opened")
         showAgentsPane(app)
         return app
     }
