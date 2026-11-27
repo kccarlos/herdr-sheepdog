@@ -92,9 +92,12 @@ public struct ComputerSnapshot: Equatable, Sendable, Identifiable {
 
     public var running: [Agent] { agents.filter { $0.state.isRunning } }
     public var waitingCount: Int { running.filter { $0.state == .blocked }.count }
+    public var factoryList: FactoryAgentsList {
+        FactoryAgentsList(agents: agents, heads: factoryHeads, questions: questions)
+    }
 
-    /// "4 agents · 1 waiting", "1 agent", "No agents", "Offline since 9:12",
-    /// "Connecting…".
+    /// "4 agents · 1 waiting", "1 factory project", "No agents",
+    /// "Offline since 9:12", "Connecting…".
     public func summary(now: Date = Date(), calendar: Calendar = .current) -> String {
         switch reachability {
         case .connecting:
@@ -103,11 +106,21 @@ public struct ComputerSnapshot: Equatable, Sendable, Identifiable {
             guard let since else { return "Offline" }
             return "Offline since \(Self.time(since, now: now, calendar: calendar))"
         case .online:
-            let n = running.count
-            guard n > 0 else { return "No agents" }
-            let agents = n == 1 ? "1 agent" : "\(n) agents"
-            return waitingCount > 0 ? "\(agents) · \(waitingCount) waiting" : agents
+            let list = factoryList
+            return Self.summaryLine(
+                agents: list.agents.running.count, projects: list.items.count, waiting: list.waitingCount
+            )
         }
+    }
+
+    /// Joins non-zero agent, factory-project, and waiting counts, or returns "No agents".
+    public static func summaryLine(agents: Int, projects: Int, waiting: Int) -> String {
+        let parts = [
+            agents > 0 ? (agents == 1 ? "1 agent" : "\(agents) agents") : nil,
+            projects > 0 ? (projects == 1 ? "1 factory project" : "\(projects) factory projects") : nil,
+            waiting > 0 ? "\(waiting) waiting" : nil,
+        ].compactMap { $0 }
+        return parts.isEmpty ? "No agents" : parts.joined(separator: " · ")
     }
 
     /// "Last seen 9:12." for an offline computer that answered before, nil

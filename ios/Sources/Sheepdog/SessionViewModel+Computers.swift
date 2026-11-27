@@ -204,6 +204,17 @@ extension SessionViewModel {
         return ApprovalFlow.Card(pending: remote.namespaced, phase: session.phase(remote.pending.id))
     }
 
+    /// A factory ask or coordinator dialog card on the current or another computer.
+    func factoryAskCard(_ ask: PendingAction, computer: ComputerSnapshot?) -> ApprovalFlow.Card {
+        guard let computer else {
+            return ApprovalFlow.Card(pending: ask, phase: questionPhase(ask.id))
+        }
+        var pending = ask
+        pending.id = RemoteQuestion.id(computer: computer.id, question: ask.id)
+        let phase = session(computer.id)?.phase(ask.id) ?? .open(error: nil)
+        return ApprovalFlow.Card(pending: pending, phase: phase)
+    }
+
     /// The other computers' open questions, oldest first; none with one
     /// computer.
     var remoteQuestions: [RemoteQuestion] {
