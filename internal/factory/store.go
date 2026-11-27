@@ -2,6 +2,7 @@ package factory
 
 import (
 	"bytes"
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -98,6 +99,25 @@ func LoadState(path string) (flow.State, error) {
 		// Older states stored a single retry bit for the whole batch.
 		for i := range p.CoordWakesInFlight {
 			p.CoordWakesInFlight[i].Retried = true
+		}
+	}
+	if err == nil && p.NewGoal && p.GoalGen == 0 {
+		// Older states persisted NewGoal without a goal generation or queued wake.
+		p.GoalGen = 1
+		var at time.Time
+		p.Wakes = slices.DeleteFunc(p.Wakes, func(w flow.Wake) bool {
+			if w.Task != "" || w.Key != "new_goal" || w.GoalGen != 0 {
+				return false
+			}
+			at = cmp.Or(at, w.At)
+			return true
+		})
+		if p.Goal != "" {
+			if at.IsZero() && p.Run != nil {
+				at = cmp.Or(p.Run.LastTurnEnd, p.Run.StartedAt)
+			}
+			at = cmp.Or(at, p.CoordLastWakeAt, p.CoordWakeAt, time.Unix(0, 0).UTC()).UTC()
+			replaceProjectWake(&s, flow.Wake{Key: "new_goal", Why: "owner gave a new goal", Facts: "goal: " + p.Goal, GoalGen: p.GoalGen, At: at})
 		}
 	}
 	return s, err

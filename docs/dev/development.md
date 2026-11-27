@@ -161,8 +161,9 @@ marker when its build fails, so they stop at once), download it and run
 no checkout, Go or XcodeGen. A booting simulator slows everything else
 on the Mac badly (a download or the daemon's first launch takes minutes
 beside it), so nothing but the build runs beside it. A test job less saves
-Mac minutes and a test job more saves wall clock: with the largest-text
-classes in their own shard, no job nears the 50-minute limit. Smoke
+Mac minutes and a test job more saves wall clock. The shards are sized
+to finish in about 45 minutes on a slow runner (runner speed varies about
+2x), under the 75-minute limit. Smoke
 and the shards run side by side and the first that fails cancels the
 rest (`fail-fast`); the shards do not wait for smoke, because that would
 add smoke's whole time to every run. Each test job prints its

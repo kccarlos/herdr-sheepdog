@@ -295,11 +295,15 @@ func (e *Engine) StartSet(folder, goal string, set map[string]string) error {
 	if s.Project.RunID != "" {
 		_, _ = e.observeCoordLocked(ctx, id, &s)
 	}
-	if s.Project.Goal != "" && goal != s.Project.Goal && len(s.Tasks) > 0 {
+	if goal != s.Project.Goal {
+		s.Project.GoalGen++
+	}
+	requeueNewGoal := s.Project.Goal != "" && goal != s.Project.Goal && len(s.Tasks) > 0
+	if requeueNewGoal {
 		s.Project.NewGoal, s.Project.NewGoalTasks = true, len(s.Tasks)
-		if s.Project.RunID != "" || (s.Project.Run != nil && s.Project.Run.State != flow.PhaseEnded) {
-			holdProjectWake(&s, "new_goal", "owner gave a new goal", "goal: "+goal, e.now())
-		}
+	}
+	if requeueNewGoal || s.Project.NewGoal && goal != "" && !flow.HasNewGoalWakeGen(s.Project.Wakes, s.Project.GoalGen) && !flow.HasNewGoalWakeGen(s.Project.CoordWakesInFlight, s.Project.GoalGen) {
+		replaceProjectWake(&s, flow.Wake{Key: "new_goal", Why: "owner gave a new goal", Facts: "goal: " + goal, GoalGen: s.Project.GoalGen, At: e.now()})
 	}
 	s.Project.Folder, s.Project.RepoURL, s.Project.Goal, s.Project.Started, s.Project.Finished, s.Project.Acts, s.Project.Base, s.Project.Invariants, s.Project.WaitKey, s.Project.CoordSilentStops = root, repoURL, goal, true, false, nil, nil, nil, "", 0
 	clearCoordTrack(&s.Project, true, true)
@@ -804,7 +808,7 @@ func (e *Engine) observeCoordLocked(ctx context.Context, id string, s *flow.Stat
 		}
 		_, err = e.advanceRunLocked(ctx, id, "", s, "", flow.RoleCoordinator, "claude", &p.Run)
 	}
-	if p.NewGoal && len(s.Tasks) > p.NewGoalTasks && slices.ContainsFunc(s.Tasks[p.NewGoalTasks:], func(t flow.Task) bool { return t.SplitFrom == "" }) {
+	if flow.NewGoalSettled(*p, s.Tasks, false) {
 		p.NewGoal, p.NewGoalTasks, dirty = false, 0, true
 	}
 	if recoverEndedCoordWakes(p) {
@@ -1845,6 +1849,9 @@ func (e *Engine) actTaskLocked(ctx context.Context, id string, s *flow.State, ti
 		facts.OtherMergeInFlight = otherMergeInFlight(s.Tasks, ti)
 	}
 	if !flow.Ended(task) && !e.cancelStaleGateAsksLocked(id, s, ti, now) {
+		return
+	}
+	if flow.Ended(task) && !e.cancelEndedTaskAsksLocked(id, s, ti, now) {
 		return
 	}
 	r, d := flow.FirstMatch(flow.TaskRows, flow.In{Task: task, Settings: s.Settings, Facts: facts, Asks: s.Asks, Now: now})

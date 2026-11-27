@@ -108,7 +108,9 @@ jobs:
     # 27.0, above the app's iOS 26 deployment target.
     # https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md
     runs-on: xcode-27
-    timeout-minutes: 50
+    # GitHub macOS runners vary about 2x in speed (the same shard took 38
+    # and 51 minutes on 2026-11-27), so the limit leaves room above ~45.
+    timeout-minutes: 75
     strategy:
       # Smoke and the shards run side by side; the first job that fails
       # cancels the others (a red smoke stops the shards).
