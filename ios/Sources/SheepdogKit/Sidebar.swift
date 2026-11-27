@@ -19,7 +19,31 @@ public struct SidebarSections: Equatable, Sendable {
     public struct Computer: Equatable, Sendable, Identifiable {
         public var id: String
         public var name: String
+        public var factoryProjects: [FactoryAgentsList.Item]
+        public var finishedFactoryCount: Int
         public var spaces: [Space]
+
+        public init(id: String, name: String, spaces: [Space],
+                    factoryProjects: [FactoryAgentsList.Item] = [], finishedFactoryCount: Int = 0) {
+            self.id = id
+            self.name = name
+            self.factoryProjects = factoryProjects
+            self.finishedFactoryCount = finishedFactoryCount
+            self.spaces = spaces
+        }
+
+        private var factoryCountSummary: String? {
+            switch (factoryProjects.count, finishedFactoryCount) {
+            case (let a, let d) where a > 0 && d > 0: return "\(a), and \(d) done"
+            case (let a, _) where a > 0: return "\(a)"
+            case (_, let d) where d > 0: return "\(d) done"
+            default: return nil
+            }
+        }
+
+        public var factorySectionDetail: String? { factoryCountSummary.map { "· \($0)" } }
+        public var factorySectionAccessibilityLabel: String? { factoryCountSummary.map { "Factory projects, \($0)" } }
+        public var hasContent: Bool { !spaces.isEmpty || !factoryProjects.isEmpty || finishedFactoryCount > 0 }
     }
 
     public var computers: [Computer]
@@ -40,25 +64,38 @@ public struct SidebarSections: Equatable, Sendable {
     /// others what they last reported (none while offline). A current
     /// computer with no snapshot (a loopback fixture, nothing paired) goes
     /// first.
-    public init(snapshots: [ComputerSnapshot], currentID: String, currentName: String, currentAgents: [Agent]) {
-        var computers = snapshots.map { snapshot -> Computer in
-            if snapshot.id == currentID {
-                return .computer(id: snapshot.id, name: snapshot.name, agents: currentAgents)
+    public init(snapshots: [ComputerSnapshot], currentID: String, currentName: String, currentAgents: [Agent],
+                currentFactoryHeads: [FactoryProjectHead]? = nil, currentQuestions: [PendingAction]? = nil) {
+        var computers = snapshots.map { s -> Computer in
+            if s.id == currentID {
+                return .computer(id: s.id, name: s.name, agents: currentAgents,
+                                 factoryHeads: currentFactoryHeads ?? s.factoryHeads,
+                                 questions: currentQuestions ?? s.questions)
             }
-            return .computer(id: snapshot.id, name: snapshot.name, agents: snapshot.reachability.isOnline ? snapshot.agents : [])
+            guard s.reachability.isOnline else {
+                return .computer(id: s.id, name: s.name, agents: [])
+            }
+            return .computer(id: s.id, name: s.name, agents: s.agents,
+                             factoryHeads: s.factoryHeads, questions: s.questions)
         }
         if !snapshots.contains(where: { $0.id == currentID }) {
-            computers.insert(.computer(id: currentID, name: currentName, agents: currentAgents), at: 0)
+            let current = Computer.computer(id: currentID, name: currentName, agents: currentAgents,
+                                            factoryHeads: currentFactoryHeads ?? [], questions: currentQuestions ?? [])
+            computers.insert(current, at: 0)
         }
         self.computers = computers
     }
 }
 
 extension SidebarSections.Computer {
-    /// One computer's agents, grouped into spaces.
-    public static func computer(id: String, name: String, agents: [Agent]) -> SidebarSections.Computer {
-        let running = agents.filter { $0.state.isRunning }
-        let groups = Dictionary(grouping: running) { $0.workspaceLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "" }
+    /// One computer's active factory projects and ordinary agents grouped into spaces.
+    public static func computer(id: String, name: String, agents: [Agent],
+                                factoryHeads: [FactoryProjectHead] = [],
+                                questions: [PendingAction] = []) -> SidebarSections.Computer {
+        let list = FactoryAgentsList(agents: agents, heads: factoryHeads, questions: questions)
+        let groups = Dictionary(grouping: list.agents.running) {
+            $0.workspaceLabel?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        }
         let spaces = groups
             .map { name, agents in
                 SidebarSections.Space(name: name, agents: agents.sorted { $0.alias.localizedCaseInsensitiveCompare($1.alias) == .orderedAscending })
@@ -68,6 +105,8 @@ extension SidebarSections.Computer {
                 if lhs.name.isEmpty != rhs.name.isEmpty { return !lhs.name.isEmpty }
                 return lhs.name.localizedCaseInsensitiveCompare(rhs.name) == .orderedAscending
             }
-        return SidebarSections.Computer(id: id, name: name, spaces: spaces)
+        return SidebarSections.Computer(id: id, name: name, spaces: spaces,
+                                        factoryProjects: list.items.filter { $0.head.state != .finished },
+                                        finishedFactoryCount: list.finishedHeads.count)
     }
 }

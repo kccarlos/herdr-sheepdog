@@ -59,7 +59,9 @@ struct AgentPanes: View {
             .overlay { if dropTargeted { dropTarget(side: side) } }
         }
         .dropDestination(for: AgentWindowRoute.self) { routes, _ in
-            guard let route = routes.first, model.flock.all.contains(where: { $0.paneID == route.paneID }) else { return false }
+            guard let route = routes.first,
+                  model.agentsModel.factoryList.agents.all.contains(where: { $0.paneID == route.paneID })
+            else { return false }
             withAnimation(Theme.ease(reduceMotion: reduceMotion)) { ui.beside(route.paneID) }
             return true
         } isTargeted: { targeted in
@@ -76,7 +78,7 @@ struct AgentPanes: View {
                 // Show sidebar sits in the first pane.
                 leading: index == 0 ? leading : nil,
                 onClose: two ? { withAnimation(Theme.ease(reduceMotion: reduceMotion)) { ui.close(pane: index) } } : nil,
-                splitCandidates: two ? [] : model.flock.running.filter { $0.paneID != id },
+                splitCandidates: two ? [] : model.agentsModel.factoryList.agents.running.filter { $0.paneID != id },
                 onSplit: two ? nil : { other in withAnimation(Theme.ease(reduceMotion: reduceMotion)) { ui.beside(other) } },
                 focused: two && ui.focusedPane == index,
                 onGone: { ui.close(pane: index) },
