@@ -12,6 +12,7 @@ struct FactoryProjectView: View {
     @Environment(\.horizontalSizeClass) private var sizeClass
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var loaded: Result<([FactoryTask], Bool), Error>?
+    @State private var boardWidth: CGFloat = 0
     @State private var text = ""
     @State private var feedback: (message: String, color: Color)?
     @State private var showsCoordinator = false
@@ -24,7 +25,13 @@ struct FactoryProjectView: View {
     private var computer: ComputerModel? { model.fleet.model(computerID) }
     private var head: FactoryProjectHead { computer?.factoryHeads.first { $0.id == initialHead.id } ?? initialHead }
     private var isRegular: Bool { sizeClass == .regular }
-    private var sideBySide: Bool { isRegular && !dynamicTypeSize.isAccessibilitySize }
+    private var boardLayout: FactoryTaskGraph.BoardLayout {
+        .init(
+            isRegular: isRegular,
+            isAccessibilitySize: dynamicTypeSize.isAccessibilitySize,
+            availableWidth: boardWidth
+        )
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -65,6 +72,7 @@ struct FactoryProjectView: View {
             showsSettings = false
             selectedTask = nil
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width.rounded() } action: { boardWidth = $0 }
     }
 
     private var boardScroll: some View {
@@ -98,19 +106,19 @@ struct FactoryProjectView: View {
                             .accessibilityIdentifier("factoryProject.settings")
                     }
                     composer(board, on: computer)
-                    if sideBySide && !board.isEmptyTasks {
-                        HStack(alignment: .top, spacing: 16) {
-                            tasksSection(board, on: computer).frame(width: 340, alignment: .leading)
-                            FactoryTaskGraphView(graph: FactoryTaskGraph(tasks: tasks)) { selectedTask = $0 }
-                        }
-                    } else {
+                    let layout = boardLayout.sideBySide && !board.isEmptyTasks
+                        ? AnyLayout(HStackLayout(alignment: .top, spacing: 16))
+                        : AnyLayout(VStackLayout(alignment: .leading, spacing: 12))
+                    layout {
                         tasksSection(board, on: computer)
+                            .frame(width: board.isEmptyTasks ? nil : boardLayout.listWidth, alignment: .leading)
                         if isRegular && !board.isEmptyTasks {
                             FactoryTaskGraphView(graph: FactoryTaskGraph(tasks: tasks)) { selectedTask = $0 }
                         }
                     }
                 }
-                .frame(maxWidth: isRegular ? .infinity : 660, alignment: .leading).padding(16)
+                .frame(maxWidth: isRegular ? .infinity : 660, alignment: .leading)
+                .padding(16)
                 .accessibilityElement(children: .contain).accessibilityIdentifier("factoryProject.board")
             } else {
                 ProgressView(FactoryProjectBoard.loadingMessage(projectName: head.name, computerName: name)).padding()

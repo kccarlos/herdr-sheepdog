@@ -485,8 +485,9 @@ section 6.
     factory project board (`IPadDetail.factoryProject`, including another
     computer's project directly per D12 without moving voice, laying out the
     task list beside the layered dependency graph `FactoryTaskGraphView` over
-    Kit's `FactoryTaskGraph` at regular width and stacking at accessibility
-    text sizes; tapping any graph node pushes `FactoryTaskView`); or
+    Kit's `FactoryTaskGraph` (`BoardLayout`) when regular-width room allows
+    and stacking in narrow windows or at accessibility text sizes; tapping any
+    graph node pushes `FactoryTaskView`); or
     an agent's window as a pane (`AgentScreenView(pane:)` with a
     `PaneChrome`: its own header with the dot, name and space, ⋯, and
     Close instead of a pop). A shell pushes on the detail's own stack.
