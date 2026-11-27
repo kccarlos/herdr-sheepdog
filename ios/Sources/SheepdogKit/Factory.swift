@@ -243,6 +243,10 @@ public struct FactorySettingRow: Decodable, Equatable, Identifiable, Sendable {
         return "\(prefix). Change it before the next start."
     }
 
+    public func keptNotice(was: String?) -> String {
+        "Kept at \(was?.trimmed.nonEmpty ?? "not set"). Nothing changed."
+    }
+
     public static func errorMessage(_ error: Error, computerName: String, linkUsable: Bool = true) -> String {
         if let r = error as? FactoryRefusal, r.code != "proof_required", !r.message.isEmpty { return r.message }
         if case let .rejected(status, msg) = error as? DaemonError,
@@ -251,6 +255,41 @@ public struct FactorySettingRow: Decodable, Equatable, Identifiable, Sendable {
             error, computerName: computerName, linkUsable: linkUsable,
             prefix: "Not changed: ", retry: "try again"
         )
+    }
+
+    public static func answerError(_ raw: String, computerName: String) -> String {
+        let text = raw.hasPrefix("The daemon refused: ") ? String(raw.dropFirst(20)) : raw
+        if text.hasPrefix("proof_required") || text.hasPrefix("proof_rejected") {
+            let err = DaemonError.rejected(status: 403, message: "proof_required")
+            return factoryActionError(
+                err, computerName: computerName, linkUsable: true,
+                prefix: "Not saved: ", retry: "try again"
+            )
+        }
+        if text.hasPrefix("out_of_range:") {
+            let detail = String(text.dropFirst(13)).trimmed
+            return "Not saved: another setting changed after you asked. \(detail)"
+        }
+        if let colon = text.range(of: ": "),
+           colon.lowerBound > text.startIndex,
+           text[..<colon.lowerBound].allSatisfy({ $0.isASCII && ($0.isLowercase || $0 == "_") }),
+           let detail = String(text[colon.upperBound...]).trimmed.nonEmpty {
+            return detail
+        }
+        return text
+    }
+
+    public static func parseFix(_ fix: String) -> (command: String?, rest: String) {
+        let text = fix.trimmed
+        guard text.lowercased().hasPrefix("run:") else { return (nil, text) }
+        let body = String(text.dropFirst(4)).trimmed
+        let cut = [body.range(of: " ("), body.range(of: ", then ")]
+            .compactMap { $0?.lowerBound }
+            .min()
+        if let cut {
+            return (String(body[..<cut]).trimmed.nonEmpty, String(body[cut...]).trimmed)
+        }
+        return (body.nonEmpty, "")
     }
 
     enum CodingKeys: String, CodingKey {
@@ -305,11 +344,10 @@ public struct FactoryStartCheck: Decodable, Equatable, Sendable {
     }
     public var statusWord: String { ["ok": "pass", "warn": "warning", "skip": "skipped"][status] ?? status }
     public var commandFix: (command: String, rest: String?)? {
-        guard let raw = fix?.trimmed.nonEmpty, raw.hasPrefix("run:") else { return nil }
-        let body = String(raw.dropFirst(4)).trimmed, cut = [body.range(of: " (")?.lowerBound, body.range(of: ", then ")?.lowerBound].compactMap { $0 }.min() ?? body.endIndex
-        guard let command = String(body[..<cut]).trimmed.nonEmpty else { return nil }
-        let tail = String(body[cut...]).trimmed
-        return (command, (tail.hasPrefix(",") ? String(tail.dropFirst()).trimmed : tail).nonEmpty)
+        guard let raw = fix?.trimmed.nonEmpty else { return nil }
+        let (command, rest) = FactorySettingRow.parseFix(raw)
+        guard let command else { return nil }
+        return (command, (rest.hasPrefix(",") ? String(rest.dropFirst()).trimmed : rest).nonEmpty)
     }
 }
 
