@@ -294,6 +294,33 @@ private extension KeyedDecodingContainer {
     }
 }
 
+/// One start-check result from `POST /api/factory/projects/check` or a 400 start refusal.
+public struct FactoryStartCheck: Decodable, Equatable, Sendable {
+    public let name, status: String
+    public let detail, fix: String?
+    public init(name: String, status: String, detail: String? = nil, fix: String? = nil) {
+        self.name = name; self.status = status; self.detail = detail; self.fix = fix
+    }
+    public var statusWord: String { ["ok": "pass", "warn": "warning", "skip": "skipped"][status] ?? status }
+    public var commandFix: (command: String, rest: String?)? {
+        guard let raw = fix?.trimmed.nonEmpty, raw.hasPrefix("run:") else { return nil }
+        let body = String(raw.dropFirst(4)).trimmed, cut = [body.range(of: " (")?.lowerBound, body.range(of: ", then ")?.lowerBound].compactMap { $0 }.min() ?? body.endIndex
+        guard let command = String(body[..<cut]).trimmed.nonEmpty else { return nil }
+        let tail = String(body[cut...]).trimmed
+        return (command, (tail.hasPrefix(",") ? String(tail.dropFirst()).trimmed : tail).nonEmpty)
+    }
+}
+
+/// A 400 start refusal carrying the daemon's start-check results.
+public struct FactoryStartChecksError: LocalizedError, Equatable, Sendable {
+    public let message: String
+    public let results: [FactoryStartCheck]
+    public init(message: String, results: [FactoryStartCheck]) { self.message = message; self.results = results }
+    public var errorDescription: String? { message }
+}
+
+private struct FactoryStartChecksReply: Decodable { let error: String?; let results: [FactoryStartCheck] }
+
 extension DaemonClient {
     /// `GET /api/factory/projects`.
     public func factoryProjects() async throws -> [FactoryProject] {
@@ -333,13 +360,10 @@ extension DaemonClient {
         return reply.ask
     }
 
-    /// Resume with the project's existing goal using the paired-device start route.
-    public func resumeFactory(folder: String, goal: String) async throws { try await factoryPost("/api/factory/projects/start", ["folder": folder, "goal": goal]) }
-
-    public func sayFactory(projectID: String, text: String) async throws {
-        try await factoryPost("/api/factory/projects/\(factoryPathSegment(projectID))/say", ["text": text])
-    }
-
+    /// Start, resume, give a new goal, or reopen a project via `POST /api/factory/projects/start`.
+    public func startFactory(folder: String, goal: String) async throws { try await factoryPost("/api/factory/projects/start", ["folder": folder, "goal": goal]) }
+    public func resumeFactory(folder: String, goal: String) async throws { try await startFactory(folder: folder, goal: goal) }
+    public func sayFactory(projectID: String, text: String) async throws { try await factoryPost("/api/factory/projects/\(factoryPathSegment(projectID))/say", ["text": text]) }
     public func stopFactory(projectID: String) async throws { try await factoryPost("/api/factory/projects/stop", ["project": projectID]) }
 
     private func factoryPathSegment(_ id: String) -> String {
@@ -383,6 +407,9 @@ extension DaemonClient {
         case 401:
             throw DaemonError.unauthorized(endpoint: endpoint.display)
         default:
+            if http.statusCode == 400, let checks = try? DaemonClient.decoder.decode(FactoryStartChecksReply.self, from: data) {
+                throw FactoryStartChecksError(message: checks.error ?? "start checks failed", results: checks.results)
+            }
             let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
             let msg = (obj?["error"] as? String) ?? ""
             let code = (obj?["code"] as? String) ?? ""
