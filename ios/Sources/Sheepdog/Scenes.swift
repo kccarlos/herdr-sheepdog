@@ -1,3 +1,4 @@
+import SheepdogKit
 import SwiftUI
 
 /// The app's windows on iPad (several scenes). There is one session view
@@ -162,6 +163,12 @@ final class SceneUI {
     }
 }
 
+/// Route for pushing a factory project board onto a navigation stack.
+struct FactoryProjectRoute: Hashable {
+    let head: FactoryProjectHead
+    let computerID: String
+}
+
 /// Where an agent's or a shell's window opens.
 enum WindowRequest: Hashable {
     case agent(String)
@@ -169,6 +176,7 @@ enum WindowRequest: Hashable {
     /// A new agent: on iPad it opens beside the focused pane.
     case newAgent(String)
     case shell(cwd: String?)
+    case factoryProject(FactoryProjectHead, computerID: String)
 }
 
 /// Opens a window the way this layout does: a push on iPhone, the detail
