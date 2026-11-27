@@ -344,6 +344,7 @@ lowercase.
 | `app.np.folders` | label | folders sheepdog knows on Work Mac | the folder list in New project |
 | `app.np.known` | mark | already a project: open it to give it a new goal | a folder that is already a project; not pickable |
 | `app.np.none` | empty state | No folders to pick: herdr cannot be reached on Work Mac. Open herdr-app on Work Mac, then try again. | replaces `np.sugg.none`, which tells the reader to type a path |
+| `app.np.empty` | empty state | No folders to pick yet. Open a workspace in herdr on Work Mac, then try again. | GET /api/spaces succeeds with no folders and no existing projects |
 | `app.np.fix` | label | Fix, in a terminal on Work Mac: | before a command fix; the phone cannot run it |
 | `app.np.nofactory` | heading | The factory is not available on Work Mac | New project when the computer has no factory |
 | `app.np.nofactory.p` | sentence | It needs sheepdog on herdr-core. Work Mac's sheepdog runs on herdr-tui, or herdr-core does not answer. | with the fix "Open herdr-app, or start herdr-core in a terminal:" and `hc server start` |

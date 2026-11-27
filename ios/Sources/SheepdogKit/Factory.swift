@@ -282,7 +282,8 @@ extension DaemonClient {
     public func checkFactory(folder: String) async throws -> [FactoryStartCheck] {
         struct Reply: Decodable { let results: [FactoryStartCheck] }
         let body = try JSONSerialization.data(withJSONObject: ["folder": folder], options: .withoutEscapingSlashes)
-        let req = try request(encodedPath: "/api/factory/projects/check", method: "POST", body: body)
+        var req = try request(encodedPath: "/api/factory/projects/check", method: "POST", body: body)
+        req.timeoutInterval = max(DaemonClient.actionTimeout.map { $0 + 5 } ?? 0, 45)
         return try await factoryReply(Reply.self, request: req, what: "the start checks").results
     }
     public func resumeFactory(folder: String, goal: String) async throws { try await startFactory(folder: folder, goal: goal) }

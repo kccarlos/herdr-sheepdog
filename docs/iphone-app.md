@@ -348,13 +348,14 @@ Mac panel.
     tap Try again.
 - **Factory projects.** Start a new project from **+ ▸ New factory project**:
   pick a git repository folder sheepdog knows on your computer (folders that
-  are already a project cannot be picked again), write a goal, and optionally
-  run **Check this folder** before pressing **Start the project and its
-  agents**. Any failing start check shows its fix with **Copy** for terminal
-  commands and keeps Start off until **Check again** passes; once started, the
-  new project's board opens automatically. Open a project in **Agents** to see its tasks, open
-  asks, instruction box, and **Stop**, **Resume**, **New goal** or **Reopen
-  with a new goal** controls (a finished project needs a new goal to reopen;
+  are already a project cannot be picked again), write a goal, and run **Check
+  this folder** before pressing **Start the project and its agents** (a new
+  project starts with your computer's default settings). Any failing start
+  check shows its fix with **Copy** for terminal commands and keeps Start off
+  until **Check again** passes; once started, the new project's board opens
+  automatically. Open a project in **Agents** to see its tasks, open asks,
+  instruction box, and **Stop**, **Resume**, **New goal** or **Reopen with a
+  new goal** controls (a finished project needs a new goal to reopen;
   start-check failures on **Resume**, **New goal** and **Reopen** show each
   check and its fix, with **Copy** for terminal commands). Tap any task to
   open its read-only task view with its steps, live run, review rounds, last

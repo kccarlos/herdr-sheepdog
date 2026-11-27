@@ -517,10 +517,13 @@ struct SessionMenus {
         }
         .disabled(!value.actionsAvailable)
         .accessibilityIdentifier("new.agent")
-        Button { here { model.presentation.present(.newFactoryProject) } } label: {
+        Button {
+            here { model.presentation.present(.newFactoryProject) }
+        } label: {
             Label("New factory project", systemImage: "point.3.connected.trianglepath.dotted")
         }
-        .disabled(!value.actionsAvailable).accessibilityIdentifier("new.factoryProject")
+        .disabled(!value.actionsAvailable)
+        .accessibilityIdentifier("new.factoryProject")
         NewShellButton(shown: value.shellShown)
     }
 
