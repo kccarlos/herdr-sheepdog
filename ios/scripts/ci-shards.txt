@@ -84,3 +84,4 @@ shard-4  SheepdogUITests/ReadmeRecordingUITests
 # they have a job of their own (shards 2 and 4 hit the 50-minute limit).
 shard-5  SheepdogUITests/FilesDemoUITests
 shard-5  SheepdogUITests/AgentAttentionLargestTextUITests
+shard-5  SheepdogUITests/FactorySayKeyboardUITests

@@ -15,6 +15,7 @@ struct FactoryProjectView: View {
     @State private var selectedTask: FactoryTask?
     @State private var showsGoalSheet = false
     @State private var showDone = false
+    @FocusState private var sayFocused: Bool
 
     private var computer: ComputerModel? { model.fleet.model(computerID) }
     private var head: FactoryProjectHead { computer?.factoryHeads.first { $0.id == initialHead.id } ?? initialHead }
@@ -105,6 +106,7 @@ struct FactoryProjectView: View {
                 ProgressView(FactoryProjectBoard.loadingMessage(projectName: head.name, computerName: name)).padding()
             }
         }
+        .scrollDismissesKeyboard(.interactively)
         .background(Theme.surface).navigationTitle(head.name)
         .navigationBarTitleDisplayMode(.inline).toolbar(.visible, for: .navigationBar)
         .task(id: "\(computer?.factoryChanges[head.id] ?? 0):\(head.state.rawValue):\(head.goal)") { await load() }
@@ -140,7 +142,8 @@ struct FactoryProjectView: View {
             Text(box.label).font(.subheadline.weight(.semibold)).accessibilityRepresentation { EmptyView() }
             HStack {
                 TextField(box.placeholder, text: Binding(get: { text }, set: edit), axis: .vertical)
-                    .font(.body).lineLimit(1...4).accessibilityLabel(box.label).accessibilityIdentifier("factoryProject.say.field")
+                    .font(.body).lineLimit(1...4).focused($sayFocused)
+                    .accessibilityLabel(box.label).accessibilityIdentifier("factoryProject.say.field")
                 Button { send(instruction, box: box, on: computer, key: key) } label: { Image(systemName: "arrow.up") }
                     .buttonStyle(PillButtonStyle(fullWidth: false)).disabled(!box.canSend || computer.actions.isInFlight(key))
                     .accessibilityLabel(box.sendAccessibilityLabel).accessibilityIdentifier("factoryProject.say.send")
@@ -156,6 +159,7 @@ struct FactoryProjectView: View {
     }
 
     private func edit(_ draft: String) {
+        guard draft != text else { return }
         text = draft
         feedback = nil
     }
@@ -186,8 +190,10 @@ struct FactoryProjectView: View {
                 try await computer.actions.run(key, .agent, as: DaemonClient.self) { try await $0.sayFactory(projectID: id, text: instruction) }
                 guard text == box.text else { return }
                 text = ""
+                sayFocused = false
                 if head.state == box.state { feedback = (box.sentStatus, box.hasCoordinator ? Theme.done : Theme.muted) }
             } catch where FactoryProjectBoard.isProjectGone(error) {
+                sayFocused = false
                 projectGone()
             } catch {
                 guard text == box.text, head.state == box.state else { return }
