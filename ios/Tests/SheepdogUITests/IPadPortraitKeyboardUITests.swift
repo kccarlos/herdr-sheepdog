@@ -80,9 +80,7 @@ final class IPadPortraitKeyboardUITests: XCTestCase {
         tapWhenTappable(app.buttons.matching(identifier: "agentScreen.menu.shell").firstMatch, "Open shell here")
         XCTAssertTrue(element(app, "shell.typingHint").waitForExistence(timeout: 10))
         XCTAssertTrue(app.keyboards.firstMatch.waitForExistence(timeout: 10), "the shell's keyboard comes up in portrait")
-        for key in ["l", "s"] { app.keyboards.keys[key].tap() }
-        let ret = app.keyboards.buttons.matching(NSPredicate(format: "label ==[c] 'return'")).firstMatch
-        if ret.exists { ret.tap() } else { app.keyboards.keys.matching(NSPredicate(format: "label ==[c] 'return'")).firstMatch.tap() }
+        typeWhenFocused(element(app, "agentScreen.terminal"), "ls\n")
         let listed = app.descendants(matching: .any).matching(identifier: "agentScreen.terminal")
             .matching(NSPredicate(format: "value CONTAINS 'package.json'")).firstMatch
         XCTAssertTrue(listed.waitForExistence(timeout: 10), "what was typed reached the shell")

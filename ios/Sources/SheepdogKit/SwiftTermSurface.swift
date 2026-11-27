@@ -142,6 +142,7 @@ public final class SwiftTermSurface: NSObject, TerminalSurface {
             guard keyboardEnabled != oldValue else { return }
             terminalView.inputView = keyboardEnabled ? nil : UIView(frame: .zero)
             terminalView.reloadInputViews()
+            container.forwardAccessibility(to: keyboardEnabled ? terminalView : nil)
         }
     }
 
@@ -354,10 +355,64 @@ public final class SwiftTermSurface: NSObject, TerminalSurface {
 
 /// The surface's outer view, and what VoiceOver reads: the terminal's
 /// visible lines as the value, and line by line through the rotor
-/// (`UIAccessibilityReadingContent`).
+/// (`UIAccessibilityReadingContent`). While typing mode is on, accessibility
+/// forwards to the first-responder `TerminalView` so Accessibility and
+/// Full Keyboard Access (and XCUITest) see keyboard focus on the terminal.
 final class TerminalContainerView: UIView, UIAccessibilityReadingContent {
     var lines: () -> [String] = { [] }
     var lineHeight: () -> CGFloat = { 14 }
+    private weak var forwardedTarget: UIView?
+    private var storedIdentifier: String?
+    private var storedValue: String?
+
+    override var accessibilityIdentifier: String? {
+        get { forwardedTarget == nil ? super.accessibilityIdentifier : nil }
+        set {
+            storedIdentifier = newValue
+            if let target = forwardedTarget {
+                super.accessibilityIdentifier = nil
+                target.accessibilityIdentifier = newValue
+            } else {
+                super.accessibilityIdentifier = newValue
+            }
+        }
+    }
+
+    override var accessibilityValue: String? {
+        get { storedValue }
+        set {
+            storedValue = newValue
+            if let target = forwardedTarget {
+                target.accessibilityValue = newValue
+            } else {
+                super.accessibilityValue = newValue
+            }
+        }
+    }
+
+    func forwardAccessibility(to target: UIView?) {
+        if let previous = forwardedTarget, previous !== target {
+            previous.isAccessibilityElement = false
+            previous.accessibilityElementsHidden = true
+            previous.accessibilityIdentifier = nil
+            previous.accessibilityValue = nil
+        }
+        forwardedTarget = target
+        if let target {
+            isAccessibilityElement = false
+            super.accessibilityIdentifier = nil
+            super.accessibilityValue = nil
+            target.isAccessibilityElement = true
+            target.accessibilityElementsHidden = false
+            target.accessibilityLabel = accessibilityLabel
+            target.accessibilityIdentifier = storedIdentifier
+            target.accessibilityValue = storedValue
+        } else {
+            isAccessibilityElement = true
+            super.accessibilityIdentifier = storedIdentifier
+            super.accessibilityValue = storedValue
+        }
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)

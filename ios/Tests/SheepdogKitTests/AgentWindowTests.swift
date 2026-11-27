@@ -297,6 +297,40 @@ final class AgentWindowTests: XCTestCase {
         XCTAssertEqual(surface.fontSize, SwiftTermSurface.fontSizeRange.upperBound, "clamped")
     }
 
+    @MainActor
+    func testTypingModeForwardsAccessibilityToTerminalView() throws {
+        let surface = TerminalRenderer.makeSurface(fontSize: 11)
+        let container = surface.view
+        let terminalView = try XCTUnwrap(container.subviews.first)
+        container.accessibilityIdentifier = "agentScreen.terminal"
+        container.accessibilityValue = "shop %"
+
+        XCTAssertTrue(container.isAccessibilityElement)
+        XCTAssertEqual(container.accessibilityIdentifier, "agentScreen.terminal")
+        XCTAssertFalse(terminalView.isAccessibilityElement)
+        XCTAssertTrue(terminalView.accessibilityElementsHidden)
+
+        surface.keyboardEnabled = true
+        XCTAssertFalse(container.isAccessibilityElement)
+        XCTAssertNil(container.accessibilityIdentifier)
+        XCTAssertTrue(terminalView.isAccessibilityElement)
+        XCTAssertFalse(terminalView.accessibilityElementsHidden)
+        XCTAssertEqual(terminalView.accessibilityIdentifier, "agentScreen.terminal")
+        XCTAssertEqual(terminalView.accessibilityValue, "shop %")
+
+        container.accessibilityValue = "shop % ls\npackage.json"
+        XCTAssertEqual(terminalView.accessibilityValue, "shop % ls\npackage.json")
+        XCTAssertEqual(container.accessibilityValue, "shop % ls\npackage.json")
+
+        surface.keyboardEnabled = false
+        XCTAssertTrue(container.isAccessibilityElement)
+        XCTAssertEqual(container.accessibilityIdentifier, "agentScreen.terminal")
+        XCTAssertEqual(container.accessibilityValue, "shop % ls\npackage.json")
+        XCTAssertFalse(terminalView.isAccessibilityElement)
+        XCTAssertTrue(terminalView.accessibilityElementsHidden)
+        XCTAssertNil(terminalView.accessibilityIdentifier)
+    }
+
     // MARK: Snapshot in the terminal
 
     @MainActor
