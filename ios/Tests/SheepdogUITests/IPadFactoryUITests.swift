@@ -299,6 +299,111 @@ final class IPadFactoryUITests: XCTestCase {
         shot("13b-board-graph-ax5")
     }
 
+    private static let skipEdgeWrappedGraph = #"""
+    {"protocol":1,"project":"proj-1","folder":"~/code/notes","tasks":[
+      {"ref":"T1","title":"Approve gate","stage":"owner_gate","why_waiting":"Approve T1?","after":[],"dependents":["T2","T3"],"layer":0,"rounds":1,"steps":[{"name":"planned","state":"done"},{"name":"implementing","state":"done"},{"name":"CI","state":"now"}]},
+      {"ref":"T2","title":"Wait on dep","stage":"waiting_on_dep","why_waiting":"Waiting on T1","after":["T1"],"dependents":["T3"],"layer":1,"rounds":0,"steps":[{"name":"planned","state":"now"}]},
+      {"ref":"T3","title":"Ship it","stage":"done","after":["T1","T2"],"dependents":[],"layer":2,"rounds":0,"steps":[{"name":"planned","state":"done"},{"name":"merged","state":"done"}]}
+    ]}
+    """#
+
+    func testGraphNodeGrowthAndSkipEdgeLayout() throws {
+        let heads = #"""
+        [{"id":"proj-1","name":"notes","goal":"Verify graph nodes and skip edges","state":"running",
+          "counts":{"owner_gate":1,"waiting_on_dep":1,"done":1},"folder":"~/code/notes",
+          "coordinator_pane":"coord-notes-1"}]
+        """#
+        let stub = try StubDaemon(.computer(name: "Work Mac", agents: "[]", questions: "[]", factory: heads))
+        stub.factoryGraphs["proj-1"] = Self.skipEdgeWrappedGraph
+        let host = try stub.start()
+        defer { stub.stop() }
+
+        let app = launch(computers: "Work Mac=\(host)")
+        let notesRow = element(app, "sidebar.factory.proj-1")
+        XCTAssertTrue(notesRow.waitForExistence(timeout: 15))
+        tapWhenTappable(notesRow, "notes in iPad sidebar")
+
+        let graph = element(app, "factoryProject.graph")
+        XCTAssertTrue(graph.waitForExistence(timeout: 15))
+        XCTAssertEqual(graph.label, "task graph: 3 tasks in 3 layers")
+
+        func assertNodesFit(_ context: String) {
+            let t1 = element(app, "factoryProject.graph.node.T1")
+            let t2 = element(app, "factoryProject.graph.node.T2")
+            let t3 = element(app, "factoryProject.graph.node.T3")
+            XCTAssertTrue(t1.waitForExistence(timeout: 10), context)
+            XCTAssertTrue(t2.exists && t3.exists, context)
+            XCTAssertGreaterThan(
+                t1.frame.height, t3.frame.height + 6,
+                "\(context): wrapped 'needs your approval' node must grow taller than single-line 'done' node"
+            )
+            for (name, node) in [("T1", t1), ("T2", t2), ("T3", t3)] {
+                XCTAssertGreaterThanOrEqual(node.frame.minY, graph.frame.minY, "\(context): \(name) inside graph top")
+                XCTAssertLessThanOrEqual(node.frame.maxY, graph.frame.maxY - 4, "\(context): \(name) inside graph bottom")
+                XCTAssertLessThanOrEqual(node.frame.maxX, graph.frame.maxX, "\(context): \(name) inside graph right")
+            }
+            XCTAssertLessThan(t1.frame.maxX, t2.frame.minX, "\(context): T1 left of T2")
+            XCTAssertLessThan(t2.frame.maxX, t3.frame.minX, "\(context): T2 left of T3")
+        }
+
+        assertNodesFit("landscape")
+        shot("fix-graph-landscape")
+
+        XCUIDevice.shared.orientation = .portrait
+        XCTAssertTrue(graph.waitForExistence(timeout: 10))
+        let hideSidebar = element(app, "sidebar.hide")
+        if hideSidebar.waitForExistence(timeout: 2), hideSidebar.isHittable {
+            tapWhenTappable(hideSidebar, "Hide sidebar in portrait")
+            usleep(300_000)
+        }
+        assertNodesFit("portrait")
+        shot("fix-graph-portrait")
+    }
+
+    func testGraphNodeGrowthAndSkipEdgeAtLargestText() throws {
+        let heads = #"""
+        [{"id":"proj-1","name":"notes","goal":"Verify graph nodes at AX5","state":"running",
+          "counts":{"owner_gate":1,"waiting_on_dep":1,"done":1},"folder":"~/code/notes",
+          "coordinator_pane":"coord-notes-1"}]
+        """#
+        let stub = try StubDaemon(.computer(name: "Work Mac", agents: "[]", questions: "[]", factory: heads))
+        stub.factoryGraphs["proj-1"] = Self.skipEdgeWrappedGraph
+        let host = try stub.start()
+        defer { stub.stop() }
+
+        let app = launch(
+            computers: "Work Mac=\(host)",
+            extra: ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+        )
+        let notesRow = element(app, "sidebar.factory.proj-1")
+        XCTAssertTrue(notesRow.waitForExistence(timeout: 15))
+        tapWhenTappable(notesRow, "notes at AX5")
+
+        let hideSidebar = element(app, "sidebar.hide")
+        if hideSidebar.waitForExistence(timeout: 2), hideSidebar.isHittable {
+            tapWhenTappable(hideSidebar, "Hide sidebar at AX5")
+        }
+        let graph = scrollToVisible(app, element(app, "factoryProject.graph"))
+        XCTAssertEqual(graph.label, "task graph: 3 tasks in 3 layers")
+        let t1 = revealAboveCapsule(app, scrollToVisible(app, element(app, "factoryProject.graph.node.T1")))
+        let t2 = element(app, "factoryProject.graph.node.T2")
+        let t3 = element(app, "factoryProject.graph.node.T3")
+        XCTAssertTrue(t1.exists && t2.exists && t3.exists)
+        XCTAssertGreaterThan(
+            t1.frame.height, t3.frame.height + 20,
+            "AX5: wrapped 'needs your approval' node must grow taller than single-line 'done' node"
+        )
+        XCTAssertGreaterThan(
+            t2.frame.height, t3.frame.height + 20,
+            "AX5: wrapped 'waiting on others' node must grow taller than single-line 'done' node"
+        )
+        for (name, node) in [("T1", t1), ("T2", t2), ("T3", t3)] {
+            XCTAssertGreaterThanOrEqual(node.frame.minY, graph.frame.minY, "AX5: \(name) inside graph top")
+            XCTAssertLessThanOrEqual(node.frame.maxY, graph.frame.maxY - 4, "AX5: \(name) inside graph bottom")
+        }
+        shot("fix-graph-ax5")
+    }
+
     func testSecondaryComputerWithoutFactoryProjectsKeepsTwoColumnGridAndOnlineTotals() throws {
         let workHeads = #"""
         [{"id":"proj-1","name":"notes","goal":"A notes page with search","state":"running",

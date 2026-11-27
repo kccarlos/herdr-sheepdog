@@ -190,7 +190,7 @@ final class FactoryIPadGraphTests: XCTestCase {
             ("T10", "waiting on you", .blocked, false, "T10, Import, waiting on you, after T6"),
             ("T11", "needs your approval", .blocked, false, "T11, Deploy, needs your approval"),
             ("T12", "blocked", .blocked, false, "T12, Broken, blocked"),
-            ("T13", "waiting on others", .idle, false, "T13, Sync, waiting on others, after T7"),
+            ("T13", "waiting on others", .idle, true, "T13, Sync, waiting on others, after T7"),
             ("T14", "queued", .idle, true, "T14, Filters, queued, after T7"),
             ("T16", "plan review", .idle, false, "T16, Custom, plan review"),
         ]
@@ -200,6 +200,38 @@ final class FactoryIPadGraphTests: XCTestCase {
             XCTAssertEqual(node.tone, tone, ref)
             XCTAssertEqual(node.isDashed, dashed, ref)
             XCTAssertEqual(node.accessibilityLabel, aria, ref)
+        }
+    }
+
+    /// Every stage emitted by the daemon (`internal/factory/flow/rows.go`, `ladder.go`,
+    /// `view.go`) plus unmerged `ended` steps must map to the right `isDashed` border style:
+    /// queued-looking stages (`queued`, `waiting_on_dep`) and ended steps (`split`, `dropped`,
+    /// `closed`) are dashed; active, blocked, and merged-done stages are solid.
+    func testDaemonStageDashedBorders() throws {
+        let cases: [(stage: String, endedStep: String?, wantDashed: Bool)] = [
+            ("done", nil, false),
+            ("done", "split", true),
+            ("done", "dropped", true),
+            ("done", "closed", true),
+            ("working", nil, false),
+            ("ci", nil, false),
+            ("owner_gate", nil, false),
+            ("owner_answer", nil, false),
+            ("blocked_or_failed", nil, false),
+            ("waiting_on_dep", nil, true),
+            ("queued", nil, true),
+        ]
+        let tasksJSON = cases.enumerated().map { index, item in
+            let steps = item.endedStep.map { #"[{"name":"\#($0)","state":"ended"}]"# } ?? "[]"
+            return #"{"ref":"T\#(index + 1)","title":"Task \#(index + 1)","stage":"\#(item.stage)","after":[],"dependents":[],"layer":0,"rounds":0,"steps":\#(steps)}"#
+        }.joined(separator: ",")
+        let view = try decodeGraph(#"{"protocol":1,"project":"proj-1","folder":"~/code/notes","tasks":[\#(tasksJSON)]}"#)
+        let byRef = Dictionary(uniqueKeysWithValues: FactoryTaskGraph(tasks: view.tasks).nodes.map { ($0.ref, $0) })
+        for (index, item) in cases.enumerated() {
+            let ref = "T\(index + 1)"
+            let node = try XCTUnwrap(byRef[ref], ref)
+            let label = item.endedStep.map { "\(item.stage)/\($0)" } ?? item.stage
+            XCTAssertEqual(node.isDashed, item.wantDashed, "stage \(label) isDashed")
         }
     }
 
