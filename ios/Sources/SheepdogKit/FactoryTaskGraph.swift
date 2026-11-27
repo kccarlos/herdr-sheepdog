@@ -113,7 +113,7 @@ public struct FactoryTaskGraph: Equatable, Sendable {
         case "done": return (word, .done, false)
         case "working", "ci": return (word, .working, false)
         case "owner_answer", "owner_gate", "blocked_or_failed": return (word, .blocked, false)
-        case "queued": return (word, .idle, true)
+        case "queued", "waiting_on_dep": return (word, .idle, true)
         default: return (word, .idle, false)
         }
     }
