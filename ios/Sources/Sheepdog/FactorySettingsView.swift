@@ -15,6 +15,7 @@ struct FactorySettingsView: View {
     @State private var busyRows: Set<String> = []
     @State private var showAll = false
     @State private var editingModels: FactorySettingRow?
+    @State private var loadSeq = 0
 
     private var computer: ComputerModel? { model.fleet.model(computerID) }
     private var head: FactoryProjectHead {
@@ -284,18 +285,20 @@ struct FactorySettingsView: View {
     private func load() async {
         if case .failure = loaded { loaded = nil }
         guard let computer else { return }
+        loadSeq += 1
+        let seq = loadSeq
         do {
             let (rows, openAsks) = try await computer.request(as: DaemonClient.self) { [id = head.id] client in
                 (try await client.factorySettings(projectID: id), try? await client.factoryAsks())
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, seq == loadSeq else { return }
             loaded = .success(rows)
             if let openAsks { asks = openAsks }
             if let editing = editingModels, openAsk(for: editing.name) != nil {
                 editingModels = nil
             }
         } catch {
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled, seq == loadSeq else { return }
             if FactoryProjectBoard.isProjectGone(error) {
                 onGone()
             } else if (try? loaded?.get()) == nil {
@@ -356,6 +359,13 @@ struct FactorySettingsView: View {
                 text = optionIndex == 1 ? saved : row.keptNotice(was: ask.set?.was)
                 done = true
                 expire = optionIndex == 1
+                if optionIndex == 1, let value = ask.set?.value, case var .success(rows)? = loaded,
+                   let index = rows.firstIndex(where: { $0.name == row.name }) {
+                    rows[index].value = value
+                    rows[index].problem = nil
+                    loaded = .success(rows)
+                    loadSeq += 1
+                }
             case let .gone(msg):
                 let finished = "Not saved: the project finished before you answered,"
                     + " so this change was cancelled. You can make it again."
