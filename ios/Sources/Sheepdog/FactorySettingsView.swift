@@ -12,7 +12,7 @@ struct FactorySettingsView: View {
     @State private var asks: [FactoryAsk] = []
     @State private var drafts: [String: String] = [:]
     @State private var feedback: [String: (text: String, isError: Bool, done: Bool, fix: String?)] = [:]
-    @State private var busyRow: String?
+    @State private var busyRows: Set<String> = []
     @State private var showAll = false
 
     private var computer: ComputerModel? { model.fleet.model(computerID) }
@@ -90,7 +90,7 @@ struct FactorySettingsView: View {
     private func rowView(_ row: FactorySettingRow) -> some View {
         let ask = openAsk(for: row.name)
         let current = drafts[row.name] ?? ask?.set?.value ?? row.value
-        let sending = busyRow == row.name
+        let sending = busyRows.contains(row.name)
         let dirty = ask == nil && drafts[row.name] != nil && drafts[row.name] != row.value
         let ax = dynamicTypeSize.isAccessibilitySize
         let layout = ax
@@ -141,7 +141,7 @@ struct FactorySettingsView: View {
                 }
                 .buttonStyle(PillButtonStyle(prominent: true, fullWidth: false))
                 .disabled(sending)
-                .accessibilityLabel("Change \(row.label)")
+                .accessibilityLabel(sending ? "Asking…" : "Change \(row.label)")
             }
             if row.isChanged {
                 Button(sending ? "Asking…" : "Back to the default") {
@@ -149,7 +149,9 @@ struct FactorySettingsView: View {
                 }
                 .buttonStyle(PillButtonStyle(fullWidth: false))
                 .disabled(sending)
-                .accessibilityLabel("Set \(row.label) back to the default, \(row.displayDefault)")
+                .accessibilityLabel(
+                    sending ? "Asking…" : "Set \(row.label) back to the default, \(row.displayDefault)"
+                )
             }
         }
     }
@@ -278,9 +280,9 @@ struct FactorySettingsView: View {
 
     private func propose(row: FactorySettingRow, value: String) async {
         guard let computer else { return }
-        busyRow = row.name
+        busyRows.insert(row.name)
         feedback[row.name] = nil
-        defer { busyRow = nil }
+        defer { busyRows.remove(row.name) }
         do {
             let key = "setting:\(head.id):\(row.name):\(value)"
             let ask = try await computer.actions.run(

@@ -259,7 +259,7 @@ public struct FactorySettingRow: Decodable, Equatable, Identifiable, Sendable {
 
     public static func answerError(_ raw: String, computerName: String) -> String {
         let text = raw.hasPrefix("The daemon refused: ") ? String(raw.dropFirst(20)) : raw
-        if text.hasPrefix("proof_required") {
+        if text.hasPrefix("proof_required") || text.hasPrefix("proof_rejected") {
             let err = DaemonError.rejected(status: 403, message: "proof_required")
             return factoryActionError(
                 err, computerName: computerName, linkUsable: true,
@@ -287,7 +287,7 @@ public struct FactorySettingRow: Decodable, Equatable, Identifiable, Sendable {
             .compactMap { $0?.lowerBound }
             .min()
         if let cut {
-            return (String(body[..<cut]).trimmed, String(body[cut...]).trimmed)
+            return (String(body[..<cut]).trimmed.nonEmpty, String(body[cut...]).trimmed)
         }
         return (body.nonEmpty, "")
     }
@@ -341,13 +341,6 @@ public struct FactoryStartCheck: Decodable, Equatable, Sendable {
         self.name = name; self.status = status; self.detail = detail; self.fix = fix
     }
     public var statusWord: String { ["ok": "pass", "warn": "warning", "skip": "skipped"][status] ?? status }
-    public var commandFix: (command: String, rest: String?)? {
-        guard let raw = fix?.trimmed.nonEmpty, raw.hasPrefix("run:") else { return nil }
-        let body = String(raw.dropFirst(4)).trimmed, cut = [body.range(of: " (")?.lowerBound, body.range(of: ", then ")?.lowerBound].compactMap { $0 }.min() ?? body.endIndex
-        guard let command = String(body[..<cut]).trimmed.nonEmpty else { return nil }
-        let tail = String(body[cut...]).trimmed
-        return (command, (tail.hasPrefix(",") ? String(tail.dropFirst()).trimmed : tail).nonEmpty)
-    }
 }
 
 /// A 400 start refusal carrying the daemon's start-check results.
