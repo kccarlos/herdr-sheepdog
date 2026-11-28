@@ -309,9 +309,9 @@ private struct HourGallery: View {
     }
 }
 
-/// Two days under pinned day headings (`-sheepdogCapsuleGallery daysPinned`
+/// Two days with in-flow day headings (`-sheepdogCapsuleGallery daysPinned`
 /// or `daysRest`), with the flag button over the corner as in the real
-/// screen: where the heading sits pinned, at rest, and what it covers.
+/// screen.
 private struct DaysGallery: View {
     let manyYesterday: Bool
 
