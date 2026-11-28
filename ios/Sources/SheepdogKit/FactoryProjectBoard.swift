@@ -80,6 +80,10 @@ public struct FactoryProjectBoard {
     public var canStop: Bool { head.state == .running || (head.state == .finished && live) }
     public var canResume: Bool { summary.resumableFolder != nil }
     public var canChangeGoal: Bool { head.folder?.trimmed.nonEmpty != nil }
+    public var goalUndeliveredNote: String? {
+        head.state == .running && head.goalUndelivered ? "The coordinator did not get the new goal. Give it the goal again." : nil
+    }
+    public var initialGoalDraft: String { goalUndeliveredNote != nil ? head.goal : "" }
     public var goalActionLabel: String { head.state == .finished ? "Reopen with a new goal" : "New goal" }
     public func goalForm(draft: String) -> FactoryGoalForm { .init(state: head.state, hasFolder: canChangeGoal, draft: draft) }
     public var stopAccessibilityLabel: String { "Stop this project" }

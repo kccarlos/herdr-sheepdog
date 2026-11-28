@@ -130,10 +130,17 @@ struct FactoryGoalSheet: View {
     let computer: ComputerModel
     let onGone: () -> Void
     @Environment(\.dismiss) private var dismiss
-    @State private var draft = ""
+    @State private var draft: String
     @State private var errorMessage: String?
     @State private var checks: [FactoryStartCheck] = []
     @State private var submitting = false
+
+    init(head: FactoryProjectHead, computer: ComputerModel, onGone: @escaping () -> Void) {
+        self.head = head
+        self.computer = computer
+        self.onGone = onGone
+        _draft = State(initialValue: head.state == .running && head.goalUndelivered ? head.goal : "")
+    }
 
     private var form: FactoryGoalForm { FactoryGoalForm(state: head.state, hasFolder: head.folder?.trimmedOrNil != nil, draft: draft) }
 

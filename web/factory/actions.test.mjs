@@ -836,3 +836,47 @@ test('style.css sets font-size: 13px on .pill so the project bar state pill matc
   assert.match(pillRule[1], /font-size\s*:\s*13px\b/, '.pill must set font-size: 13px so it does not inherit 15px body size in .pa-st');
 });
 
+test('undelivered goal shows one plain line on a running project, prefills New goal with the same goal, and disappears once settled', async (t) => {
+  const undeliveredMsg = 'The coordinator did not get the new goal. Give it the goal again.';
+  const daemon = fakeDaemon({
+    projects: [
+      mkProj({ id: 'proj-run', folder: '/Users/dev/code/notes', goal: 'Add search filters', state: 'running', running: true, live: true, goal_undelivered: true }),
+      mkProj({ id: 'proj-stop', folder: '/Users/dev/code/stop', goal: 'Stopped goal', state: 'stopped', running: false, live: false, goal_undelivered: true }),
+    ],
+    paired: true,
+    onStart: (body, list) => {
+      const pr = list.find((p) => p.folder === body.folder);
+      if (pr) pr.goal_undelivered = false;
+      return null;
+    },
+  });
+  const page = await bootPage(t, daemon, { hash: '#proj-run' });
+
+  const bar = projectBar(page.doc);
+  assert.ok(bar.textContent.includes(undeliveredMsg), `expected "${undeliveredMsg}" in project bar`);
+  assert.doesNotMatch(bar.textContent, /\b(J12|S9d|new_goal|goal_undelivered)\b/, 'no engine jargon in undelivered goal notice');
+  assert.deepEqual(btnTexts(bar), [W.stop, W.newGoal]);
+
+  // Existing New goal button opens the form prefilled with the exact current goal.
+  btn(bar, W.newGoal).click(); await page.flush();
+  const openBar = projectBar(page.doc);
+  const ta = goalTextarea(openBar, page.doc);
+  assert.equal(ta.value, 'Add search filters', 'New goal must prefill the same goal when undelivered');
+  assert.ok(btn(openBar, W.ngGoRun), 'running new-goal form must offer Give it this goal');
+
+  // Submitting sends the same goal to start and clears the notice once settled.
+  btn(openBar, W.ngGoRun).click(); await page.flush();
+  assert.equal(daemon.started.length, 1);
+  assert.deepEqual({ folder: daemon.started[0].folder, goal: daemon.started[0].goal }, { folder: '/Users/dev/code/notes', goal: 'Add search filters' });
+  const settledBar = projectBar(page.doc);
+  assert.ok(!settledBar.textContent.includes(undeliveredMsg), 'undelivered notice must disappear once settled');
+
+  // Once settled, opening New goal starts empty again.
+  btn(settledBar, W.newGoal).click(); await page.flush();
+  assert.equal(goalTextarea(projectBar(page.doc), page.doc).value, '', 'settled New goal must not prefill old goal');
+
+  // Non-running states never show the undelivered notice.
+  await page.setHash('#proj-stop');
+  assert.ok(!projectBar(page.doc).textContent.includes(undeliveredMsg), 'stopped project must not show undelivered goal notice');
+});
+

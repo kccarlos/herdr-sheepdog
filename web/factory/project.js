@@ -65,13 +65,14 @@ export function renderChecksHTML(results, ui = {}) {
 
 export function renderProjectActionsHTML(project, ui = {}) {
   const st = projectState(project), fin = st === 'finished', canStop = st === 'running' || (fin && Boolean(project?.live));
-  const dis = ui.busy ? ' disabled' : '';
+  const dis = ui.busy ? ' disabled' : '', undelivered = st === 'running' && Boolean(project?.goal_undelivered);
   const note = st === 'stopped' ? 'Stopped. No agent is running. Resume goes on with the same goal.'
     : (fin ? (project?.live ? 'Finished. An agent is still running.' : 'Finished. To go on, reopen it with a new goal.') : '');
+  const undelHTML = undelivered ? ` <p class="pa-warn" role="status">${ERR_ICO}<span>The coordinator did not get the new goal. Give it the goal again.</span></p>` : '';
   const btns = [
     canStop && `<button type="button" class="ask-opt" data-pa="stop" aria-label="Stop this project"${dis}>Stop</button>`,
     st === 'stopped' && `<button type="button" class="ask-opt" data-pa="resume" aria-label="Resume this project"${dis}>${ui.busy === 'resume' ? 'Starting…' : 'Resume'}</button>`,
-    `<button type="button" class="ask-opt" data-pa="newgoal"${dis}>${fin ? 'Reopen with a new goal' : 'New goal'}</button>`,
+    `<button type="button" class="ask-opt${undelivered ? ' rec' : ''}" data-pa="newgoal"${dis}>${fin ? 'Reopen with a new goal' : 'New goal'}</button>`,
   ].filter(Boolean).join(' ');
   let extra = '';
   if (ui.mode === 'stop' && canStop) {
@@ -91,7 +92,7 @@ export function renderProjectActionsHTML(project, ui = {}) {
   if (ui.error && (ui.checks || ui.mode !== 'newgoal')) extra += ` <p class="ask-err" role="alert">${ERR_ICO}<span>${esc(ui.error)}</span></p>`;
   if (Array.isArray(ui.checks) && ui.checks.length) extra += ' ' + renderChecksHTML(ui.checks, { noSummary: true, copied: ui.copied });
   if (ui.pairState?.pending?.kind === 'project' && ui.pairState.pending.project === project?.id) extra += ' ' + pairBoxHTML(ui.pairState, 'pair-code-pa');
-  return `<section class="proj-bar" aria-label="This project"><div class="pa-st"><span class="pill"><span class="dot ${ST_DOT[st] || 'idle'}" aria-hidden="true"></span>${esc(st)}</span>${note ? ` <span class="small muted">${note}</span>` : ''}</div> <div class="ask-opts">${btns}</div>${extra}</section>`;
+  return `<section class="proj-bar" aria-label="This project"><div class="pa-st"><span class="pill"><span class="dot ${ST_DOT[st] || 'idle'}" aria-hidden="true"></span>${esc(st)}</span>${note ? ` <span class="small muted">${note}</span>` : ''}</div>${undelHTML} <div class="ask-opts">${btns}</div>${extra}</section>`;
 }
 
 export function renderNewProjectHTML(rows, ui = {}) {

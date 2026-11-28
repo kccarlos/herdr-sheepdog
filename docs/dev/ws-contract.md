@@ -1922,8 +1922,11 @@ the single source of truth for factory JSON shapes.
 `coordinator_pane` when the coordinator has a live pane, and `alert` when
 one is open. The alert has `kind`, `cause`, and an optional `fix`. The
 stopping alert wins, then the first `agents_down` alert by key, then the
-first remaining alert by key. The project view shares `name`,
-`coordinator_pane` and `alert` with this entry. The name comes from the last
+first remaining alert by key. It also includes `goal_undelivered: true` when
+a running project's current new goal has no queued or in-flight delivery and
+no handling evidence in the current generation. The project view shares
+`name`, `coordinator_pane`, `alert` and `goal_undelivered` with this entry.
+The name comes from the last
 part of the folder path and falls back to the id when there is no folder.
 
 Factory question cards include `factory` with `project` (the id), `kind`

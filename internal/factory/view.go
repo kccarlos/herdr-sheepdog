@@ -46,6 +46,7 @@ type ProjectView struct {
 	Live            bool           `json:"live,omitempty"`
 	Status          string         `json:"status,omitempty"`
 	Counts          map[string]int `json:"counts,omitempty"`
+	GoalUndelivered bool           `json:"goal_undelivered,omitempty"`
 	Error           string         `json:"error,omitempty"`
 }
 
@@ -58,6 +59,7 @@ type ProjectHead struct {
 	Folder          string         `json:"folder,omitempty"`
 	CoordinatorPane string         `json:"coordinator_pane,omitempty"`
 	Alert           *ProjectAlert  `json:"alert,omitempty"`
+	GoalUndelivered bool           `json:"goal_undelivered,omitempty"`
 }
 
 // Clone returns a project head with its counts and alert copied.
@@ -199,7 +201,8 @@ func currentCoordinator(p flow.Project) bool {
 func projectHeadOf(s flow.State) ProjectHead {
 	p := s.Project
 	h := ProjectHead{ID: p.ID, Name: ProjectName(p.ID, p.Folder), Goal: p.Goal, Folder: p.Folder,
-		State: "stopped", Counts: map[string]int{}, Alert: projectAlert(p.Alerts)}
+		State: "stopped", Counts: map[string]int{}, Alert: projectAlert(p.Alerts),
+		GoalUndelivered: flow.GoalUndelivered(p, s.Tasks)}
 	if p.Finished {
 		h.State = "finished"
 	} else if p.Started {
@@ -228,7 +231,7 @@ func projectViewOf(s flow.State) ProjectView {
 	}
 	return ProjectView{ID: h.ID, Name: h.Name, Folder: h.Folder, RepoURL: s.Project.RepoURL, Goal: h.Goal,
 		State: h.State, Running: s.Project.Started, Live: projectLive(s), Status: status, Counts: h.Counts,
-		CoordinatorPane: h.CoordinatorPane, Alert: h.Alert}
+		CoordinatorPane: h.CoordinatorPane, Alert: h.Alert, GoalUndelivered: h.GoalUndelivered}
 }
 
 var taskRows = func() map[string]flow.Row[flow.In] {

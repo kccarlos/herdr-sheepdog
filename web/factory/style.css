@@ -157,6 +157,7 @@ fieldset.np-models > legend { padding: 0; margin-bottom: 4px; }
 .ck-name { font-weight: 500; min-width: 0; overflow-wrap: anywhere; }
 .proj-bar { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .pa-st { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; min-width: 0; }
+.pa-warn { display: flex; gap: 8px; align-items: flex-start; margin: 0; font-size: 14px; font-weight: 500; color: var(--primary-text); overflow-wrap: anywhere; }
 .pa-confirm { border-color: var(--danger); }
 .pa-confirm h3 { font-size: 15px; font-weight: 600; }
 .ask-opt.danger { border-color: var(--danger); color: var(--danger); }

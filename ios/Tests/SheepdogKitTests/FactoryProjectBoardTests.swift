@@ -12,10 +12,11 @@ final class FactoryProjectBoardTests: XCTestCase {
         id: String = "proj-1", name: String = "notes", goal: String = "A notes page with search",
         state: FactoryProjectState = .running, counts: [String: Int] = [:],
         folder: String? = "~/code/notes", coordinatorPane: String? = "coord-notes-1",
-        alert: FactoryProjectAlert? = nil
+        alert: FactoryProjectAlert? = nil, goalUndelivered: Bool? = nil
     ) throws -> FactoryProjectHead {
         var o: [String: Any] = ["id": id, "name": name, "goal": goal, "state": state.rawValue, "counts": counts]
         folder.map { o["folder"] = $0 }; coordinatorPane.map { o["coordinator_pane"] = $0 }
+        goalUndelivered.map { o["goal_undelivered"] = $0 }
         if let a = alert { o["alert"] = ["kind": a.kind, "cause": a.cause].merging(a.fix.map { ["fix": $0] } ?? [:]) { _, r in r } }
         return try DaemonClient.decoder.decode(FactoryProjectHead.self, from: JSONSerialization.data(withJSONObject: o))
     }
@@ -341,6 +342,24 @@ final class FactoryProjectBoardTests: XCTestCase {
         XCTAssertTrue(paddedBoard.showsCoordinatorButton)
         XCTAssertEqual(FactoryCoordinatorWindow(head: paddedHead).coordinatorPane, "coord-notes-1")
         XCTAssertEqual(paddedBoard.sayBox(text: "Wait on T11").sentStatus, "Told the notes factory.")
+    }
+
+    func testGoalUndeliveredNoteAndPrefillAppearOnlyWhileRunningAndClearOnceSettled() throws {
+        let undelivered = FactoryProjectBoard(head: try head(goal: "Add keyboard shortcuts", state: .running, goalUndelivered: true), tasks: [], now: now)
+        XCTAssertEqual(undelivered.goalUndeliveredNote, "The coordinator did not get the new goal. Give it the goal again.")
+        XCTAssertEqual(undelivered.initialGoalDraft, "Add keyboard shortcuts")
+
+        let settled = FactoryProjectBoard(head: try head(goal: "Add keyboard shortcuts", state: .running, goalUndelivered: false), tasks: [], now: now)
+        XCTAssertNil(settled.goalUndeliveredNote)
+        XCTAssertEqual(settled.initialGoalDraft, "")
+
+        let stopped = FactoryProjectBoard(head: try head(goal: "Add keyboard shortcuts", state: .stopped, goalUndelivered: true), tasks: [], now: now)
+        XCTAssertNil(stopped.goalUndeliveredNote)
+        XCTAssertEqual(stopped.initialGoalDraft, "")
+
+        let finished = FactoryProjectBoard(head: try head(goal: "Add keyboard shortcuts", state: .finished, goalUndelivered: true), tasks: [], now: now)
+        XCTAssertNil(finished.goalUndeliveredNote)
+        XCTAssertEqual(finished.initialGoalDraft, "")
     }
 }
 

@@ -1040,6 +1040,14 @@ struct FactoryHeadCard: View {
                 Text($0).font(.footnote).foregroundStyle(Theme.muted)
                     .accessibilityIdentifier("factoryProject.alert.fix")
             }
+            if let note = project?.goalUndeliveredNote {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle").accessibilityHidden(true)
+                    Text(note).fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("factoryProject.goalUndelivered")
+                }
+                .font(.footnote.weight(.semibold)).foregroundStyle(Theme.blockedText)
+            }
             let canStop = project?.canStop == true, folder = canStop ? nil : item.resumableFolder, canGoal = project?.canChangeGoal == true && onGoal != nil
             if canStop || folder != nil || canGoal {
                 OptionFlow(spacing: 8) {

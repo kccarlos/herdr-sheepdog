@@ -41,10 +41,12 @@ public struct FactoryProjectHead: Codable, Equatable, Hashable, Identifiable, Se
     /// Left out by the daemon when no coordinator runs.
     public var coordinatorPane: String?
     public var alert: FactoryProjectAlert?
+    @FactoryDefaultEmpty public var goalUndelivered: Bool
 
     enum CodingKeys: String, CodingKey {
         case id, name, goal, state, counts, folder, alert
         case coordinatorPane = "coordinator_pane"
+        case goalUndelivered = "goal_undelivered"
     }
 }
 
@@ -76,6 +78,7 @@ public struct FactoryProject: Decodable, Equatable, Identifiable, Sendable {
     public var counts: [String: Int]
     public var coordinatorPane: String?
     public var alert: FactoryProjectAlert?
+    public var goalUndelivered: Bool
     /// Set instead of the rest when the project's state file did not load.
     public var error: String?
 
@@ -83,6 +86,7 @@ public struct FactoryProject: Decodable, Equatable, Identifiable, Sendable {
         case id, name, folder, goal, state, running, live, status, counts, alert, error
         case repoURL = "repo_url"
         case coordinatorPane = "coordinator_pane"
+        case goalUndelivered = "goal_undelivered"
     }
 
     public init(from decoder: Decoder) throws {
@@ -99,6 +103,7 @@ public struct FactoryProject: Decodable, Equatable, Identifiable, Sendable {
         counts = try c.decodeIfPresent([String: Int].self, forKey: .counts) ?? [:]
         coordinatorPane = try c.decodeIfPresent(String.self, forKey: .coordinatorPane)
         alert = try c.decodeIfPresent(FactoryProjectAlert.self, forKey: .alert)
+        goalUndelivered = try c.decodeIfPresent(Bool.self, forKey: .goalUndelivered) ?? false
         error = try c.decodeIfPresent(String.self, forKey: .error)
     }
 }

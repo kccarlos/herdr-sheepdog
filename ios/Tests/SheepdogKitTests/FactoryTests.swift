@@ -199,6 +199,39 @@ final class FactoryStateDecodeTests: XCTestCase {
         XCTAssertNil(head.alert)
     }
 
+    func testFactoryHeadAndProjectDecodeGoalUndeliveredAndRejectMalformedType() throws {
+        let omittedHead = try DaemonClient.decoder.decode(
+            FactoryProjectHead.self,
+            from: Data(#"{"id":"proj-1","name":"notes","goal":"g","state":"running","counts":{}}"#.utf8)
+        )
+        XCTAssertFalse(omittedHead.goalUndelivered)
+
+        let undeliveredHead = try DaemonClient.decoder.decode(
+            FactoryProjectHead.self,
+            from: Data(#"{"id":"proj-1","name":"notes","goal":"g","state":"running","counts":{},"goal_undelivered":true}"#.utf8)
+        )
+        XCTAssertTrue(undeliveredHead.goalUndelivered)
+
+        XCTAssertThrowsError(
+            try DaemonClient.decoder.decode(
+                FactoryProjectHead.self,
+                from: Data(#"{"id":"proj-1","name":"notes","goal":"g","state":"running","counts":{},"goal_undelivered":"yes"}"#.utf8)
+            )
+        )
+
+        let undeliveredProject = try DaemonClient.decoder.decode(
+            FactoryProject.self,
+            from: Data(#"{"id":"proj-1","name":"notes","goal":"g","state":"running","running":true,"counts":{},"goal_undelivered":true}"#.utf8)
+        )
+        XCTAssertTrue(undeliveredProject.goalUndelivered)
+
+        let normalProject = try DaemonClient.decoder.decode(
+            FactoryProject.self,
+            from: Data(#"{"id":"proj-1","name":"notes","goal":"g","state":"running","running":true,"counts":{}}"#.utf8)
+        )
+        XCTAssertFalse(normalProject.goalUndelivered)
+    }
+
     /// Strict inner decoding: malformed `alert`, `counts`, or non-string `state`
     /// on `FactoryProject` must fail decoding rather than silently zeroing the field.
     func testFactoryProjectRejectsMalformedNestedValues() throws {
