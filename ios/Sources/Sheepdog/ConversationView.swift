@@ -99,7 +99,7 @@ struct ConversationView: View {
         let sections = Self.sections(display)
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 0, pinnedViews: [.sectionHeaders]) {
+                LazyVStack(spacing: 0) {
                     if canLoadOlder {
                         OlderButton(loading: loadingOlder) {
                             Task { await loadKeepingPosition(proxy) }
@@ -112,24 +112,17 @@ struct ConversationView: View {
                     // Runs of the agents' updates fold into one "N agent
                     // updates" row; what was said stays in the open.
                     ForEach(Array(sections.enumerated()), id: \.element.id) { index, section in
-                        SwiftUI.Section {
-                            ForEach(section.rows) { row in
-                                rowView(row, layout: layout, pointers: pointers)
-                                    .environment(\.ledgerPosition, positions[row.id] ?? .single)
-                                    .padding(.top, gaps[row.id] ?? 0)
-                                    .id(row.id)
-                            }
-                        } header: {
-                            if let day = section.day {
-                                DayDivider(date: day)
-                                    .id(section.id)
-                            }
-                        } footer: {
-                            // The gap before the next day lives here, not in
-                            // the next heading, so a heading sits at the same
-                            // depth pinned and at rest.
-                            if index < sections.count - 1 { Color.clear.frame(height: 8) }
+                        if let day = section.day {
+                            DayDivider(date: day)
+                                .id(section.id)
                         }
+                        ForEach(section.rows) { row in
+                            rowView(row, layout: layout, pointers: pointers)
+                                .environment(\.ledgerPosition, positions[row.id] ?? .single)
+                                .padding(.top, gaps[row.id] ?? 0)
+                                .id(row.id)
+                        }
+                        if index < sections.count - 1 { Color.clear.frame(height: 8) }
                     }
                     Color.clear
                         .frame(height: 1)

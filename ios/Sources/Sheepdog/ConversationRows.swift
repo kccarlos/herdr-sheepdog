@@ -786,12 +786,11 @@ struct CatchMeUpChip: View {
 
 // MARK: - Context
 
-/// "Today", "Yesterday", "Monday 21 September": the section header, so it
-/// sticks to the top while its day scrolls under it.
+/// "Today", "Yesterday", "Monday 21 September": the heading above a day's
+/// rows, laid out in flow so it never overlays a bubble.
 struct DayDivider: View {
     let date: Date
-    /// Space above the heading text, inside its background: the list's top
-    /// margin, so the heading sits at the same depth pinned and at rest.
+    /// Space above the heading text: the list's top margin for the first day.
     var topInset: CGFloat = 12
 
     var body: some View {
@@ -801,13 +800,6 @@ struct DayDivider: View {
             .padding(.top, topInset + 4)
             .padding(.bottom, 8)
             .frame(maxWidth: .infinity)
-            // Opaque, so rows scrolling under the pinned heading do not
-            // show through; it is the page colour, so there is no visible
-            // box while it is not pinned. It bleeds sideways through the
-            // 16 pt gutter only: section headers draw above rows, so any
-            // upward bleed would cut the row above the heading. The strip
-            // above the pinned text is `topInset`, inside the heading.
-            .background(Theme.surface.padding(.horizontal, -16))
             .accessibilityAddTraits(.isHeader)
             .accessibilityIdentifier("divider.day")
     }
