@@ -164,5 +164,22 @@ if [[ "$got" == "$want_full" ]]; then ok "matrix full"; else bad "matrix full"; 
 got="$(bash "$plan" matrix smoke "$work/shards")"
 if [[ "$got" == "$want_smoke" ]]; then ok "matrix smoke"; else bad "matrix smoke"; echo "     got  $got"; echo "     want $want_smoke"; fi
 
+# The macos job in ios.yml must build and test both macOS schemes
+# (SheepdogKitMac and SheepdogMac) defined in ios/project.yml, and
+# ios/project.yml must disable code signing and align deployment targets on
+# the macOS targets.
+ios_yml="$here/../../.github/workflows/ios.yml"
+proj_yml="$here/../project.yml"
+if grep -qE -- '-scheme[[:space:]]+SheepdogKitMac\b' "$ios_yml" && grep -qE -- '-scheme[[:space:]]+SheepdogMac\b' "$ios_yml"; then
+  ok "ios.yml macos job tests SheepdogKitMac and SheepdogMac"
+else
+  bad "ios.yml macos job must test both -scheme SheepdogKitMac and -scheme SheepdogMac"
+fi
+if [[ "$(grep -c 'CODE_SIGNING_ALLOWED: NO' "$proj_yml")" -ge 5 ]] && ! grep -A3 'platform: macOS' "$proj_yml" | grep -q 'deploymentTarget: "26.0"'; then
+  ok "project.yml macOS targets align deploymentTarget and CODE_SIGNING_ALLOWED: NO"
+else
+  bad "project.yml macOS targets must align deploymentTarget and set CODE_SIGNING_ALLOWED: NO"
+fi
+
 if (( fails )); then echo "ci-plan_test: $fails failed"; exit 1; fi
 echo "ci-plan_test: ok"
