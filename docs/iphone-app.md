@@ -175,8 +175,8 @@ Mac panel.
     a row share one card. An open question is one line, "Codex asked —
     answer below"; you answer on the card above the voice bar. At the
     largest text sizes that card is a bar, "Codex asked" and **Answer**,
-    that opens the question. Day headings stay at the top while their day
-    scrolls.
+    that opens the question. Day headings mark the start of each day in the
+    list.
   - Updates that came while no phone was listening read "While you were
     away · …" and fold into the same row ("6 updates while you were
     away"). That row has a **Catch me up** button: it asks the

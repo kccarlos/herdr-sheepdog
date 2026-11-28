@@ -64,7 +64,7 @@ struct ConversationView: View {
         display.contains { if case .row(.day) = $0 { return false } else { return true } }
     }
 
-    /// One day's rows under its sticky heading.
+    /// One day's rows under its day heading.
     private struct DaySection: Identifiable {
         var id: String
         var day: Date?
@@ -156,9 +156,9 @@ struct ConversationView: View {
                 .frame(maxWidth: sizeClass == .regular ? 680 : .infinity)
                 .frame(maxWidth: .infinity)
                 .padding(.horizontal, 16)
-                // The top 12 pt live inside the first day heading (its own
-                // inset), so a pinned heading covers the strip above it
-                // without reaching up over the row above it when it is not.
+                // The first day heading already includes the 12 pt top margin
+                // via `DayDivider.topInset`, so only add top padding when the
+                // list does not start with a day heading.
                 .padding(.top, sections.first?.day == nil ? 12 : 0)
                 .padding(.bottom, 12)
             }
