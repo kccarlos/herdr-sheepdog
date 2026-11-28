@@ -8,6 +8,7 @@ import XCTest
 /// by default). The appearance and text size are the simulator's.
 final class IPadUITests: XCTestCase {
     private let environment = ProcessInfo.processInfo.environment
+    private var windowedCleanup: (() -> Void)?
 
     override func setUpWithError() throws {
         continueAfterFailure = false
@@ -16,6 +17,8 @@ final class IPadUITests: XCTestCase {
     }
 
     override func tearDown() {
+        windowedCleanup?()
+        windowedCleanup = nil
         XCUIDevice.shared.orientation = .portrait
         super.tearDown()
     }
@@ -310,5 +313,133 @@ final class IPadUITests: XCTestCase {
         XCTAssertTrue(element(app, "computer.sidebarVoiceMarker.fixture-1").waitForExistence(timeout: 10))
         XCTAssertEqual(element(app, "computer.sidebarVoiceMarker.fixture-1").label, "Move the voice to Work Mac")
         XCTAssertLessThan(element(app, "computerLabel.sidebar.fixture-1").frame.minY, element(app, "computerLabel.sidebar.fixture-2").frame.minY, "Work Mac stays above Home Mac after moving the voice")
+    }
+
+    /// iPadOS 26/27 Windowed Apps / Stage Manager: the system window-controls
+    /// pill must never overlap the sidebar title, the detail header's Show
+    /// sidebar / All agents / agent-pane controls, or the compact top bar's
+    /// Conversation / Agents switcher.
+    func testWindowedControlsClearHeaders() throws {
+        let agents = #"[{"pane_id":"p-1","alias":"ordinary-qa","kind":"claude","state":"working","workspace_label":"webapp"}]"#
+        let stub = try StubDaemon(.computer(name: "Work Mac", agents: agents, questions: "[]", factory: "[]"))
+        let host = try stub.start()
+
+        let app = XCUIApplication()
+        let sb = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let screenW = max(sb.frame.width, sb.frame.height)
+        let screenH = min(sb.frame.width, sb.frame.height)
+
+        func dragCorner(to target: CGPoint) {
+            let win = app.windows.firstMatch
+            guard win.exists else { return }
+            let frame = win.frame
+            guard frame.minX.isFinite, frame.minY.isFinite, !frame.isEmpty else { return }
+            let start = sb.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: frame.maxX - 6, dy: frame.maxY - 6))
+            let end = sb.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: target.x, dy: target.y))
+            start.press(forDuration: 0.15, thenDragTo: end, withVelocity: .default, thenHoldForDuration: 0.1)
+            sleep(2)
+        }
+
+        func restoreFullScreen() {
+            for _ in 0 ..< 4 {
+                let win = app.windows.firstMatch
+                guard app.state == .runningForeground, win.exists else { break }
+                let frame = win.frame
+                if frame.width >= screenW - 20 && frame.height >= screenH - 20 { break }
+                dragCorner(to: CGPoint(x: screenW - 4, y: screenH - 4))
+            }
+        }
+
+        // Registered for tearDown() (not defer) because continueAfterFailure = false
+        // unwinds via Objective-C exception on assertion failure, bypassing defer.
+        windowedCleanup = {
+            restoreFullScreen()
+            stub.stop()
+        }
+
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogComputers", "Work Mac=\(host)"]
+        app.launch()
+        XCTAssertTrue(app.windows.firstMatch.waitForExistence(timeout: 15), "app window appeared")
+        restoreFullScreen()
+        XCTAssertTrue(element(app, "sidebar.agent.ordinary-qa").waitForExistence(timeout: 15))
+
+        let wc = sb.buttons["window-controls:com.github.kccarlos.herdr-sheepdog-ios"].firstMatch
+
+        func assertClearsWindowControls(_ target: XCUIElement, _ name: String, file: StaticString = #filePath, line: UInt = #line) {
+            XCTAssertTrue(wc.waitForExistence(timeout: 5), "window controls must exist when checking \(name)", file: file, line: line)
+            XCTAssertTrue(target.waitForExistence(timeout: 5), "\(name) must exist", file: file, line: line)
+            let winFrame = app.windows.firstMatch.frame
+            let wcFrame = wc.frame
+            let targetFrame = target.frame
+            XCTAssertTrue(winFrame.minX.isFinite && winFrame.minY.isFinite && !winFrame.isEmpty, "app window frame \(winFrame) must be non-empty", file: file, line: line)
+            XCTAssertTrue(wcFrame.minX.isFinite && wcFrame.minY.isFinite && !wcFrame.isEmpty, "window controls frame \(wcFrame) must be non-empty", file: file, line: line)
+            XCTAssertTrue(targetFrame.minX.isFinite && targetFrame.minY.isFinite && !targetFrame.isEmpty, "\(name) frame \(targetFrame) must be non-empty", file: file, line: line)
+            XCTAssertTrue(winFrame.intersects(wcFrame), "window controls \(wcFrame) must lie inside app window \(winFrame) when checking \(name)", file: file, line: line)
+            XCTAssertFalse(wcFrame.intersects(targetFrame), "window controls \(wcFrame) must not overlap \(name) \(targetFrame)", file: file, line: line)
+        }
+
+        shot("windowed-full")
+
+        // Regular windowed, landscape-aspect on both 11-inch (820 pt tall) and
+        // 13-inch (1032 pt tall) iPads so GeometryProxy.isPortrait stays false.
+        let regularTarget = CGPoint(x: screenW - (screenW - 898) / 2, y: min(screenH - 35, 780))
+        for _ in 0 ..< 3 {
+            let frame = app.windows.firstMatch.frame
+            if frame.width < screenW - 20 && wc.waitForExistence(timeout: 3) { break }
+            dragCorner(to: regularTarget)
+        }
+        let regularWin = app.windows.firstMatch.frame
+        XCTAssertLessThan(regularWin.width, screenW - 20, "corner drag must shrink window from full screen (\(regularWin))")
+        XCTAssertGreaterThan(regularWin.width, regularWin.height, "regular windowed frame must stay landscape (\(regularWin))")
+        XCTAssertTrue(wc.waitForExistence(timeout: 5), "window controls must appear after resizing window to \(regularWin)")
+
+        let title = app.staticTexts["Sheepdog"].firstMatch
+        assertClearsWindowControls(title, "sidebar title")
+        XCTAssertGreaterThanOrEqual(title.frame.width, 95, "sidebar title must not truncate in windowed mode")
+        shot("windowed-898")
+
+        // Regular windowed with sidebar hidden (Conversation).
+        tapWhenTappable(element(app, "sidebar.hide"), "Hide sidebar")
+        let showSidebar = element(app, "sidebar.show")
+        XCTAssertTrue(showSidebar.waitForExistence(timeout: 5), "Show sidebar appeared on Conversation")
+        assertClearsWindowControls(showSidebar, "Show sidebar on Conversation")
+        shot("windowed-898-hidden")
+
+        // Regular windowed with sidebar hidden (All agents).
+        tapWhenTappable(showSidebar, "Show sidebar")
+        tapWhenTappable(element(app, "sidebar.allAgents"), "All agents")
+        tapWhenTappable(element(app, "sidebar.hide"), "Hide sidebar on All agents")
+        XCTAssertTrue(showSidebar.waitForExistence(timeout: 5), "Show sidebar appeared on All agents")
+        let allTitle = element(app, "allAgents.title")
+        assertClearsWindowControls(showSidebar, "Show sidebar on All agents")
+        assertClearsWindowControls(allTitle, "All agents header")
+        shot("windowed-898-allagents-hidden")
+
+        // Regular windowed with sidebar hidden (agent pane).
+        tapWhenTappable(showSidebar, "Show sidebar for agent pane")
+        tapWhenTappable(element(app, "sidebar.agent.ordinary-qa"), "ordinary-qa in sidebar")
+        let agentHeader = element(app, "agentScreen.header")
+        XCTAssertTrue(agentHeader.waitForExistence(timeout: 5), "agent pane header appeared")
+        tapWhenTappable(element(app, "sidebar.hide"), "Hide sidebar on agent pane")
+        XCTAssertTrue(showSidebar.waitForExistence(timeout: 5), "Show sidebar appeared on agent pane")
+        assertClearsWindowControls(showSidebar, "Show sidebar on agent pane")
+        assertClearsWindowControls(agentHeader, "agent pane header")
+
+        // Return to Conversation and resize to compact windowed (~375 pt wide).
+        tapWhenTappable(showSidebar, "Show sidebar before compact resize")
+        tapWhenTappable(element(app, "sidebar.conversation"), "Conversation")
+        let convSegment = element(app, "main.pane.conversation")
+        let compactTarget = CGPoint(x: screenW - (screenW - 375) / 2, y: screenH - 20)
+        for _ in 0 ..< 3 {
+            if convSegment.exists && app.windows.firstMatch.frame.width < 500 { break }
+            dragCorner(to: compactTarget)
+        }
+        let compactWin = app.windows.firstMatch.frame
+        XCTAssertLessThan(compactWin.width, 500, "corner drag must shrink window to compact width (\(compactWin))")
+        XCTAssertTrue(convSegment.waitForExistence(timeout: 10), "narrow window switches to compact TopBar")
+        assertClearsWindowControls(convSegment, "Conversation control")
+        let agentsSegment = element(app, "main.pane.flock")
+        assertClearsWindowControls(agentsSegment, "Agents control")
+        shot("windowed-375")
     }
 }
