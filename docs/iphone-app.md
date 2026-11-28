@@ -27,7 +27,7 @@ setup.
 
 ## Screenshots
 
-All from the [offline demo](#try-it-without-a-computer-the-demo), on an iPhone 18 Pro. Redo them with `ios/scripts/readme-shots.sh` ([how](dev/development.md#readme-and-docs-images)).
+Captured on an iPhone 18 Pro and an iPad Air 11-inch from the [offline demo](#try-it-without-a-computer-the-demo) and simulated factory projects. Redo them with `ios/scripts/readme-shots.sh` ([how](dev/development.md#readme-and-docs-images)).
 
 <table>
   <tr>
@@ -45,6 +45,27 @@ All from the [offline demo](#try-it-without-a-computer-the-demo), on an iPhone 1
 </table>
 
 <p align="center"><img src="../assets/readme/app/ipad.png" alt="On iPad the agents sit in a sidebar beside the detail" width="720"></p>
+
+### Factory
+
+When your computer runs sheepdog on `herdr-core`, the app shows your [factory](factory.md) projects alongside your agents: start a project after its start checks pass, watch tasks and send an instruction in the Tell box, look into the coordinator's window, and confirm setting changes read back to you.
+
+<table>
+  <tr>
+    <td align="center" valign="top"><img src="../assets/readme/app/factory-board.png" alt="A factory project board on iPhone: project state, Stop and New goal controls, the Tell the notes factory box, and active tasks with step status" width="240"><br><sub>Project board: tasks and the Tell box</sub></td>
+    <td align="center" valign="top"><img src="../assets/readme/app/factory-coordinator.png" alt="The coordinator window on iPhone: terminal view, an ask reminder strip pointing back to the ask card, keys, and prompt box" width="240"><br><sub>Coordinator window with an ask reminder</sub></td>
+    <td align="center" valign="top"><img src="../assets/readme/app/factory-new-project.png" alt="The New project sheet on iPhone: picked git repository folder, goal, and start checks with a failing check, copyable terminal fix, and disabled Start button" width="240"><br><sub>New project with start checks</sub></td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td align="center" valign="top"><img src="../assets/readme/app/factory-settings.png" alt="Factory project settings on iPhone: per-role model rows and a read-back confirmation ask for max running with Save (Recommended) and Keep current" width="240"><br><sub>Settings with a read-back ask</sub></td>
+    <td align="center" valign="top"><img src="../assets/readme/app/dark-factory-board.png" alt="The same factory project board in dark mode" width="240"><br><sub>Project board in dark mode</sub></td>
+  </tr>
+</table>
+
+<p align="center"><img src="../assets/readme/app/ipad-factory.png" alt="On iPad the factory project board shows the sidebar, open asks, tasks and interactive dependency graph side by side" width="720"><br><sub>On iPad: the project board with open asks, tasks and the dependency graph side by side</sub></p>
 
 ## Pair
 

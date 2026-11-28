@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 import Network
 
@@ -116,7 +117,10 @@ final class StubDaemon {
     var conversationHandler: (([String]) -> String)?
     /// Enable SSE `/events` streaming so tests can push `factory.changed`.
     var enableEvents = false
+    /// Enable live `/term` WebSocket streaming from `screens` so agent/coordinator windows go live instead of falling back to snapshots.
+    var enableTerm = false
     private var eventClients: [NWConnection] = []
+    private var termClients: [NWConnection] = []
     private var nextEventID: UInt64 = 1_795_550_000_000_001
     private var says: [(project: String, body: String)] = []
     private var stops: [String] = []
@@ -175,7 +179,10 @@ final class StubDaemon {
 
     func stop() {
         let clients = lock.withLock { () -> [NWConnection] in
-            let c = eventClients; eventClients = []; return c
+            let c = eventClients + termClients
+            eventClients = []
+            termClients = []
+            return c
         }
         for client in clients { client.cancel() }
         listener.cancel()
@@ -196,7 +203,7 @@ final class StubDaemon {
                 self.receiveRequest(connection, so: received)
                 return
             }
-            self.answer(connection, String(decoding: received, as: UTF8.self))
+            self.answer(connection, received)
         }
     }
 
@@ -209,11 +216,16 @@ final class StubDaemon {
         return request.count - end.upperBound >= length
     }
 
-    private func answer(_ connection: NWConnection, _ request: String) {
-        let words = request.split(separator: " ")
+    private func answer(_ connection: NWConnection, _ received: Data) {
+        let headEnd = received.range(of: Data("\r\n\r\n".utf8))
+        let headText = headEnd.map { String(decoding: received[..<$0.lowerBound], as: UTF8.self) }
+            ?? String(decoding: received, as: UTF8.self)
+        let trailing = headEnd.map { Data(received[$0.upperBound...]) } ?? Data()
+        let request = String(decoding: received, as: UTF8.self)
+        let words = headText.split(separator: " ")
         let method = words.first.map(String.init) ?? "GET"
         let path = words.dropFirst().first.map(String.init) ?? "/"
-        let body = request.range(of: "\r\n\r\n").map { String(request[$0.upperBound...]) } ?? ""
+        let body = String(decoding: trailing, as: UTF8.self)
         lock.withLock {
             seen.append("\(method) \(path)")
             if method == "POST", path.hasPrefix("/api/turn") { typed.append(Self.typedText(request)) }
@@ -223,6 +235,10 @@ final class StubDaemon {
             let head = Data("HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\n\r\n: ok\n\n".utf8)
             lock.withLock { eventClients.append(connection) }
             connection.send(content: head, completion: .idempotent)
+            return
+        }
+        if method == "GET", path.hasPrefix("/term"), enableTerm, let wsKey = Self.headerValue("sec-websocket-key", in: headText) {
+            upgradeTermWebSocket(connection, key: wsKey, initial: trailing)
             return
         }
         let reply = response(for: path, method: method, body: body)
@@ -426,5 +442,180 @@ final class StubDaemon {
         let bytes = Data(body.utf8)
         let head = "HTTP/1.1 \(status) \(reason)\r\nContent-Type: \(type)\r\nContent-Length: \(bytes.count)\r\nConnection: close\r\n\r\n"
         return Data(head.utf8) + bytes
+    }
+
+    // MARK: - Live `/term` WebSocket
+
+    private final class TermConnectionState {
+        var buffer = Data()
+        var channels: [Int: (pane: String, cols: Int, rows: Int, seq: UInt32)] = [:]
+    }
+
+    private static func headerValue(_ name: String, in head: String) -> String? {
+        let lower = name.lowercased() + ":"
+        for line in head.components(separatedBy: "\r\n") {
+            if line.lowercased().hasPrefix(lower) {
+                return line.dropFirst(lower.count).trimmingCharacters(in: .whitespaces)
+            }
+        }
+        return nil
+    }
+
+    private func upgradeTermWebSocket(_ connection: NWConnection, key: String, initial: Data) {
+        let magic = key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
+        let accept = Data(Insecure.SHA1.hash(data: Data(magic.utf8))).base64EncodedString()
+        let response = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: \(accept)\r\n\r\n"
+        lock.withLock { termClients.append(connection) }
+        let state = TermConnectionState()
+        state.buffer = initial
+        connection.send(content: Data(response.utf8), completion: .contentProcessed { [weak self] error in
+            guard let self, error == nil else { return }
+            self.drainTermFrames(connection, state: state)
+            self.receiveTermData(connection, state: state)
+        })
+    }
+
+    private func receiveTermData(_ connection: NWConnection, state: TermConnectionState) {
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, done, error in
+            guard let self else { return }
+            if let data, !data.isEmpty {
+                state.buffer.append(data)
+                self.drainTermFrames(connection, state: state)
+            }
+            if !done, error == nil {
+                self.receiveTermData(connection, state: state)
+            }
+        }
+    }
+
+    private func drainTermFrames(_ connection: NWConnection, state: TermConnectionState) {
+        while let (opcode, payload, consumed) = Self.parseWSFrame(state.buffer) {
+            state.buffer.removeFirst(consumed)
+            switch opcode {
+            case 0x1:
+                handleTermText(connection, payload: payload, state: state)
+            case 0x8:
+                connection.send(content: Self.encodeWSFrame(opcode: 0x8, payload: Data()), completion: .contentProcessed { _ in connection.cancel() })
+                return
+            case 0x9:
+                connection.send(content: Self.encodeWSFrame(opcode: 0xA, payload: payload), completion: .idempotent)
+            default:
+                break
+            }
+        }
+    }
+
+    private func handleTermText(_ connection: NWConnection, payload: Data, state: TermConnectionState) {
+        guard let obj = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
+              let type = obj["type"] as? String else { return }
+        switch type {
+        case "term-hello":
+            sendWSText(connection, #"{"type":"term-ready","protocol":1,"limits":{"channels":4},"shell":false}"#)
+        case "term-open":
+            guard let ch = obj["ch"] as? Int,
+                  let target = obj["target"] as? [String: Any],
+                  let pane = target["pane_id"] as? String else { return }
+            let cols = obj["cols"] as? Int ?? 58
+            let rows = obj["rows"] as? Int ?? 30
+            guard lock.withLock({ screens[pane] }) != nil else {
+                sendWSText(connection, #"{"type":"term-closed","ch":\#(ch),"reason":"refused:not_tracked"}"#)
+                return
+            }
+            state.channels[ch] = (pane: pane, cols: cols, rows: rows, seq: 0)
+            sendWSText(connection, #"{"type":"term-opened","ch":\#(ch),"pane_id":\#(Self.json(pane)),"mode":"control","cols":\#(cols),"rows":\#(rows),"kind":"agent"}"#)
+            sendTermFullFrame(connection, ch: ch, state: state)
+        case "term-resize":
+            guard let ch = obj["ch"] as? Int, var channel = state.channels[ch] else { return }
+            if let cols = obj["cols"] as? Int { channel.cols = cols }
+            if let rows = obj["rows"] as? Int { channel.rows = rows }
+            state.channels[ch] = channel
+            sendTermFullFrame(connection, ch: ch, state: state)
+        case "term-close":
+            if let ch = obj["ch"] as? Int { state.channels[ch] = nil }
+        default:
+            break
+        }
+    }
+
+    private func sendTermFullFrame(_ connection: NWConnection, ch: Int, state: TermConnectionState) {
+        guard var channel = state.channels[ch],
+              let text = lock.withLock({ screens[channel.pane] }) else { return }
+        channel.seq &+= 1
+        state.channels[ch] = channel
+        var lines = text.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        while lines.last?.isEmpty == true { lines.removeLast() }
+        if channel.rows > 0, lines.count > channel.rows { lines = Array(lines.suffix(channel.rows)) }
+        var ansi = Data("\u{1b}[?2026h\u{1b}[?25l\u{1b}[0m\u{1b}[2J".utf8)
+        for (index, line) in lines.enumerated() {
+            ansi.append(contentsOf: "\u{1b}[\(index + 1);1H".utf8)
+            ansi.append(contentsOf: line.utf8)
+        }
+        ansi.append(contentsOf: "\u{1b}[0m\u{1b}[?2026l".utf8)
+        var frame = Data([
+            0x01,
+            UInt8((ch >> 8) & 0xff), UInt8(ch & 0xff),
+            UInt8((channel.seq >> 24) & 0xff), UInt8((channel.seq >> 16) & 0xff),
+            UInt8((channel.seq >> 8) & 0xff), UInt8(channel.seq & 0xff),
+            UInt8((channel.cols >> 8) & 0xff), UInt8(channel.cols & 0xff),
+            UInt8((channel.rows >> 8) & 0xff), UInt8(channel.rows & 0xff),
+            0x01,
+        ])
+        frame.append(ansi)
+        connection.send(content: Self.encodeWSFrame(opcode: 0x2, payload: frame), completion: .idempotent)
+    }
+
+    private func sendWSText(_ connection: NWConnection, _ text: String) {
+        connection.send(content: Self.encodeWSFrame(opcode: 0x1, payload: Data(text.utf8)), completion: .idempotent)
+    }
+
+    private static func parseWSFrame(_ data: Data) -> (opcode: UInt8, payload: Data, consumed: Int)? {
+        let bytes = [UInt8](data)
+        guard bytes.count >= 2 else { return nil }
+        let opcode = bytes[0] & 0x0f
+        let masked = (bytes[1] & 0x80) != 0
+        var length = Int(bytes[1] & 0x7f)
+        var offset = 2
+        if length == 126 {
+            guard bytes.count >= offset + 2 else { return nil }
+            length = Int(bytes[offset]) << 8 | Int(bytes[offset + 1])
+            offset += 2
+        } else if length == 127 {
+            guard bytes.count >= offset + 8 else { return nil }
+            var value: UInt64 = 0
+            for i in 0 ..< 8 { value = (value << 8) | UInt64(bytes[offset + i]) }
+            length = Int(value)
+            offset += 8
+        }
+        let maskOffset = offset
+        if masked {
+            guard bytes.count >= offset + 4 else { return nil }
+            offset += 4
+        }
+        guard bytes.count >= offset + length else { return nil }
+        var payload = Array(bytes[offset ..< offset + length])
+        if masked {
+            let mask = Array(bytes[maskOffset ..< maskOffset + 4])
+            for i in payload.indices { payload[i] ^= mask[i % 4] }
+        }
+        return (opcode, Data(payload), offset + length)
+    }
+
+    private static func encodeWSFrame(opcode: UInt8, payload: Data) -> Data {
+        var out = Data([0x80 | (opcode & 0x0f)])
+        if payload.count < 126 {
+            out.append(UInt8(payload.count))
+        } else if payload.count <= Int(UInt16.max) {
+            out.append(126)
+            out.append(UInt8((payload.count >> 8) & 0xff))
+            out.append(UInt8(payload.count & 0xff))
+        } else {
+            out.append(127)
+            let count = UInt64(payload.count)
+            for shift in stride(from: 56, through: 0, by: -8) {
+                out.append(UInt8((count >> shift) & 0xff))
+            }
+        }
+        out.append(payload)
+        return out
     }
 }
