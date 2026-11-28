@@ -15,9 +15,10 @@ agents. There is no sheepdog server and no account.
   <img src="../assets/readme/app/conversation.png" alt="The app's conversation" width="140">
   <img src="../assets/readme/app/agents.png" alt="The Agents page: Needs you, Working, Done" width="140">
   <img src="../assets/readme/app/files.png" alt="The Files browser" width="140">
+  <img src="../assets/readme/app/factory-board.png" alt="A factory project board with tasks and the Tell box" width="140">
 </p>
 
-**Using the app** (install, the demo, pairing, notifications,
+**Using the app** (install, the demo, pairing, factory projects, notifications,
 troubleshooting) is in [docs/iphone-app.md](../docs/iphone-app.md). Its
 privacy policy is the daemon's [privacy page](../docs/privacy.md). This
 page is about building the app.

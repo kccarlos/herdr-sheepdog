@@ -209,6 +209,127 @@ final class RedesignShotsUITests: XCTestCase {
         shot("settings-connection")
     }
 
+    /// Factory screens for README and docs/iphone-app.md against `StubDaemon`
+    /// (no live daemon, no network, demo names only): project board with tasks
+    /// and the Tell box, coordinator window with the ask reminder strip,
+    /// project settings with a read-back ask, and the new-project sheet with
+    /// start checks.
+    func testFactorySet() throws {
+        let iso = ISO8601DateFormatter()
+        let started12m = iso.string(from: Date().addingTimeInterval(-12 * 60))
+        let started6m = iso.string(from: Date().addingTimeInterval(-6 * 60))
+        let runningProjects = #"""
+        [{"id":"proj-1","name":"notes","goal":"A notes page with search","state":"running","counts":{"working":2,"done":4},"folder":"~/code/notes","coordinator_pane":"coord-notes-1"},
+         {"id":"proj-2","name":"photos","goal":"Faster thumbnails","state":"stopped","counts":{"done":2,"queued":4},"folder":"~/code/photos"}]
+        """#
+        let boardGraph = #"""
+        {"protocol":1,"project":"proj-1","folder":"~/code/notes","tasks":[
+          {"ref":"T7","title":"Search box and filters","stage":"working","why_waiting":"In review round 2","after":["T1","T4"],"dependents":[],"layer":2,"rounds":1,"run_role":"reviewer","run_cli":"claude","run_started_at":"\#(started12m)","steps":[{"name":"planned","state":"done"},{"name":"implementing","state":"done"},{"name":"review","state":"now","text":"review round 2; needs 2 passing, at most 5"},{"name":"CI","state":"todo"},{"name":"merged","state":"todo"}]},
+          {"ref":"T8","title":"Tag index and autocomplete","stage":"working","why_waiting":"Worker is working","after":["T6"],"dependents":[],"layer":2,"rounds":1,"run_role":"worker","run_cli":"codex","run_started_at":"\#(started6m)","last_actor_decision":{"at":"\#(started6m)","by":"coordinator","decision":"sent back","why":"the tag index must be case-insensitive"},"steps":[{"name":"planned","state":"done"},{"name":"implementing","state":"now","text":"sent back from review round 1; 1 round done"},{"name":"review","state":"todo"}]},
+          {"ref":"T1","title":"Notes page layout","stage":"done","after":[],"dependents":["T4","T7"],"layer":0,"rounds":0,"steps":[{"name":"planned","state":"done"},{"name":"merged","state":"done"}]},
+          {"ref":"T4","title":"Search index migration","stage":"done","after":["T1"],"dependents":["T7"],"layer":1,"rounds":0,"steps":[{"name":"planned","state":"done"},{"name":"merged","state":"done"}]}
+        ]}
+        """#
+        let sampleAsk = #"{"id":"fask-del-1","pane_id":"factory:proj-1","kind":"answer_prompt","agent":"notes","question":"Delete the old notes table?","summary":"Delete the old notes table?","factory":{"project":"proj-1","task":"T10","kind":"delete"},"options":[{"index":1,"label":"Keep it","default":true,"recommended":true},{"index":2,"label":"Delete it"}]}"#
+        let stub = try StubDaemon(.computer(name: "Work Mac", agents: "[]", questions: "[]", factory: runningProjects))
+        stub.enableEvents = true
+        stub.helloFeatures = ["agent-actions"]
+        stub.factoryGraphs["proj-1"] = boardGraph
+        stub.screens["coord-notes-1"] = """
+        ● notes coordinator · 3 active tasks
+          T7  Search box and filters    review round 2 (claude)
+          T8  Tag index autocomplete    implementing (codex)
+          T10 Import legacy notes       waiting on your answer
+
+        ● factory ask T10 "Delete the old notes table?"
+          Options: Keep it (Recommended) · Delete it
+
+        > Monitoring T7 and T8 while waiting on T10.
+        """
+        stub.factorySettings["proj-1"] = FactorySettingsUITests.settingsJSON()
+        stub.proposeSettingHandler = { [weak stub] proj, _ in
+            let q = "This project: max running 4 (now 3). Save?"
+            let ask = #"{"id":"ask-rule-1","project":"\#(proj)","kind":"rule","gated":true,"question":"\#(q)","options":["Save","Keep current"],"recommend":"Save","set":{"name":"max_running","value":"4","was":"3"},"asked_by":"engine","at":"2026-11-26T09:00:00Z","status":"open"}"#
+            let card = #"{"id":"fask-ask-rule-1","pane_id":"factory:\#(proj)","kind":"answer_prompt","agent":"notes","question":"\#(q)","summary":"\#(q)","factory":{"project":"\#(proj)","kind":"rule"},"options":[{"index":1,"label":"Save","default":true,"recommended":true},{"index":2,"label":"Keep current"}]}"#
+            stub?.factoryAsks = #"{"protocol":1,"asks":[\#(ask)]}"#
+            stub?.questionsState = "[\(card)]"
+            stub?.pendingActionState = card
+            stub?.emitFactoryChanged(project: proj)
+            return (200, #"{"ok":true,"ask":\#(ask)}"#)
+        }
+        stub.spacesJSON = #"""
+        {"spaces":[
+          {"id":"w1","name":"notes","path":"~/code/notes","git":true,"worktree":false,"agents":[],"shells":[],"commands":[]},
+          {"id":"w2","name":"bookmarks","path":"~/code/bookmarks","git":true,"worktree":false,"agents":[],"shells":[],"commands":[]}
+        ],"folders":[],"kinds":[{"kind":"claude","name":"Claude"}],"worktrees":true,"needs_access":[]}
+        """#
+        stub.checkHandler = { _ in
+            (200, #"{"results":[{"name":"git version","status":"ok","detail":"git version 2.47.1"},{"name":"start claude","status":"ok","detail":"claude is signed in"},{"name":"start codex","status":"fail","detail":"codex is not signed in","fix":"run: codex login"},{"name":"start fetch","status":"warn","detail":"git failed to fetch origin"}]}"#)
+        }
+        let host = try stub.start(); defer { stub.stop() }
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogComputers", "Work Mac=\(host)"]
+        app.launch()
+
+        // 1. Project board with tasks and the Tell box.
+        showAgentsPane(app)
+        tapWhenTappable(scrollToVisible(app, app.descendants(matching: .any)["flock.factory.proj-1"].firstMatch), "notes head")
+        XCTAssertTrue(app.descendants(matching: .any)["factoryProject.board"].waitForExistence(timeout: 15))
+        XCTAssertTrue(app.descendants(matching: .any)["factoryProject.task.T7"].waitForExistence(timeout: 10))
+        sleep(1)
+        shot("factory-board")
+
+        // 2. Coordinator window with the ask reminder strip.
+        stub.questionsState = "[\(sampleAsk)]"
+        stub.pendingActionState = sampleAsk
+        stub.emitFactoryChanged(project: "proj-1")
+        let coordBtn = app.buttons["factoryProject.coordinator"].firstMatch
+        XCTAssertTrue(coordBtn.waitForExistence(timeout: 10))
+        tapWhenTappable(coordBtn, "Coordinator")
+        let terminal = app.descendants(matching: .any)["agentScreen.terminal"].firstMatch
+        XCTAssertTrue(terminal.waitForExistence(timeout: 10))
+        expectation(for: NSPredicate(format: "value CONTAINS 'notes coordinator'"), evaluatedWith: terminal)
+        waitForExpectations(timeout: 15)
+        XCTAssertTrue(app.descendants(matching: .any)["coordinatorWindow.askStrip"].waitForExistence(timeout: 10))
+        sleep(1)
+        shot("factory-coordinator")
+
+        // 3. Project settings with a read-back confirmation ask.
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.descendants(matching: .any)["factoryProject.board"].waitForExistence(timeout: 10))
+        stub.questionsState = "[]"
+        stub.pendingActionState = nil
+        stub.emitFactoryChanged(project: "proj-1")
+        tapWhenTappable(scrollToVisible(app, app.buttons["factoryProject.settings"].firstMatch), "Settings")
+        XCTAssertTrue(app.staticTexts["For this project only. A change is read back to you and saved when you confirm."].waitForExistence(timeout: 10))
+        let plusMaxRun = scrollToVisible(app, app.buttons["factorySettings.increment.max_running"].firstMatch)
+        tapWhenTappable(plusMaxRun, "+ max running")
+        tapWhenTappable(scrollToVisible(app, app.buttons["Change max running"].firstMatch), "Change max running")
+        XCTAssertTrue(app.staticTexts["This project: max running 4 (now 3). Save?"].waitForExistence(timeout: 10))
+        _ = scrollToVisible(app, app.buttons["factorySettings.allFold"].firstMatch)
+        sleep(1)
+        shot("factory-settings")
+
+        // 4. New factory project sheet with start checks.
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        XCTAssertTrue(app.descendants(matching: .any)["factoryProject.board"].waitForExistence(timeout: 10))
+        app.navigationBars.buttons.element(boundBy: 0).tap()
+        showAgentsPane(app)
+        let sheet = app.descendants(matching: .any)["factoryNewProject.sheet"].firstMatch
+        tapMenuItem(app, menu: "toolbar.new", item: "new.factoryProject", until: sheet)
+        tapWhenTappable(scrollToVisible(app, app.buttons["~/code/bookmarks, git repository"].firstMatch), "bookmarks folder")
+        let goalField = scrollToVisible(app, app.descendants(matching: .any)["factoryNewProject.goal"].firstMatch)
+        typeWhenFocused(goalField, "Tag and search saved links")
+        // Dismiss software keyboard before running checks so the full start-checks card is visible.
+        app.navigationBars["New project"].firstMatch.tap()
+        tapWhenTappable(scrollToVisible(app, app.buttons["Check this folder"].firstMatch), "Check this folder")
+        XCTAssertTrue(app.staticTexts["1 check failed. Fix it, then check again."].waitForExistence(timeout: 10))
+        _ = scrollToVisible(app, app.buttons["Start the project and its agents"].firstMatch)
+        sleep(1)
+        shot("factory-new-project")
+    }
+
     // MARK: - Helpers
 
     /// Conversation or Agents: the copy on screen (the demo keeps the

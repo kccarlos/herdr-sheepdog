@@ -61,6 +61,12 @@ Point sheepdog at a GitHub repository and give it a goal: a **coordinator** plan
   </picture>
 </p>
 
+<p align="center">
+  <img src="assets/readme/app/factory-board.png" alt="A factory project board on iPhone: project controls, the Tell box for instructions to the coordinator, and active tasks" width="190">
+  <img src="assets/readme/app/factory-coordinator.png" alt="The coordinator window on iPhone: terminal view, an ask reminder strip pointing back to the ask card, and a prompt box" width="190">
+</p>
+<p align="center"><sub>Factory projects in the iPhone app: the project board with tasks and the Tell box, and the coordinator window with an ask reminder. <a href="docs/iphone-app.md#factory">More iPhone and iPad factory screenshots →</a></sub></p>
+
 ---
 
 <a id="install"></a>
