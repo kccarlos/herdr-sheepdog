@@ -538,12 +538,6 @@ final class FactoryClientRouteTests: XCTestCase {
             }
         }
     }
-
-    /// Deferred until daemon PR 5 lands `POST /api/factory/projects/{id}/say`
-    /// (`docs/dev/design/app-factory.md` §6.2, §10 rows 5 and 7).
-    func testFactorySayRouteDeferredUntilPR5() throws {
-        throw XCTSkip("POST /api/factory/projects/{id}/say is added in daemon PR 5; pin its request/response shape once PR 5 merges.")
-    }
 }
 
 final class FactoryEventRefreshTests: XCTestCase {
