@@ -6,11 +6,9 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"net"
 	"os"
 	"os/signal"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -180,7 +178,8 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return 1
 	}
 	applyDataDir(&cfg, o.dataDir)
-	opts := app.Options{Voice: o.voice, Herdr: o.herdr, CLI: o.cli, Brain: o.brain, Port: o.port, Dev: o.dev, HeardEcho: o.heardEcho, Version: version, EnvFileNames: envNames}
+	applyPort(&cfg, o.port)
+	opts := app.Options{Voice: o.voice, Herdr: o.herdr, CLI: o.cli, Brain: o.brain, Dev: o.dev, HeardEcho: o.heardEcho, Version: version, EnvFileNames: envNames}
 	if err := app.Check(cfg, opts); err != nil {
 		fprintf(stderr, "sheepdog serve: %v\n", err)
 		return 2
@@ -195,11 +194,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		return 1
 	}
 	defer func() { lock.Release() }() // lock is re-taken after a failed hand-over
-	port := cfg.Web.Port
-	if o.port > 0 {
-		port = o.port
-	}
-	if msg := portBusyMessage(ctx, cfg, port); msg != "" {
+	if msg := portBusyMessage(ctx, cfg); msg != "" {
 		fprintln(stderr, msg)
 		return 1
 	}
@@ -304,7 +299,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		}
 		if err := listenRetry(a, run > 0); err != nil {
 			if errors.Is(err, syscall.EADDRINUSE) {
-				if msg := portBusyMessage(ctx, cfg, port); msg != "" {
+				if msg := portBusyMessage(ctx, cfg); msg != "" {
 					fprintln(stderr, msg)
 					return 1
 				}
@@ -319,9 +314,10 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 		if serveBuilt != nil {
 			serveBuilt(a)
 		}
-		_ = lock.Write(daemon.Info{PID: os.Getpid(), URL: localURLOf(a, cfg), Version: version, StartedAt: startedAt, Background: o.background})
+		localURL := daemon.LocalURL(a.Config().Web.Bind, a.Port())
+		_ = lock.Write(daemon.Info{PID: os.Getpid(), URL: localURL, Version: version, StartedAt: startedAt, Background: o.background})
 		if run == 0 {
-			fprintf(stderr, "sheepdog serve %s: %s\n", version, cfg)
+			fprintf(stderr, "sheepdog serve %s: %s\n", version, a.Config())
 			fprintf(stdout, "sheepdog %s listening on %s (voice=%s herdr=%s cli=%s orchestrator=%s)\n", version, a.URL(), a.VoiceProvider(), o.herdr, o.cli, a.BrainMode())
 		} else {
 			fprintf(stdout, "sheepdog reloaded its settings: listening on %s (voice=%s orchestrator=%s)\n", a.URL(), a.VoiceProvider(), a.BrainMode())
@@ -336,7 +332,7 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 			}
 		}
 		if a.SetupNeeded() {
-			fprintf(stdout, "  setup       %s/setup  (no voice key yet: the voice is off until you add one)\n", localURLOf(a, cfg))
+			fprintf(stdout, "  setup       %s/setup  (no voice key yet: the voice is off until you add one)\n", localURL)
 		}
 		if run == 0 {
 			fprintf(stdout, "  voice page  %s/voice\n", a.URL())
@@ -418,10 +414,6 @@ func runServe(ctx context.Context, args []string, stdout, stderr io.Writer) int 
 					fprintf(stderr, "sheepdog serve: the new settings do not start (%v); keeping the old ones\n", err)
 					cfg = a.Config()
 				}
-			}
-			port = cfg.Web.Port
-			if o.port > 0 {
-				port = o.port
 			}
 			continue
 		}
@@ -512,17 +504,6 @@ var handOverToService = func(ctx context.Context, cfg config.Config, o serveOpts
 // listens.
 var serveBuilt func(*app.App)
 
-// localURLOf is the URL this computer reaches the daemon on (the pid
-// file's): 127.0.0.1 for a bind on every address, not http://[::]:port.
-func localURLOf(a *app.App, cfg config.Config) string {
-	_, p, err := net.SplitHostPort(strings.TrimPrefix(a.URL(), "http://"))
-	port, _ := strconv.Atoi(p)
-	if err != nil || port == 0 {
-		return a.URL()
-	}
-	return daemon.LocalURL(cfg.Web.Bind, port)
-}
-
 // listenRetry binds the web port. After a reload the old listener has
 // just closed; a few short retries cover the moment it takes.
 func listenRetry(a *app.App, reload bool) error {
@@ -551,6 +532,7 @@ func reloadServeConfig(baseEnv []string, o serveOpts, stderr io.Writer) (config.
 		return config.Config{}, names, false
 	}
 	applyDataDir(&cfg, o.dataDir)
+	applyPort(&cfg, o.port)
 	return cfg, names, true
 }
 
@@ -576,9 +558,17 @@ func applyDataDir(cfg *config.Config, dir string) {
 	cfg.DataDir = dir
 }
 
+// applyPort applies --port when set (non-zero; invalid values fail app.Check).
+func applyPort(cfg *config.Config, port int) {
+	if port != 0 {
+		cfg.Web.Port = port
+	}
+}
+
 // portBusyMessage says who holds the daemon's port, or "" when it is
 // free (or port is 0: a free one is picked).
-func portBusyMessage(ctx context.Context, cfg config.Config, port int) string {
+func portBusyMessage(ctx context.Context, cfg config.Config) string {
+	port := cfg.Web.Port
 	if port <= 0 {
 		return ""
 	}

@@ -307,7 +307,10 @@ func (a *App) wire() error {
 	deps.Term, deps.HerdrBackend = a.term, a.herdrBackend
 	deps.HerdrBackends, deps.HerdrOverride = a.herdrBackends, a.herdrOverride()
 	deps.Shell, deps.Files, deps.Advertise = cfg.Web.Shell, cfg.Web.Files, cfg.Web.Advertise
-	deps.TailscaleHTTPS, deps.TailscaleCert = cfg.Web.TailscaleHTTPS, web.TailscaleCertCLI(cfg.DataDir, cfg.Web.Port)
+	deps.TailscaleHTTPS = cfg.Web.TailscaleHTTPS
+	deps.TailscaleCert = func(ctx context.Context) (string, []byte, []byte, error) {
+		return web.TailscaleCertCLI(cfg.DataDir, a.Port())(ctx)
+	}
 	deps.TailscaleFunnel = web.TailscaleFunnelCLI()
 	tlsID, err := web.LoadTLSIdentity(cfg.DataDir, nil)
 	if err != nil {

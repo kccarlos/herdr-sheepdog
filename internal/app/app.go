@@ -205,7 +205,6 @@ type App struct {
 	web            *web.Server
 	factory        *factory.Engine
 	prompts        *prompts.Loader
-	port           int
 
 	queryLazy *lazyQuerier // nil when --cli=off; filled in by Run after daemon.start
 
@@ -309,6 +308,12 @@ func Check(cfg config.Config, opts Options) error {
 	if opts.Brain != BrainOn && opts.Brain != BrainOff && opts.Brain != BrainFake {
 		return fmt.Errorf("app: --brain must be %s, %s or %s", BrainOn, BrainOff, BrainFake)
 	}
+	if opts.Port < 0 || opts.Port > 65535 {
+		return fmt.Errorf("app: --port=%d: want a port number", opts.Port)
+	}
+	if cfg.Web.Port < 0 || cfg.Web.Port > 65535 {
+		return fmt.Errorf("app: web.port=%d: want a port number", cfg.Web.Port)
+	}
 	// A missing voice key is not an error with the default --voice=on:
 	// the daemon starts in setup mode (web server up, voice off until
 	// `sheepdog setup` saves a key). Only a provider forced by the flag
@@ -335,9 +340,8 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 	if err := Check(cfg, opts); err != nil {
 		return nil, err
 	}
-	port := cfg.Web.Port
 	if opts.Port > 0 {
-		port = opts.Port
+		cfg.Web.Port = opts.Port
 	}
 
 	elog, err := eventlog.Open(cfg.DataDir, eventlog.Options{Stderr: opts.Stderr})
@@ -352,7 +356,7 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 		log = teeLogger{elog, opts.Echo}
 	}
 	ml := &mutedLogger{Logger: log}
-	a := &App{cfg: cfg, opts: opts, elog: elog, log: ml, mutedLog: ml, port: port, restart: make(chan string, 1)}
+	a := &App{cfg: cfg, opts: opts, elog: elog, log: ml, mutedLog: ml, restart: make(chan string, 1)}
 	if err := a.wire(); err != nil {
 		_ = elog.Close()
 		return nil, err
@@ -361,10 +365,28 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 	return a, nil
 }
 
-// Listen binds web.bind:<port> (web.bind defaults to 127.0.0.1). URL is
-// valid afterwards.
+// Listen binds web.bind:<port> (web.bind defaults to 127.0.0.1). URL and Port
+// are valid afterwards, and factory RunEnv reflects the actual bound port
+// (including when port 0 picks an ephemeral port).
 func (a *App) Listen() error {
-	return a.web.Listen(net.JoinHostPort(a.cfg.Web.Bind, strconv.Itoa(a.port)))
+	if err := a.web.Listen(net.JoinHostPort(a.cfg.Web.Bind, strconv.Itoa(a.cfg.Web.Port))); err != nil {
+		return err
+	}
+	if p := a.web.Port(); p > 0 {
+		a.factory.RunEnv["SHEEPDOG_WEB_PORT"] = strconv.Itoa(p)
+	}
+	return nil
+}
+
+// Port returns the bound TCP port once Listen has succeeded, else the
+// configured web.port.
+func (a *App) Port() int {
+	if a.web != nil {
+		if p := a.web.Port(); p > 0 {
+			return p
+		}
+	}
+	return a.cfg.Web.Port
 }
 
 // URL returns the base URL of the web server ("" before Listen).
@@ -426,8 +448,13 @@ func lanURLs(port string) []string {
 	return out
 }
 
-// Config is the config the daemon was built with.
-func (a *App) Config() config.Config { return a.cfg }
+// Config is the config the daemon runs with (Web.Port reflects the bound port
+// once Listen has succeeded).
+func (a *App) Config() config.Config {
+	cfg := a.cfg
+	cfg.Web.Port = a.Port()
+	return cfg
+}
 
 // Log returns the daemon's logger (the event log, plus the echo).
 func (a *App) Log() logging.Logger { return a.log }

@@ -3,12 +3,17 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/app"
 )
 
 // noKeys clears every provider key for the test: a developer's .env
@@ -67,6 +72,16 @@ func TestServeFlagsAndValidation(t *testing.T) {
 	stderr.Reset()
 	if code := run(context.Background(), []string{"serve", "--config", filepath.Join(dir, "none.toml"), "--voice", "gemini", "--data-dir", dir}, &stdout, &stderr); code != 2 || !strings.Contains(stderr.String(), "GEMINI_API_KEY") {
 		t.Errorf("gemini without key: exit=%d %s", code, stderr.String())
+	}
+	envPath := filepath.Join(dir, ".env")
+	if err := os.WriteFile(envPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, bad := range []string{"-1", "65536"} {
+		stderr.Reset()
+		if code := run(context.Background(), []string{"serve", "--env-file", envPath, "--config", filepath.Join(dir, "none.toml"), "--port", bad, "--voice", "off", "--herdr", "mock", "--data-dir", dir}, &stdout, &stderr); code != 2 {
+			t.Errorf("bad --port=%s: exit=%d %s", bad, code, stderr.String())
+		}
 	}
 }
 
@@ -216,13 +231,17 @@ func TestServeEnvFileLoadsAndNeverLogs(t *testing.T) {
 func TestServeMockVoiceOffSmoke(t *testing.T) {
 	noKeys(t)
 	dir := t.TempDir()
+	envPath := filepath.Join(dir, ".env")
+	if err := os.WriteFile(envPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("SHEEPDOG_WEB_PORT", "0")
 
 	stdout, stderr := &syncBuffer{}, &syncBuffer{}
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan int, 1)
 	go func() {
-		done <- run(ctx, []string{"serve", "--config", filepath.Join(dir, "none.toml"), "--voice", "off", "--herdr", "mock", "--data-dir", dir, "--verbose"}, stdout, stderr)
+		done <- run(ctx, []string{"serve", "--env-file", envPath, "--config", filepath.Join(dir, "none.toml"), "--voice", "off", "--herdr", "mock", "--data-dir", dir, "--verbose"}, stdout, stderr)
 	}()
 	// Wait for the banner with the URL.
 	var url string
@@ -257,6 +276,16 @@ func TestServeMockVoiceOffSmoke(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("serve did not exit")
 	}
+	if _, boundPort, err := net.SplitHostPort(strings.TrimPrefix(url, "http://")); err != nil || boundPort == "0" {
+		t.Errorf("bound url = %q (err=%v)", url, err)
+	} else {
+		if !strings.Contains(stderr.String(), "web.port="+boundPort) {
+			t.Errorf("stderr missing ephemeral web.port=%s: %s", boundPort, stderr.String())
+		}
+		if strings.Contains(stderr.String(), "web.port=0") {
+			t.Errorf("stderr logged web.port=0 instead of %s: %s", boundPort, stderr.String())
+		}
+	}
 	if !strings.Contains(stderr.String(), `"daemon.start"`) || !strings.Contains(stderr.String(), `"daemon.stop"`) {
 		t.Errorf("--verbose did not echo daemon events: %s", stderr.String())
 	}
@@ -279,5 +308,98 @@ func TestDefaultSecretFileMayBeAbsent(t *testing.T) {
 	var stderr bytes.Buffer
 	if code, ok := loadServeEnvFile(missing, &stderr); !ok || code != 0 {
 		t.Errorf("absent default secret file: code=%d ok=%v %s", code, ok, stderr.String())
+	}
+}
+
+// TestServePortFlagOverridesLoggedPort proves `sheepdog serve --port N`
+// (without SHEEPDOG_WEB_PORT) logs web.port=N and builds the daemon with
+// Config().Web.Port == N, including across a reload even when the env file
+// sets a different SHEEPDOG_WEB_PORT.
+func TestServePortFlagOverridesLoggedPort(t *testing.T) {
+	noKeys(t)
+	unsetEnv(t, "SHEEPDOG_WEB_PORT")
+
+	port := freePort(t)
+	otherPort := freePort(t)
+	wantSuffix := ":" + strconv.Itoa(port)
+	wantLogged := fmt.Sprintf("web.port=%d", port)
+
+	dir := t.TempDir()
+	envPath := filepath.Join(dir, ".env")
+	if err := os.WriteFile(envPath, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	built := make(chan *app.App, 4)
+	serveBuilt = func(a *app.App) { built <- a }
+	t.Cleanup(func() { serveBuilt = nil })
+
+	stdout, stderr := &syncBuffer{}, &syncBuffer{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan int, 1)
+	go func() {
+		done <- run(ctx, []string{
+			"serve",
+			"--env-file", envPath,
+			"--config", filepath.Join(dir, "none.toml"),
+			"--port", strconv.Itoa(port),
+			"--voice", "off",
+			"--herdr", "mock",
+			"--cli", "off",
+			"--brain", "off",
+			"--data-dir", dir,
+		}, stdout, stderr)
+	}()
+
+	next := func() *app.App {
+		t.Helper()
+		select {
+		case a := <-built:
+			return a
+		case code := <-done:
+			t.Fatalf("serve exited %d: %s", code, stderr.String())
+		case <-time.After(10 * time.Second):
+			t.Fatalf("no daemon built: %s", stderr.String())
+		}
+		return nil
+	}
+
+	a := next()
+	if !strings.HasSuffix(a.URL(), wantSuffix) {
+		t.Errorf("initial URL = %q, want suffix %q", a.URL(), wantSuffix)
+	}
+	if a.Config().Web.Port != port {
+		t.Errorf("initial Config().Web.Port = %d, want %d", a.Config().Web.Port, port)
+	}
+
+	// Reload must keep --port even if the env file sets a different port.
+	if err := os.WriteFile(envPath, []byte(fmt.Sprintf("SHEEPDOG_WEB_PORT=%d\n", otherPort)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a.RequestRestart("test")
+	a = next()
+	if !strings.HasSuffix(a.URL(), wantSuffix) {
+		t.Errorf("reloaded URL = %q, want suffix %q", a.URL(), wantSuffix)
+	}
+	if a.Config().Web.Port != port {
+		t.Errorf("reloaded Config().Web.Port = %d, want %d", a.Config().Web.Port, port)
+	}
+
+	cancel()
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("exit = %d: %s", code, stderr.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not exit")
+	}
+
+	errOut := stderr.String()
+	if !strings.Contains(errOut, wantLogged) {
+		t.Errorf("stderr missing %q: %s", wantLogged, errOut)
+	}
+	if strings.Contains(errOut, "web.port=7777") {
+		t.Errorf("stderr logged default web.port=7777 instead of %d: %s", port, errOut)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -372,9 +373,10 @@ func TestSetupDemoRoutes(t *testing.T) {
 }
 
 type fakeDemo struct {
-	mu  sync.Mutex
-	log []string
-	on  bool
+	mu      sync.Mutex
+	log     []string
+	on      bool
+	lastCfg config.Config
 }
 
 func (d *fakeDemo) calls() []string {
@@ -382,10 +384,10 @@ func (d *fakeDemo) calls() []string {
 	defer d.mu.Unlock()
 	return append([]string{}, d.log...)
 }
-func (d *fakeDemo) Start(config.Config) (DemoState, error) {
+func (d *fakeDemo) Start(cfg config.Config) (DemoState, error) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	d.log, d.on = append(d.log, "start"), true
+	d.log, d.on, d.lastCfg = append(d.log, "start"), true, cfg
 	return DemoState{Running: true, URL: "http://127.0.0.1:7778"}, nil
 }
 func (d *fakeDemo) Stop(string) {
@@ -428,5 +430,83 @@ func TestHerdrBackendSwitch(t *testing.T) {
 	data, err := os.ReadFile(f.env)
 	if err != nil || !strings.Contains(string(data), "SHEEPDOG_HERDR_BACKEND=hc") {
 		t.Errorf("env file = %q (%v), want SHEEPDOG_HERDR_BACKEND=hc", string(data), err)
+	}
+}
+
+// TestSetupUsesBoundPortAfterEphemeralListen proves setup checks and demo start
+// resolve Web.Port from the bound listener when configured with port 0.
+func TestSetupUsesBoundPortAfterEphemeralListen(t *testing.T) {
+	cfg := config.Default()
+	cfg.DataDir = t.TempDir()
+	cfg.Web.Port = 0
+	f := newSetupFixture(t, cfg)
+	var funnelPort int
+	f.h.srv.deps.TailscaleFunnel = func(_ context.Context, port int) (bool, error) {
+		funnelPort = port
+		return false, nil
+	}
+	if err := f.h.srv.Listen("127.0.0.1:0"); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- f.h.srv.Serve(ctx, time.Second) }()
+	t.Cleanup(func() {
+		cancel()
+		<-done
+	})
+
+	_, portStr, err := net.SplitHostPort(f.h.srv.Addr())
+	if err != nil {
+		t.Fatal(err)
+	}
+	bound, err := strconv.Atoi(portStr)
+	if err != nil || bound <= 0 {
+		t.Fatalf("bound port %q: %v", portStr, err)
+	}
+	base := "http://" + f.h.srv.Addr()
+
+	resp, err := http.Get(base + "/api/setup/checks")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out struct {
+		Checks []SetupCheck `json:"checks"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		_ = resp.Body.Close()
+		t.Fatal(err)
+	}
+	_ = resp.Body.Close()
+	wantAddr := "127.0.0.1:" + portStr
+	var found bool
+	for _, c := range out.Checks {
+		if c.Name == "web port" {
+			found = true
+			if !strings.Contains(c.Detail, wantAddr) {
+				t.Errorf("web port detail = %q, want %q", c.Detail, wantAddr)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("missing web port check: %+v", out.Checks)
+	}
+	if funnelPort != bound {
+		t.Errorf("TailscaleFunnel port = %d, want %d", funnelPort, bound)
+	}
+
+	dresp, err := http.Post(base+"/api/setup/demo", "application/json", strings.NewReader(`{"action":"start"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = dresp.Body.Close()
+	if dresp.StatusCode != http.StatusOK {
+		t.Fatalf("/api/setup/demo status = %d", dresp.StatusCode)
+	}
+	f.demo.mu.Lock()
+	gotDemoPort := f.demo.lastCfg.Web.Port
+	f.demo.mu.Unlock()
+	if gotDemoPort != bound {
+		t.Errorf("demo Start Web.Port = %d, want %d", gotDemoPort, bound)
 	}
 }

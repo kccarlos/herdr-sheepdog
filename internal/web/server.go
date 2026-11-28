@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -753,6 +754,18 @@ func (s *Server) Addr() string {
 		return ""
 	}
 	return s.ln.Addr().String()
+}
+
+// Port returns the bound TCP port once Listen has succeeded, else 0.
+func (s *Server) Port() int {
+	if addr := s.Addr(); addr != "" {
+		if _, p, err := net.SplitHostPort(addr); err == nil {
+			if n, err := strconv.Atoi(p); err == nil && n > 0 {
+				return n
+			}
+		}
+	}
+	return 0
 }
 
 // Serve serves on the listener from Listen until ctx ends, then shuts
