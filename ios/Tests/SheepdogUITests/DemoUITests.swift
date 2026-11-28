@@ -185,4 +185,12 @@ final class DemoUITests: XCTestCase {
         let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
         XCTAssertFalse(springboard.alerts.firstMatch.waitForExistence(timeout: 4), "no permission prompt in the demo's first seconds")
     }
+
+    func testClosingTypingBoxRepeatedly() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogDemoPaused", "-sheepdogOpenDemo"]
+        app.launch()
+        XCTAssertTrue(app.descendants(matching: .any)["demo.header"].waitForExistence(timeout: 15))
+        stressCloseTypingBox(app)
+    }
 }

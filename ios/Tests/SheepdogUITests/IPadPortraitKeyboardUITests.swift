@@ -74,6 +74,15 @@ final class IPadPortraitKeyboardUITests: XCTestCase {
         XCTAssertTrue(element(app, "voice.capsule").waitForExistence(timeout: 5), "the capsule comes back")
     }
 
+    func testClosingTypingBoxRepeatedlyInPortrait() throws {
+        let app = XCUIApplication()
+        app.launchArguments = ["-sheepdogResetState", "-sheepdogNoAnimations", "-sheepdogDemoSilent", "-sheepdogDemoPaused", "-sheepdogOpenDemo"]
+        app.launch()
+        XCTAssertTrue(element(app, "demo.header").waitForExistence(timeout: 20))
+        XCTAssertTrue(element(app, "sidebar.show").waitForExistence(timeout: 10), "the sidebar is hidden in portrait")
+        stressCloseTypingBox(app)
+    }
+
     func testShellWindowTypesInPortrait() throws {
         let app = openAgent()
         tapWhenTappable(app.buttons.matching(identifier: "agentScreen.menu").firstMatch, "the window menu")

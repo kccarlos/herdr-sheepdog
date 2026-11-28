@@ -1,5 +1,6 @@
 import SheepdogKit
 import SwiftUI
+import UIKit
 
 /// The floating voice capsule (canvas "Dock"): the mic (mute) button, the
 /// orb, the name and status — a button that opens the voice menu — and the
@@ -568,11 +569,12 @@ struct CapsuleComposer: View {
     let voiceName: String
     let sending: Bool
     let error: String?
+    var focused: FocusState<Bool>.Binding
     let send: (String) async -> Bool
     let close: () -> Void
 
     @State private var text = ""
-    @FocusState private var focused: Bool
+    @State private var closing = false
     @ScaledMetric(relativeTo: .body) private var scaledHeight: CGFloat = 60
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
@@ -589,7 +591,7 @@ struct CapsuleComposer: View {
                     .accessibilityIdentifier("type.error")
             }
             HStack(spacing: 8) {
-                Button(action: close) {
+                Button(action: dismiss) {
                     CapsuleOrb(mode: .quiet)
                 }
                 .buttonStyle(.plain)
@@ -601,7 +603,7 @@ struct CapsuleComposer: View {
                     .lineLimit(1 ... (dynamicTypeSize.isAccessibilitySize ? 2 : 4))
                     .textInputAutocapitalization(.sentences)
                     .submitLabel(.send)
-                    .focused($focused)
+                    .focused(focused)
                     .onSubmit(submit)
                     .accessibilityLabel("Message to \(voiceName)")
                     .accessibilityIdentifier("type.field")
@@ -628,7 +630,35 @@ struct CapsuleComposer: View {
             .frame(minHeight: min(max(scaledHeight, 60), 100))
             .capsuleSurface()
         }
-        .onAppear { focused = true }
+        .onAppear { focused.wrappedValue = true }
+        .onChange(of: focused.wrappedValue) { _, isFocused in
+            guard closing, !isFocused else { return }
+            // Wait past UIKit's `_UIAfterCACommitQueue` focus flush before
+            // tearing down the TextField's AttributeGraph subtree.
+            DispatchQueue.main.async { DispatchQueue.main.async { finishClose() } }
+        }
+        .onDisappear { closing = false }
+    }
+
+    private func dismiss() {
+        guard !closing else { return }
+        closing = true
+        guard focused.wrappedValue else {
+            finishClose()
+            return
+        }
+        focused.wrappedValue = false
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(100))
+            finishClose()
+        }
+    }
+
+    private func finishClose() {
+        guard closing else { return }
+        closing = false
+        close()
     }
 
     private func submit() {
@@ -637,7 +667,7 @@ struct CapsuleComposer: View {
         Task {
             if await send(sent) {
                 text = ""
-                focused = false
+                focused.wrappedValue = false
             }
         }
     }

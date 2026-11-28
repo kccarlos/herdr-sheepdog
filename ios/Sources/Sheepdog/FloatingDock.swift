@@ -22,6 +22,7 @@ struct FloatingDock: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.motionNamespace) private var motionNamespace
     @Namespace private var fallbackNamespace
+    @FocusState private var composerFocused: Bool
 
     private var motion: Namespace.ID { motionNamespace ?? fallbackNamespace }
 
@@ -66,8 +67,10 @@ struct FloatingDock: View {
                         voiceName: model.voiceName,
                         sending: model.conversationModel.sendingTyped,
                         error: model.conversationModel.typedError,
+                        focused: $composerFocused,
                         send: { await model.sendTyped($0) },
                         close: {
+                            guard ui.typing else { return }
                             withAnimation(Theme.ease(reduceMotion: reduceMotion)) { ui.typing = false }
                             model.conversationModel.typedError = nil
                         }

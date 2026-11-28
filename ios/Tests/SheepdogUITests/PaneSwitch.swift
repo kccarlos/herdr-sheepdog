@@ -342,6 +342,39 @@ extension XCTestCase {
         return nil
     }
 
+    /// Repeatedly opens the composer, types and closes it with `type.close`.
+    /// Uses a fixed small cycle count (overridable via `SHEEPDOG_STRESS_CYCLES`
+    /// for local soaking) with generous per-cycle timeouts and no wall-clock
+    /// budget assertion so slower CI runners never flake.
+    func stressCloseTypingBox(_ app: XCUIApplication, cycles: Int = 5, file: StaticString = #filePath, line: UInt = #line) {
+        let totalCycles = max(1, ProcessInfo.processInfo.environment["SHEEPDOG_STRESS_CYCLES"].flatMap(Int.init) ?? cycles)
+        // Under `-sheepdogOpenDemo`, SwiftUI exposes the covered unconfigured
+        // root `MainView` first, where `controls.type` is disabled (`canType == false`).
+        // Filtering on `isEnabled == true` selects only the visible demo copy
+        // (and is absent while `CapsuleComposer` is open).
+        let typeButtons = app.buttons.matching(NSPredicate(format: "identifier == 'controls.type' AND isEnabled == true"))
+        let field = app.textFields.matching(identifier: "type.field").firstMatch
+        let close = app.buttons.matching(identifier: "type.close").firstMatch
+        for cycle in 1 ... totalCycles {
+            XCTAssertTrue(typeButtons.firstMatch.waitForExistence(timeout: 15), "cycle \(cycle): controls.type", file: file, line: line)
+            let openDeadline = Date().addingTimeInterval(15)
+            while !field.exists, Date() < openDeadline {
+                if tapElementTappable(typeButtons) {
+                    _ = field.waitForExistence(timeout: 2)
+                } else {
+                    usleep(100_000)
+                }
+            }
+            XCTAssertTrue(field.exists, "cycle \(cycle): tapping controls.type opened type.field", file: file, line: line)
+            typeWhenFocused(field, "a", file: file, line: line)
+            if close.isTappable { close.tap() } else { tapWhenTappable(close, "cycle \(cycle): type.close", file: file, line: line) }
+            if field.exists {
+                XCTAssertTrue(field.waitForNonExistence(timeout: 10), "cycle \(cycle): composer closed", file: file, line: line)
+            }
+            XCTAssertTrue(typeButtons.firstMatch.waitForExistence(timeout: 10), "cycle \(cycle): controls.type returned", file: file, line: line)
+        }
+    }
+
     /// Activates the matched accessibility element itself. This preserves
     /// which copy was selected when the demo and the covered app share an
     /// identifier; a coordinate tap would hit whichever copy is visually on
