@@ -233,7 +233,8 @@ final class RedesignShotsUITests: XCTestCase {
         let sampleAsk = #"{"id":"fask-del-1","pane_id":"factory:proj-1","kind":"answer_prompt","agent":"notes","question":"Delete the old notes table?","summary":"Delete the old notes table?","factory":{"project":"proj-1","task":"T10","kind":"delete"},"options":[{"index":1,"label":"Keep it","default":true,"recommended":true},{"index":2,"label":"Delete it"}]}"#
         let stub = try StubDaemon(.computer(name: "Work Mac", agents: "[]", questions: "[]", factory: runningProjects))
         stub.enableEvents = true
-        stub.helloFeatures = ["agent-actions"]
+        stub.enableTerm = true
+        stub.helloFeatures = ["agent-actions", "term"]
         stub.factoryGraphs["proj-1"] = boardGraph
         stub.screens["coord-notes-1"] = """
         ● notes coordinator · 3 active tasks
@@ -291,6 +292,7 @@ final class RedesignShotsUITests: XCTestCase {
         XCTAssertTrue(terminal.waitForExistence(timeout: 10))
         expectation(for: NSPredicate(format: "value CONTAINS 'notes coordinator'"), evaluatedWith: terminal)
         waitForExpectations(timeout: 15)
+        XCTAssertFalse(app.descendants(matching: .any)["agentScreen.notice"].exists, "live coordinator window shows no snapshot banner")
         XCTAssertTrue(app.descendants(matching: .any)["coordinatorWindow.askStrip"].waitForExistence(timeout: 10))
         sleep(1)
         shot("factory-coordinator")
