@@ -3,12 +3,17 @@ package main
 import (
 	"bytes"
 	"context"
+	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kccarlos/herdr-sheepdog/internal/app"
 )
 
 // noKeys clears every provider key for the test: a developer's .env
@@ -279,5 +284,93 @@ func TestDefaultSecretFileMayBeAbsent(t *testing.T) {
 	var stderr bytes.Buffer
 	if code, ok := loadServeEnvFile(missing, &stderr); !ok || code != 0 {
 		t.Errorf("absent default secret file: code=%d ok=%v %s", code, ok, stderr.String())
+	}
+}
+
+// TestServePortFlagOverridesLoggedPort proves `sheepdog serve --port N`
+// (without SHEEPDOG_WEB_PORT) logs web.port=N and builds the daemon with
+// Config().Web.Port == N, including across a reload.
+func TestServePortFlagOverridesLoggedPort(t *testing.T) {
+	noKeys(t)
+	unsetEnv(t, "SHEEPDOG_WEB_PORT")
+
+	port := 18091
+	if ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port)); err == nil {
+		_ = ln.Close()
+	} else {
+		port = freePort(t)
+	}
+	wantSuffix := ":" + strconv.Itoa(port)
+	wantLogged := fmt.Sprintf("web.port=%d", port)
+
+	dir := t.TempDir()
+	built := make(chan *app.App, 4)
+	serveBuilt = func(a *app.App) { built <- a }
+	t.Cleanup(func() { serveBuilt = nil })
+
+	stdout, stderr := &syncBuffer{}, &syncBuffer{}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan int, 1)
+	go func() {
+		done <- run(ctx, []string{
+			"serve",
+			"--config", filepath.Join(dir, "none.toml"),
+			"--port", strconv.Itoa(port),
+			"--voice", "off",
+			"--herdr", "mock",
+			"--cli", "off",
+			"--brain", "off",
+			"--data-dir", dir,
+		}, stdout, stderr)
+	}()
+
+	next := func() *app.App {
+		t.Helper()
+		select {
+		case a := <-built:
+			return a
+		case code := <-done:
+			t.Fatalf("serve exited %d: %s", code, stderr.String())
+		case <-time.After(10 * time.Second):
+			t.Fatalf("no daemon built: %s", stderr.String())
+		}
+		return nil
+	}
+
+	a := next()
+	if !strings.HasSuffix(a.URL(), wantSuffix) {
+		t.Errorf("initial URL = %q, want suffix %q", a.URL(), wantSuffix)
+	}
+	if a.Config().Web.Port != port {
+		t.Errorf("initial Config().Web.Port = %d, want %d", a.Config().Web.Port, port)
+	}
+
+	// Reload must keep the --port override too.
+	a.RequestRestart("test")
+	a = next()
+	if !strings.HasSuffix(a.URL(), wantSuffix) {
+		t.Errorf("reloaded URL = %q, want suffix %q", a.URL(), wantSuffix)
+	}
+	if a.Config().Web.Port != port {
+		t.Errorf("reloaded Config().Web.Port = %d, want %d", a.Config().Web.Port, port)
+	}
+
+	cancel()
+	select {
+	case code := <-done:
+		if code != 0 {
+			t.Fatalf("exit = %d: %s", code, stderr.String())
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("serve did not exit")
+	}
+
+	errOut := stderr.String()
+	if !strings.Contains(errOut, wantLogged) {
+		t.Errorf("stderr missing %q: %s", wantLogged, errOut)
+	}
+	if strings.Contains(errOut, "web.port=7777") {
+		t.Errorf("stderr logged default web.port=7777 instead of %d: %s", port, errOut)
 	}
 }

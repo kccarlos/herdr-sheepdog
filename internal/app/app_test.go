@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -842,5 +844,59 @@ func TestBrainConfigKeyVars(t *testing.T) {
 	got := BrainConfig(cfg).KeyVars
 	if len(got) != 1 || got["openai"] != "OPENAI_ORCH_API_KEY" {
 		t.Errorf("KeyVars = %v", got)
+	}
+}
+
+// TestBuildPortOverrideSetsConfigAndFactoryRunEnv proves Options.Port
+// (--port) updates the daemon's config web.port and factory RunEnv from
+// one source of truth, and Listen() propagates an ephemeral (0) port too.
+func TestBuildPortOverrideSetsConfigAndFactoryRunEnv(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.Web.Port = config.DefaultWebPort // 7777, as when SHEEPDOG_WEB_PORT is unset
+	a, err := Build(cfg, Options{Voice: VoiceOff, Herdr: HerdrMock, CLI: CLIOff, Brain: BrainOff, Port: 18091, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = a.elog.Close() }()
+	if a.Config().Web.Port != 18091 {
+		t.Errorf("Config().Web.Port = %d, want 18091", a.Config().Web.Port)
+	}
+	if got := a.Config().String(); !strings.Contains(got, "web.port=18091") {
+		t.Errorf("Config().String() missing web.port=18091: %s", got)
+	}
+	if got := a.factory.RunEnv["SHEEPDOG_WEB_PORT"]; got != "18091" {
+		t.Errorf("factory.RunEnv[SHEEPDOG_WEB_PORT] = %q, want %q", got, "18091")
+	}
+
+	// Ephemeral port (0): Listen() binds a free port and updates the same
+	// config and factory RunEnv before Run() starts any factory work.
+	eph := testConfig(t)
+	eph.Web.Port = 0
+	b, err := Build(eph, Options{Voice: VoiceOff, Herdr: HerdrMock, CLI: CLIOff, Brain: BrainOff, Stderr: io.Discard})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = b.elog.Close() }()
+	if err := b.Listen(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		_ = b.web.Serve(ctx, time.Second)
+	})
+	_, portStr, err := net.SplitHostPort(strings.TrimPrefix(b.URL(), "http://"))
+	if err != nil {
+		t.Fatalf("URL %q: %v", b.URL(), err)
+	}
+	bound, err := strconv.Atoi(portStr)
+	if err != nil || bound <= 0 {
+		t.Fatalf("bound port %q: %v", portStr, err)
+	}
+	if b.Config().Web.Port != bound {
+		t.Errorf("ephemeral Config().Web.Port = %d, want %d", b.Config().Web.Port, bound)
+	}
+	if got := b.factory.RunEnv["SHEEPDOG_WEB_PORT"]; got != portStr {
+		t.Errorf("ephemeral factory.RunEnv[SHEEPDOG_WEB_PORT] = %q, want %q", got, portStr)
 	}
 }
