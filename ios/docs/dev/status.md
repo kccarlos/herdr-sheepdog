@@ -121,6 +121,7 @@ xcodebuild -scheme Sheepdog -destination 'platform=iOS Simulator,name=iPhone 17 
 
 The unit suite (`SheepdogKitTests`) has about 1,250 tests. `LiveDaemonTests` and
 the UI tests that need a daemon skip themselves when none answers on `127.0.0.1:7799`.
+For UI tests that tap software keyboard keys (`ShellDemoUITests`, `IPadPortraitKeyboardUITests`), keep the on-screen keyboard visible by disabling Connect Hardware Keyboard (`defaults write com.apple.iphonesimulator ConnectHardwareKeyboard -bool false`) and, on headless simulators that have seen a hardware keyboard, turning off automatic minimization (`xcrun simctl spawn <udid> defaults write com.apple.keyboard.preferences AutomaticMinimizationEnabled -bool false` and `HardwareKeyboardLastSeen -bool false`).
 
 **In CI** (`.github/workflows/ios.yml`, GitHub-hosted Macs) a smoke job and
 five shards split the suite (the first Mac job to claim the build compiles

@@ -239,6 +239,7 @@ private struct AgentWindowContent: View {
                 }
             }
         }
+        .containerCornerOffset(.top, sizeToFit: true)
         .background(Theme.surface)
         .environment(ui)
         .onAppear {

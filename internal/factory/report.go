@@ -104,7 +104,7 @@ func (e *Engine) Report(token, verb string, args json.RawMessage) error {
 			tasks[i].Unreviewed = true
 		}
 	}
-	s.Tasks = tasks
+	s.Tasks, s.Project.GoalCmdGen = tasks, s.Project.GoalGen
 	titles := make([]string, len(tasks))
 	for i, t := range tasks {
 		titles[i] = t.ID + " " + t.Title
@@ -1143,7 +1143,7 @@ func (e *Engine) acceptRecapDecideLocked(id string, s *flow.State, role string, 
 		if len(req.Children) > 0 {
 			return e.refuse(id, "invalid_report", "drop does not take --child tasks.")
 		}
-		rc.Decided, t.Dropped = &flow.RecapDecision{Choice: choice, Why: why, At: now}, &flow.Dropped{Why: why}
+		rc.Decided, t.Dropped, s.Project.GoalCmdGen = &flow.RecapDecision{Choice: choice, Why: why, At: now}, &flow.Dropped{Why: why}, s.Project.GoalGen
 		return e.commitLocked(id, s, LogLine{By: role, Task: t.ID, Input: map[string]any{"verb": "recap decide", "choice": choice, "why": why},
 			Rule: "recap decide", Decision: "dropped", Why: why})
 	}
@@ -1260,7 +1260,7 @@ func (e *Engine) acceptTaskLocked(id string, s *flow.State, role string, args js
 	case "park", "unpark":
 		t.Parked = req.Action == "park"
 	case "drop":
-		t.Dropped = &flow.Dropped{Why: why}
+		t.Dropped, s.Project.GoalCmdGen = &flow.Dropped{Why: why}, s.Project.GoalGen
 		closePlanFindings(&s.Project, t.ID, flow.PlanClosedDropped, true)
 		var waiting []string // nothing is unblocked silently: they keep waiting on the dropped id
 		for _, o := range s.Tasks {
@@ -1282,7 +1282,7 @@ func (e *Engine) acceptTaskLocked(id string, s *flow.State, role string, args js
 		} else if tip != a.BaseCommit {
 			return e.refuse(id, "nothing_new", "The worker committed since it reported nothing to change; send it back or wait for its ready.")
 		}
-		t.Closed = &flow.Closed{Why: why}
+		t.Closed, s.Project.GoalCmdGen = &flow.Closed{Why: why}, s.Project.GoalGen
 	case "send-back":
 		if a == nil {
 			return e.refuse(id, "invalid_report", fmt.Sprintf("Task %q has no attempt to send back.", t.ID))
@@ -1596,6 +1596,9 @@ func (e *Engine) acceptAmendLocked(id string, s *flow.State, role string, args j
 	for i := range added {
 		added[i].Unreviewed = s.Settings.PlanReviewRounds > 0
 		done = append(done, added[i].ID+" (new)")
+	}
+	if len(added) > 0 {
+		s.Project.GoalCmdGen = s.Project.GoalGen
 	}
 	s.Tasks = append(s.Tasks, added...)
 	return e.commitLocked(id, s, LogLine{By: role, Input: map[string]any{"verb": "plan amend", "why": why, "tasks": done},

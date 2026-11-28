@@ -150,6 +150,9 @@ struct IPadSidebar: View {
             }
             .scrollBounceBehavior(.basedOnSize)
         }
+        // Clear iPadOS 26/27 floating window controls in windowed scenes
+        // without cramping the sidebar title and action buttons.
+        .containerCornerOffset(.top, sizeToFit: true)
         // The sidebar is a 390 pt column: it grows up to the largest
         // non-accessibility size, as the iPhone's chrome does; the detail
         // keeps scaling.
@@ -529,6 +532,9 @@ struct IPadDetailView: View {
                 }
             }
         }
+        // Clear iPadOS 26/27 floating window controls when the detail column
+        // occupies the window's top-leading corner (e.g. sidebar hidden).
+        .containerCornerOffset(.top, sizeToFit: true)
         .background(Theme.surface)
         // The question, the coach mark and the capsule float over the
         // detail, which scrolls under them.
