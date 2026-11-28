@@ -179,7 +179,7 @@ func (l *lifecycle) launch(ctx context.Context, oldPID int) int {
 		fprintln(l.out, alreadyRunning(info, pidKnown))
 		return 0
 	}
-	if msg := portBusyMessage(ctx, l.cfg, l.cfg.Web.Port); msg != "" && oldPID == 0 {
+	if msg := portBusyMessage(ctx, l.cfg); msg != "" && oldPID == 0 {
 		fprintln(l.errw, msg)
 		return 1
 	}

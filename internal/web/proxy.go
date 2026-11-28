@@ -212,12 +212,8 @@ func (s *Server) hasValidTicket(r *http.Request) bool {
 }
 
 func (s *Server) targetPort(r *http.Request) int {
-	if addr := s.Addr(); addr != "" {
-		if _, p, err := net.SplitHostPort(addr); err == nil {
-			if n, err := strconv.Atoi(p); err == nil && n > 0 {
-				return n
-			}
-		}
+	if p := s.Port(); p > 0 {
+		return p
 	}
 	if r != nil && r.Host != "" {
 		if _, p, err := net.SplitHostPort(r.Host); err == nil {

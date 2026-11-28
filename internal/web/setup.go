@@ -770,9 +770,19 @@ func (s *Server) restartSoon(reason string) {
 	}()
 }
 
+// setupConfig returns the daemon config with Web.Port resolved from the
+// bound listener once Listen has succeeded (covering ephemeral port 0).
+func (s *Server) setupConfig() config.Config {
+	cfg := s.deps.Setup.Config
+	if p := s.Port(); p > 0 {
+		cfg.Web.Port = p
+	}
+	return cfg
+}
+
 func (s *Server) handleSetupChecks(w http.ResponseWriter, r *http.Request) {
 	sd := s.deps.Setup
-	results := onboard.Doctor(r.Context(), sd.Config, onboard.DoctorOptions{
+	results := onboard.Doctor(r.Context(), s.setupConfig(), onboard.DoctorOptions{
 		Endpoints: sd.Endpoints, ConfigPath: sd.ConfigPath, EnvPath: sd.EnvPath,
 		TailscaleFunnel: s.deps.TailscaleFunnel,
 	})
@@ -871,7 +881,7 @@ func (s *Server) handleSetupDemo(w http.ResponseWriter, r *http.Request) {
 	}
 	switch req.Action {
 	case "start":
-		st, err := d.Start(s.deps.Setup.Config)
+		st, err := d.Start(s.setupConfig())
 		if err != nil {
 			writeJSON(w, http.StatusConflict, map[string]any{"error": err.Error(), "demo": d.State()})
 			return
