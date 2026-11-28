@@ -193,6 +193,9 @@ struct PhoneRootView: View {
                 .frame(maxHeight: .infinity)
                 bottomStack
             }
+            // Clear iPadOS 26/27 floating window controls in compact windowed
+            // scenes without cramping the top bar or overlapping its divider.
+            .containerCornerOffset(.top, sizeToFit: true)
             .background(Theme.surface)
             // The whole screen above the keyboard, outside the floating
             // stack: what the questions decide inline or compact against.
