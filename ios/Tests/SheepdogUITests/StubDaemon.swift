@@ -44,6 +44,12 @@ final class StubDaemon {
         set { lock.withLock { _checkDelay = newValue } }
     }
     private var _checkDelay: TimeInterval = 0
+    /// Optional response delay for `GET /api/factory/.../settings` alone.
+    var settingsGetDelay: TimeInterval {
+        get { lock.withLock { _settingsGetDelay } }
+        set { lock.withLock { _settingsGetDelay = newValue } }
+    }
+    private var _settingsGetDelay: TimeInterval = 0
     private let lock = NSLock()
     private var seen: [String] = []
     /// The lines typed so far (`POST /api/turn`'s `text`).
@@ -218,8 +224,15 @@ final class StubDaemon {
             return
         }
         let reply = response(for: path, method: method, body: body)
-        let delay = method == "POST" && path.hasPrefix("/api/factory/projects/check") && checkDelay > 0
-            ? checkDelay : (method == "POST" ? postDelay : 0)
+        let clean = path.prefix { $0 != "?" }
+        let isSettingsGet = method == "GET" && (clean == "/api/factory/settings" || (clean.hasPrefix("/api/factory/projects/") && clean.hasSuffix("/settings")))
+        let delay: TimeInterval = if isSettingsGet, settingsGetDelay > 0 {
+            settingsGetDelay
+        } else if method == "POST", path.hasPrefix("/api/factory/projects/check"), checkDelay > 0 {
+            checkDelay
+        } else {
+            method == "POST" ? postDelay : 0
+        }
         queue.asyncAfter(deadline: .now() + delay) {
             connection.send(content: reply, completion: .contentProcessed { _ in connection.cancel() })
         }

@@ -91,4 +91,70 @@ extension FactorySettingsUITests {
         stub.emitFactoryChanged(project: "proj-1")
         XCTAssertTrue(app.textFields["factoryModels.model.0"].waitForNonExistence(timeout: 10), "external open ask on edited models row must close FactoryModelsEditor")
     }
+
+    func testSavedNoticeShowsUpdatedRowValueBeforeReloadFinishes() throws {
+        let stub = try StubDaemon(.computer(name: "Work Mac", agents: "[]", questions: "[]", factory: Self.runningNotes))
+        stub.factoryGraphs["proj-1"] = Self.emptyGraph
+        wireReadBack(stub, project: "proj-1")
+        let host = try stub.start()
+        defer { stub.stop() }
+
+        let app = launch(host: host)
+        showAgentsPane(app)
+        tapWhenTappable(scrollToVisible(app, app.descendants(matching: .any)["flock.factory.proj-1"].firstMatch), "notes head")
+        tapWhenTappable(scrollToVisible(app, app.buttons["factoryProject.settings"].firstMatch), "Settings")
+
+        let workerRow = scrollToVisible(app, app.descendants(matching: .any)["factorySettings.row.models.worker"].firstMatch)
+        XCTAssertTrue(workerRow.waitForExistence(timeout: 10))
+        XCTAssertTrue(workerRow.staticTexts["claude · sonnet · medium"].exists)
+
+        // Propose reordering agy/gemini-4-neon/high ahead of claude/sonnet/medium on worker models.
+        tapWhenTappable(scrollToVisible(app, app.buttons["Edit worker models"].firstMatch), "Edit worker models")
+        tapWhenTappable(scrollToVisible(app, app.buttons["Add a model"].firstMatch), "Add a model")
+        tapWhenTappable(scrollToVisible(app, app.descendants(matching: .any)["factoryModels.cli.1"].buttons["agy"].firstMatch), "agy CLI")
+        tapWhenTappable(scrollToVisible(app, app.descendants(matching: .any)["factoryModels.effort.1"].buttons["high"].firstMatch), "high effort")
+        typeWhenFocused(scrollToVisible(app, app.textFields["factoryModels.model.1"].firstMatch), "gemini-4-neon\n")
+        tapWhenTappable(scrollToVisible(app, app.buttons["Move agy gemini-4-neon up"].firstMatch), "Move up")
+        tapWhenTappable(scrollToVisible(app, app.buttons["Change worker models"].firstMatch), "Change worker models")
+
+        let saveBtn = scrollToVisible(app, app.buttons["Save (Recommended)"].firstMatch)
+        XCTAssertTrue(saveBtn.waitForExistence(timeout: 10))
+
+        // Delay the trailing GET /settings reload so any subtitle lag fails deterministically.
+        stub.settingsGetDelay = 3.0
+        tapWhenTappable(saveBtn, "Save worker models")
+
+        let savedNotice = workerRow.staticTexts["Saved. The next agent started for this role uses it. Running agents keep their model."].firstMatch
+        XCTAssertTrue(savedNotice.waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            workerRow.staticTexts["agy · gemini-4-neon · high, claude · sonnet · medium"].exists,
+            "worker models subtitle must already show the new value when 'Saved.' appears"
+        )
+        XCTAssertFalse(
+            workerRow.staticTexts["claude · sonnet · medium"].exists,
+            "worker models subtitle must not lag on the previous value while 'Saved.' is visible"
+        )
+        XCTAssertTrue(workerRow.staticTexts["changed"].exists, "changed chip must appear alongside 'Saved.'")
+
+        // Also check a non-model numeric row (max_running: 3 -> 4) under a delayed reload.
+        stub.settingsGetDelay = 0
+        let maxRunRow = scrollToVisible(app, app.descendants(matching: .any)["factorySettings.row.max_running"].firstMatch)
+        tapWhenTappable(scrollToVisible(app, incrementButton(app, name: "max_running", label: "max running")), "+ max running")
+        tapWhenTappable(scrollToVisible(app, app.buttons["Change max running"].firstMatch), "Change max running")
+        let saveMax = scrollToVisible(app, app.buttons["Save (Recommended)"].firstMatch)
+        XCTAssertTrue(saveMax.waitForExistence(timeout: 10))
+
+        stub.settingsGetDelay = 3.0
+        tapWhenTappable(saveMax, "Save max running")
+
+        let savedMaxNotice = maxRunRow.staticTexts["Saved. The engine uses it from now on."].firstMatch
+        XCTAssertTrue(savedMaxNotice.waitForExistence(timeout: 10))
+        XCTAssertEqual(
+            app.textFields["max running"].firstMatch.value as? String,
+            "4",
+            "max running value must already reflect 4 when 'Saved.' appears"
+        )
+        XCTAssertTrue(maxRunRow.staticTexts["changed"].exists, "changed chip on max running must appear alongside 'Saved.'")
+        stub.settingsGetDelay = 0
+    }
 }
