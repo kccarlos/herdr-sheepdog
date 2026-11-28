@@ -67,6 +67,7 @@ shard-4  SheepdogUITests/FactoryNewProjectUITests
 shard-4  SheepdogUITests/RemoteAgentWindowUITests
 shard-4  SheepdogUITests/LinkStatusUITests
 shard-4  SheepdogUITests/ConversationPaneSwitchUITests
+shard-4  SheepdogUITests/ConversationDayDividerUITests
 shard-4  SheepdogUITests/AgentScreenUITests            # 2
 shard-4  SheepdogUITests/QuestionPresentationUITests
 shard-4  SheepdogUITests/RedesignShotsUITests          # 1

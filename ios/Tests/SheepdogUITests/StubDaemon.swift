@@ -112,6 +112,8 @@ final class StubDaemon {
     var askAnswerHandler: ((String, String) -> (Int, String))?
     /// Optional custom handler for `POST /api/agents/<pane>/input`.
     var agentInputHandler: ((String, String) -> (Int, String))?
+    /// Optional custom handler for `GET /api/conversation` (receives typed lines so far).
+    var conversationHandler: (([String]) -> String)?
     /// Enable SSE `/events` streaming so tests can push `factory.changed`.
     var enableEvents = false
     private var eventClients: [NWConnection] = []
@@ -285,9 +287,13 @@ final class StubDaemon {
             if path.hasPrefix("/api/turn") {
                 let turn = lock.withLock { typed.count }
                 let text = reply?.spoken ?? "Received."
-                return http(200, "application/json", #"{"reply":"# + Self.json(text) + #","turn_id":"stub-turn-"# + String(turn) + #","acted":false}"#)
+                return http(200, "application/json", #"{"reply":"# + Self.json(text) + #","turn_id":"stub-turn-\#(turn)","acted":false}"#)
             }
             if path.hasPrefix("/api/conversation") {
+                if let custom = conversationHandler {
+                    let typedLines = lock.withLock { self.typed }
+                    return http(200, "application/json", custom(typedLines))
+                }
                 // The first line says whose conversation this is.
                 let lines = (0 ..< history).map { index -> String in
                     let text = history > 1 && index == history - 1 ? "Latest from \(name)."
