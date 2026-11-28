@@ -187,6 +187,8 @@ type Project struct {
 	Base               *BaseState        `json:"base,omitempty"`
 	NewGoal            bool              `json:"new_goal,omitempty"`            // J4: owner gave a new goal after a plan existed
 	NewGoalTasks       int               `json:"new_goal_tasks,omitempty"`      // J4: task count when NewGoal was set
+	GoalGen            uint64            `json:"goal_gen,omitempty"`            // J4/J12: persisted goal generation, bumped by Start on a new goal
+	GoalCmdGen         uint64            `json:"goal_cmd_gen,omitempty"`        // J4: GoalGen of the latest qualifying coordinator command
 	CoordDialogStucks  int               `json:"coord_dialog_stucks,omitempty"` // J10: consecutive R29 dialog-stuck ends
 	CoordSilentStops   int               `json:"coord_silent_stops,omitempty"`  // J9: consecutive silent coordinator stops
 	CoordErrorAt       time.Time         `json:"coord_error_at,omitempty"`      // J8: when coordinator was last told to go on
@@ -212,6 +214,7 @@ type Wake struct {
 	Task    string    `json:"task,omitempty"`
 	Why     string    `json:"why"`
 	Facts   string    `json:"facts"`
+	GoalGen uint64    `json:"goal_gen,omitempty"`
 	At      time.Time `json:"at"`
 	Retried bool      `json:"retried,omitempty"`
 }

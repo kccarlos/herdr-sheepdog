@@ -22,14 +22,19 @@ final class ActionDedupUITests: XCTestCase {
         app.launch()
 
         // Approve, twice in a row: one answer reaches the computer.
-        let byTap = app.buttons["question.api.option.1"]
-        let byVoice = app.buttons["approval.option.1"]
-        let deadline = Date().addingTimeInterval(20)
-        while !byTap.exists, !byVoice.exists, Date() < deadline { usleep(200_000) }
-        let approve = byTap.exists ? byTap : byVoice
-        XCTAssertTrue(approve.exists, "the question's Yes")
+        let approve = app.buttons.matching(NSPredicate(format: "identifier IN %@", ["question.api.option.1", "approval.option.1"])).firstMatch
+        var appeared = approve.waitForExistence(timeout: 20)
+        if !appeared {
+            // A cold or overloaded simulator can leave the first process
+            // unresponsive on initial launch: start it afresh once.
+            app.terminate()
+            app.launch()
+            appeared = approve.waitForExistence(timeout: 30)
+        }
+        XCTAssertTrue(appeared, "the question's Yes")
         let tappable = Date().addingTimeInterval(10)
-        while !approve.isHittable, Date() < tappable { usleep(150_000) }
+        while !approve.isTappable, Date() < tappable { usleep(150_000) }
+        XCTAssertTrue(approve.isTappable, "the question's Yes never became tappable")
         approve.doubleTap()
         let answered = app.descendants(matching: .any).matching(NSPredicate(format: "identifier IN %@", ["question.api.answered", "approval.answered"])).firstMatch
         XCTAssertTrue(answered.waitForExistence(timeout: 10), "answered")
@@ -40,8 +45,10 @@ final class ActionDedupUITests: XCTestCase {
         tapWhenTappable(app.buttons["controls.type"], "the keyboard button")
         typeWhenFocused(app.textFields["type.field"].firstMatch, "status please")
         let send = app.buttons["type.send"]
+        XCTAssertTrue(send.waitForExistence(timeout: 10), "Send")
         let ready = Date().addingTimeInterval(10)
-        while !send.isHittable, Date() < ready { usleep(150_000) }
+        while !send.isTappable, Date() < ready { usleep(150_000) }
+        XCTAssertTrue(send.isTappable, "Send never became tappable")
         send.doubleTap()
         let sent = Date().addingTimeInterval(10)
         while stub.requests("POST /api/turn") == 0, Date() < sent { usleep(200_000) }
