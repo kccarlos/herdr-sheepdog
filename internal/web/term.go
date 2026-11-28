@@ -453,8 +453,32 @@ func (c *termConn) open(m termproto.Message) {
 			c.refuse(m.Ch, "", termproto.RefusedShellOff)
 			return
 		}
+		c.mu.Lock()
+		if (c.ctx != nil && c.ctx.Err() != nil) || c.reason != "" {
+			c.mu.Unlock()
+			return
+		}
+		if _, dup := c.chans[m.Ch]; dup {
+			c.mu.Unlock()
+			c.control(termproto.Error(m.Ch, "channel already open"))
+			return
+		}
+		if len(c.chans) >= termproto.MaxChannels {
+			c.mu.Unlock()
+			c.refuse(m.Ch, "", termproto.RefusedTooMany)
+			return
+		}
+		c.chans[m.Ch] = &termChan{
+			ch: m.Ch, kind: "shell", mode: m.Mode,
+			cols: m.Cols, rows: m.Rows, takeover: m.Takeover, start: time.Now(),
+		}
+		c.wg.Add(1)
+		c.mu.Unlock()
 		// Finding or opening the shell's pane asks herdr: off the reader.
-		go c.openShell(m)
+		go func() {
+			defer c.wg.Done()
+			c.openShell(m)
+		}()
 		return
 	}
 	kind := "agent"
@@ -483,20 +507,53 @@ func (s *Server) termPaneAvailable(pane string) bool {
 // openChan opens channel m.Ch on pane (an agent's or a phone shell's).
 func (c *termConn) openChan(m termproto.Message, pane, kind string) {
 	c.mu.Lock()
-	if _, dup := c.chans[m.Ch]; dup {
+	tc := c.chans[m.Ch]
+	pendingShell := tc != nil && tc.gen == 0 && m.Target != nil && m.Target.Shell != nil
+	if tc != nil && !pendingShell {
 		c.mu.Unlock()
 		c.control(termproto.Error(m.Ch, "channel already open"))
 		return
 	}
-	if len(c.chans) >= termproto.MaxChannels || !c.t.reserve(c.device) {
+	if (c.ctx != nil && c.ctx.Err() != nil) || c.reason != "" {
+		if pendingShell {
+			delete(c.chans, m.Ch)
+		}
+		c.mu.Unlock()
+		return
+	}
+	if pendingShell && tc.closing {
+		tc.pane = pane
+		delete(c.chans, m.Ch)
+		c.mu.Unlock()
+		c.finish(tc, termproto.ReasonReleased)
+		return
+	}
+	maxed := len(c.chans) >= termproto.MaxChannels
+	if pendingShell {
+		maxed = len(c.chans) > termproto.MaxChannels
+	}
+	if maxed || !c.t.reserve(c.device) {
+		if pendingShell {
+			delete(c.chans, m.Ch)
+		}
 		c.mu.Unlock()
 		c.refuse(m.Ch, pane, termproto.RefusedTooMany)
 		return
 	}
-	tc := &termChan{ch: m.Ch, pane: pane, kind: kind, mode: m.Mode, cols: m.Cols, rows: m.Rows, takeover: m.Takeover, start: time.Now(), gen: 1}
-	c.chans[m.Ch] = tc
+	if !pendingShell {
+		tc = &termChan{ch: m.Ch, pane: pane, kind: kind, mode: m.Mode, cols: m.Cols, rows: m.Rows, takeover: m.Takeover, start: time.Now(), gen: 1}
+		c.chans[m.Ch] = tc
+	} else {
+		tc.pane = pane
+		tc.kind = kind
+		tc.gen = 1
+	}
+	c.wg.Add(1)
 	c.mu.Unlock()
-	go c.startBridge(tc, 1, true)
+	go func() {
+		defer c.wg.Done()
+		c.startBridge(tc, 1, true)
+	}()
 }
 
 // startBridge runs the channel's bridge (first open, or an observer
@@ -504,6 +561,17 @@ func (c *termConn) openChan(m termproto.Message, pane, kind string) {
 // the caller assigned under c.mu; callbacks of older bridges are ignored.
 func (c *termConn) startBridge(tc *termChan, gen int, first bool) {
 	c.mu.Lock()
+	if tc.gen != gen {
+		c.mu.Unlock()
+		return
+	}
+	if tc.closing {
+		delete(c.chans, tc.ch)
+		c.mu.Unlock()
+		c.t.unreserve(c.device)
+		c.finish(tc, termproto.ReasonReleased)
+		return
+	}
 	opts := herdr.BridgeOptions{
 		Socket: c.t.deps.Socket, Pane: tc.pane, Mode: herdr.BridgeMode(tc.mode),
 		Cols: tc.cols, Rows: tc.rows, Takeover: tc.takeover && first,
@@ -635,7 +703,9 @@ func (c *termConn) reopenLocked(tc *termChan) {
 	tc.pending = nil
 	tc.gen++
 	gen := tc.gen
+	c.wg.Add(1)
 	go func() {
+		defer c.wg.Done()
 		if old != nil {
 			old.Release()
 		}
