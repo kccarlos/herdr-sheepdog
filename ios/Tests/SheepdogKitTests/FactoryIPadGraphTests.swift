@@ -190,7 +190,7 @@ final class FactoryIPadGraphTests: XCTestCase {
             ("T10", "waiting on you", .blocked, false, "T10, Import, waiting on you, after T6"),
             ("T11", "needs your approval", .blocked, false, "T11, Deploy, needs your approval"),
             ("T12", "blocked", .blocked, false, "T12, Broken, blocked"),
-            ("T13", "waiting on others", .idle, false, "T13, Sync, waiting on others, after T7"),
+            ("T13", "waiting on others", .idle, true, "T13, Sync, waiting on others, after T7"),
             ("T14", "queued", .idle, true, "T14, Filters, queued, after T7"),
             ("T16", "plan review", .idle, false, "T16, Custom, plan review"),
         ]
@@ -200,6 +200,38 @@ final class FactoryIPadGraphTests: XCTestCase {
             XCTAssertEqual(node.tone, tone, ref)
             XCTAssertEqual(node.isDashed, dashed, ref)
             XCTAssertEqual(node.accessibilityLabel, aria, ref)
+        }
+    }
+
+    /// Every stage emitted by the daemon (`internal/factory/flow/rows.go`, `ladder.go`,
+    /// `view.go`) plus unmerged `ended` steps must map to the right `isDashed` border style:
+    /// queued-looking stages (`queued`, `waiting_on_dep`) and ended steps (`split`, `dropped`,
+    /// `closed`) are dashed; active, blocked, and merged-done stages are solid.
+    func testDaemonStageDashedBorders() throws {
+        let cases: [(stage: String, endedStep: String?, wantDashed: Bool)] = [
+            ("done", nil, false),
+            ("done", "split", true),
+            ("done", "dropped", true),
+            ("done", "closed", true),
+            ("working", nil, false),
+            ("ci", nil, false),
+            ("owner_gate", nil, false),
+            ("owner_answer", nil, false),
+            ("blocked_or_failed", nil, false),
+            ("waiting_on_dep", nil, true),
+            ("queued", nil, true),
+        ]
+        let tasksJSON = cases.enumerated().map { index, item in
+            let steps = item.endedStep.map { #"[{"name":"\#($0)","state":"ended"}]"# } ?? "[]"
+            return #"{"ref":"T\#(index + 1)","title":"Task \#(index + 1)","stage":"\#(item.stage)","after":[],"dependents":[],"layer":0,"rounds":0,"steps":\#(steps)}"#
+        }.joined(separator: ",")
+        let view = try decodeGraph(#"{"protocol":1,"project":"proj-1","folder":"~/code/notes","tasks":[\#(tasksJSON)]}"#)
+        let byRef = Dictionary(uniqueKeysWithValues: FactoryTaskGraph(tasks: view.tasks).nodes.map { ($0.ref, $0) })
+        for (index, item) in cases.enumerated() {
+            let ref = "T\(index + 1)"
+            let node = try XCTUnwrap(byRef[ref], ref)
+            let label = item.endedStep.map { "\(item.stage)/\($0)" } ?? item.stage
+            XCTAssertEqual(node.isDashed, item.wantDashed, "stage \(label) isDashed")
         }
     }
 
@@ -485,6 +517,409 @@ final class FactoryIPadAppModelTests: XCTestCase {
                 sv.contentSize.height, sv.bounds.height + 1,
                 "graph scroll view must not scroll vertically inside boardScroll"
             )
+        }
+
+        // At AX5 inside a 420 pt container, a 3-layer wrapped graph (3 × 250 pt + gaps > 420 pt)
+        // must activate horizontal scrolling while still never scrolling vertically.
+        let ax5JSON = #"""
+        {"protocol":1,"project":"proj-1","folder":"~/code/notes","tasks":[
+          {"ref":"T1","title":"Approve gate","stage":"owner_gate","after":[],"dependents":["T2","T3"],"layer":0,"rounds":1,"steps":[]},
+          {"ref":"T2","title":"Wait on dep","stage":"waiting_on_dep","after":["T1"],"dependents":["T3"],"layer":1,"rounds":0,"steps":[]},
+          {"ref":"T3","title":"Ship it","stage":"done","after":["T1","T2"],"dependents":[],"layer":2,"rounds":0,"steps":[]}
+        ]}
+        """#
+        let ax5View = try DaemonClient.decoder.decode(FactoryGraphView.self, from: Data(ax5JSON.utf8))
+        let ax5Host = UIHostingController(
+            rootView: VStack(spacing: 0) {
+                FactoryTaskGraphView(graph: FactoryTaskGraph(tasks: ax5View.tasks)) { _ in }
+                Spacer(minLength: 0)
+            }
+            .environment(\.dynamicTypeSize, .accessibility5)
+            .frame(width: 420, height: 500)
+        )
+        ax5Host.traitOverrides.preferredContentSizeCategory = .accessibilityExtraExtraExtraLarge
+        let ax5Window = UIWindow(frame: CGRect(x: 0, y: 0, width: 420, height: 500))
+        ax5Window.traitOverrides.preferredContentSizeCategory = .accessibilityExtraExtraExtraLarge
+        ax5Window.rootViewController = ax5Host
+        ax5Window.makeKeyAndVisible()
+        ax5Host.view.setNeedsLayout()
+        ax5Host.view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        defer {
+            ax5Window.isHidden = true
+            ax5Window.rootViewController = nil
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+        }
+
+        let ax5Scrolls = findScrollViews(in: ax5Host.view)
+        XCTAssertFalse(ax5Scrolls.isEmpty, "AX5 graph view contains a horizontal scroll view")
+        for sv in ax5Scrolls {
+            XCTAssertGreaterThan(
+                sv.contentSize.width, sv.bounds.width + 100,
+                "AX5 3-layer graph (3 × 250 pt) must scroll horizontally inside a 420 pt container"
+            )
+            XCTAssertLessThanOrEqual(
+                sv.contentSize.height, sv.bounds.height + 1,
+                "AX5 graph scroll view must not scroll vertically inside boardScroll"
+            )
+        }
+    }
+
+    private func sampledPoints(of path: Path, stepsPerSegment: Int = 24) -> [CGPoint] {
+        var points: [CGPoint] = []
+        var current = CGPoint.zero
+        var subpathStart = CGPoint.zero
+        path.cgPath.applyWithBlock { elementPointer in
+            let el = elementPointer.pointee
+            switch el.type {
+            case .moveToPoint:
+                current = el.points[0]
+                subpathStart = current
+                points.append(current)
+            case .addLineToPoint:
+                let end = el.points[0]
+                for step in 1 ... stepsPerSegment {
+                    let t = CGFloat(step) / CGFloat(stepsPerSegment)
+                    points.append(CGPoint(
+                        x: current.x + (end.x - current.x) * t,
+                        y: current.y + (end.y - current.y) * t
+                    ))
+                }
+                current = end
+            case .addQuadCurveToPoint:
+                let c = el.points[0], end = el.points[1]
+                for step in 1 ... stepsPerSegment {
+                    let t = CGFloat(step) / CGFloat(stepsPerSegment)
+                    let u = 1 - t
+                    points.append(CGPoint(
+                        x: u * u * current.x + 2 * u * t * c.x + t * t * end.x,
+                        y: u * u * current.y + 2 * u * t * c.y + t * t * end.y
+                    ))
+                }
+                current = end
+            case .addCurveToPoint:
+                let c1 = el.points[0], c2 = el.points[1], end = el.points[2]
+                for step in 1 ... stepsPerSegment {
+                    let t = CGFloat(step) / CGFloat(stepsPerSegment)
+                    let u = 1 - t
+                    let x = u * u * u * current.x + 3 * u * u * t * c1.x + 3 * u * t * t * c2.x + t * t * t * end.x
+                    let y = u * u * u * current.y + 3 * u * u * t * c1.y + 3 * u * t * t * c2.y + t * t * t * end.y
+                    points.append(CGPoint(x: x, y: y))
+                }
+                current = end
+            case .closeSubpath:
+                current = subpathStart
+                points.append(current)
+            @unknown default:
+                break
+            }
+        }
+        return points
+    }
+
+    private func layoutRects(
+        for graph: FactoryTaskGraph,
+        nodeWidth: CGFloat = 118,
+        heights: [String: CGFloat] = [:]
+    ) -> (rects: [String: CGRect], canvasHeight: CGFloat, verticalPadding: CGFloat) {
+        let layerOf = Dictionary(graph.nodes.map { ($0.ref, $0.layerIndex) }, uniquingKeysWith: { _, new in new })
+        let skips = graph.edges.filter { (layerOf[$0.to] ?? 0) - (layerOf[$0.from] ?? 0) > 1 }.count
+        let vPad: CGFloat = skips > 0 ? 14 + CGFloat(min(skips, 5)) * 8 : 12
+        var rects: [String: CGRect] = [:]
+        var maxBottom: CGFloat = vPad
+        for (layerIndex, layer) in graph.layers.enumerated() {
+            let x: CGFloat = 12 + CGFloat(layerIndex) * (nodeWidth + 20)
+            var y = vPad
+            for node in layer {
+                let h = heights[node.ref] ?? 46
+                rects[node.ref] = CGRect(x: x, y: y, width: nodeWidth, height: h)
+                y += h + 14
+                maxBottom = max(maxBottom, y - 14)
+            }
+        }
+        return (rects, maxBottom + vPad, vPad)
+    }
+
+    /// Regression test for skip-edge routing (`FactoryTaskGraphView.edgePaths(graph:rects:)`):
+    /// covers a 3-layer obstructed skip, >3-layer obstructed skips (top and bottom bypass lanes),
+    /// multiple staggered skip lanes within canvas bounds, and unobstructed skip edges that stay
+    /// direct without detouring. Fails if `edgePaths` reverts to straight direct cubic Beziers.
+    func testSkipEdgeRoutingAvoidsIntermediateNodesAcrossThreeAndMoreLayers() throws {
+        func decode(_ json: String) throws -> FactoryTaskGraph {
+            let view = try DaemonClient.decoder.decode(FactoryGraphView.self, from: Data(json.utf8))
+            return FactoryTaskGraph(tasks: view.tasks)
+        }
+
+        // 1. 3-layer obstructed skip: T1 -> T3 must arch above T2 instead of crossing through T2.
+        let threeLayer = try decode(#"""
+        {"protocol":1,"project":"proj-1","folder":"~/code/notes","tasks":[
+          {"ref":"T1","title":"Approve gate","stage":"owner_gate","after":[],"dependents":["T2","T3"],"layer":0,"rounds":1,"steps":[]},
+          {"ref":"T2","title":"Wait on dep","stage":"waiting_on_dep","after":["T1"],"dependents":["T3"],"layer":1,"rounds":0,"steps":[]},
+          {"ref":"T3","title":"Ship it","stage":"done","after":["T1","T2"],"dependents":[],"layer":2,"rounds":0,"steps":[]}
+        ]}
+        """#)
+        let threeLayout = layoutRects(for: threeLayer, heights: ["T1": 62, "T2": 62, "T3": 46])
+        let threePaths = FactoryTaskGraphView.edgePaths(graph: threeLayer, rects: threeLayout.rects)
+        let t1 = try XCTUnwrap(threeLayout.rects["T1"])
+        let t2 = try XCTUnwrap(threeLayout.rects["T2"])
+        let t3 = try XCTUnwrap(threeLayout.rects["T3"])
+        let skip3Edge = FactoryTaskGraph.Edge(from: "T1", to: "T3")
+        let skip3Points = sampledPoints(of: try XCTUnwrap(threePaths[skip3Edge]))
+        XCTAssertEqual(skip3Points.first?.x ?? -1, t1.maxX, accuracy: 0.5)
+        XCTAssertEqual(skip3Points.first?.y ?? -1, t1.midY, accuracy: 0.5)
+        XCTAssertEqual(skip3Points.last?.x ?? -1, t3.minX, accuracy: 0.5)
+        XCTAssertEqual(skip3Points.last?.y ?? -1, t3.midY, accuracy: 0.5)
+        XCTAssertFalse(
+            skip3Points.contains(where: { t2.insetBy(dx: -1, dy: -1).contains($0) }),
+            "3-layer skip edge T1->T3 must not intersect intermediate node T2"
+        )
+        let overT2 = skip3Points.filter { $0.x >= t2.minX && $0.x <= t2.maxX }
+        XCTAssertFalse(overT2.isEmpty, "T1->T3 spans across T2's horizontal band")
+        for pt in overT2 {
+            XCTAssertLessThanOrEqual(pt.y, t2.minY - 10, "T1->T3 bypass lane must clear above T2")
+            XCTAssertGreaterThanOrEqual(pt.y, 0, "T1->T3 bypass lane must stay inside top canvas padding")
+        }
+
+        // 2. >3 layers (4 layers, uneven intermediate heights): T1->T7 detours above layers 1 & 2,
+        //    and T2->T8 detours below layers 1 & 2 without intersecting any intermediate node.
+        let fourLayer = try decode(#"""
+        {"protocol":1,"project":"proj-1","folder":"~/code/notes","tasks":[
+          {"ref":"T1","title":"L0 top","stage":"done","after":[],"dependents":["T3","T7"],"layer":0,"rounds":0,"steps":[]},
+          {"ref":"T2","title":"L0 bot","stage":"done","after":[],"dependents":["T4","T8"],"layer":0,"rounds":0,"steps":[]},
+          {"ref":"T3","title":"L1 top","stage":"working","after":["T1"],"dependents":["T5"],"layer":1,"rounds":0,"steps":[]},
+          {"ref":"T4","title":"L1 bot","stage":"working","after":["T2"],"dependents":["T6"],"layer":1,"rounds":0,"steps":[]},
+          {"ref":"T5","title":"L2 top","stage":"working","after":["T3"],"dependents":["T7"],"layer":2,"rounds":0,"steps":[]},
+          {"ref":"T6","title":"L2 bot","stage":"working","after":["T4"],"dependents":["T8"],"layer":2,"rounds":0,"steps":[]},
+          {"ref":"T7","title":"L3 top","stage":"queued","after":["T1","T5"],"dependents":[],"layer":3,"rounds":0,"steps":[]},
+          {"ref":"T8","title":"L3 bot","stage":"queued","after":["T2","T6"],"dependents":[],"layer":3,"rounds":0,"steps":[]}
+        ]}
+        """#)
+        let fourLayout = layoutRects(
+            for: fourLayer,
+            heights: ["T1": 64, "T2": 46, "T3": 46, "T4": 60, "T5": 46, "T6": 72, "T7": 46, "T8": 60]
+        )
+        let fourPaths = FactoryTaskGraphView.edgePaths(graph: fourLayer, rects: fourLayout.rects)
+        let inter4 = try ["T3", "T4", "T5", "T6"].map { try XCTUnwrap(fourLayout.rects[$0]) }
+        let inter4MinY = try XCTUnwrap(inter4.map(\.minY).min())
+        let inter4MaxY = try XCTUnwrap(inter4.map(\.maxY).max())
+
+        let topSkip4 = sampledPoints(of: try XCTUnwrap(fourPaths[.init(from: "T1", to: "T7")]))
+        for rect in inter4 {
+            XCTAssertFalse(
+                topSkip4.contains(where: { rect.insetBy(dx: -1, dy: -1).contains($0) }),
+                "4-layer top skip T1->T7 must clear every intermediate node across layers 1 and 2"
+            )
+        }
+        let topSpan4 = topSkip4.filter { $0.x >= inter4[0].minX && $0.x <= inter4[2].maxX }
+        XCTAssertFalse(topSpan4.isEmpty)
+        for pt in topSpan4 {
+            XCTAssertLessThanOrEqual(pt.y, inter4MinY - 10)
+            XCTAssertGreaterThanOrEqual(pt.y, 0)
+        }
+
+        let botSkip4 = sampledPoints(of: try XCTUnwrap(fourPaths[.init(from: "T2", to: "T8")]))
+        for rect in inter4 {
+            XCTAssertFalse(
+                botSkip4.contains(where: { rect.insetBy(dx: -1, dy: -1).contains($0) }),
+                "4-layer bottom skip T2->T8 must clear every intermediate node across layers 1 and 2"
+            )
+        }
+        let botSpan4 = botSkip4.filter { $0.x >= inter4[1].minX && $0.x <= inter4[3].maxX }
+        XCTAssertFalse(botSpan4.isEmpty)
+        for pt in botSpan4 {
+            XCTAssertGreaterThanOrEqual(pt.y, inter4MaxY + 10)
+            XCTAssertLessThanOrEqual(pt.y, fourLayout.canvasHeight)
+        }
+
+        // 3. Multiple skips staggered (5 layers: 3 top lanes + 2 bottom lanes).
+        let fiveLayer = try decode(#"""
+        {"protocol":1,"project":"proj-1","folder":"~/code/notes","tasks":[
+          {"ref":"A0","title":"A0","stage":"done","after":[],"dependents":["A1","A2","A3"],"layer":0,"rounds":0,"steps":[]},
+          {"ref":"B0","title":"B0","stage":"done","after":[],"dependents":["B1","B2","B3"],"layer":0,"rounds":0,"steps":[]},
+          {"ref":"A1","title":"A1","stage":"done","after":["A0"],"dependents":["A2","A4"],"layer":1,"rounds":0,"steps":[]},
+          {"ref":"B1","title":"B1","stage":"done","after":["B0"],"dependents":["B2"],"layer":1,"rounds":0,"steps":[]},
+          {"ref":"A2","title":"A2","stage":"working","after":["A0","A1"],"dependents":["A3"],"layer":2,"rounds":0,"steps":[]},
+          {"ref":"B2","title":"B2","stage":"working","after":["B0","B1"],"dependents":["B3"],"layer":2,"rounds":0,"steps":[]},
+          {"ref":"A3","title":"A3","stage":"queued","after":["A0","A2"],"dependents":["A4"],"layer":3,"rounds":0,"steps":[]},
+          {"ref":"B3","title":"B3","stage":"queued","after":["B0","B2"],"dependents":["B4"],"layer":3,"rounds":0,"steps":[]},
+          {"ref":"A4","title":"A4","stage":"queued","after":["A1","A3"],"dependents":[],"layer":4,"rounds":0,"steps":[]},
+          {"ref":"B4","title":"B4","stage":"queued","after":["B3"],"dependents":[],"layer":4,"rounds":0,"steps":[]}
+        ]}
+        """#)
+        let fiveLayout = layoutRects(for: fiveLayer)
+        let fivePaths = FactoryTaskGraphView.edgePaths(graph: fiveLayer, rects: fiveLayout.rects)
+        let nodeByRef5 = Dictionary(fiveLayer.nodes.map { ($0.ref, $0) }, uniquingKeysWith: { _, new in new })
+
+        let topEdges: [FactoryTaskGraph.Edge] = [
+            .init(from: "A0", to: "A2"),
+            .init(from: "A0", to: "A3"),
+            .init(from: "A1", to: "A4"),
+        ]
+        var topLaneYs: [CGFloat] = []
+        for edge in topEdges {
+            let pts = sampledPoints(of: try XCTUnwrap(fivePaths[edge]))
+            let fromL = try XCTUnwrap(nodeByRef5[edge.from]?.layerIndex)
+            let toL = try XCTUnwrap(nodeByRef5[edge.to]?.layerIndex)
+            let interRects = fiveLayer.nodes
+                .filter { $0.layerIndex > fromL && $0.layerIndex < toL }
+                .compactMap { fiveLayout.rects[$0.ref] }
+            for rect in interRects {
+                XCTAssertFalse(
+                    pts.contains(where: { rect.insetBy(dx: -1, dy: -1).contains($0) }),
+                    "staggered top skip \(edge.from)->\(edge.to) must not intersect intermediate nodes"
+                )
+            }
+            let minX = try XCTUnwrap(interRects.map(\.minX).min())
+            let maxX = try XCTUnwrap(interRects.map(\.maxX).max())
+            let spanYs = pts.filter { $0.x >= minX && $0.x <= maxX }.map(\.y)
+            let laneY = try XCTUnwrap(spanYs.min())
+            XCTAssertGreaterThanOrEqual(laneY, 0, "top lane stays inside canvas top padding")
+            topLaneYs.append(laneY)
+        }
+        XCTAssertGreaterThan(topLaneYs[0] - topLaneYs[1], 7, "top skip lanes 0 and 1 must stagger by ~8 pt")
+        XCTAssertGreaterThan(topLaneYs[1] - topLaneYs[2], 7, "top skip lanes 1 and 2 must stagger by ~8 pt")
+
+        let botEdges: [FactoryTaskGraph.Edge] = [
+            .init(from: "B0", to: "B2"),
+            .init(from: "B0", to: "B3"),
+        ]
+        var botLaneYs: [CGFloat] = []
+        for edge in botEdges {
+            let pts = sampledPoints(of: try XCTUnwrap(fivePaths[edge]))
+            let fromL = try XCTUnwrap(nodeByRef5[edge.from]?.layerIndex)
+            let toL = try XCTUnwrap(nodeByRef5[edge.to]?.layerIndex)
+            let interRects = fiveLayer.nodes
+                .filter { $0.layerIndex > fromL && $0.layerIndex < toL }
+                .compactMap { fiveLayout.rects[$0.ref] }
+            for rect in interRects {
+                XCTAssertFalse(
+                    pts.contains(where: { rect.insetBy(dx: -1, dy: -1).contains($0) }),
+                    "staggered bottom skip \(edge.from)->\(edge.to) must not intersect intermediate nodes"
+                )
+            }
+            let minX = try XCTUnwrap(interRects.map(\.minX).min())
+            let maxX = try XCTUnwrap(interRects.map(\.maxX).max())
+            let spanYs = pts.filter { $0.x >= minX && $0.x <= maxX }.map(\.y)
+            let laneY = try XCTUnwrap(spanYs.max())
+            XCTAssertLessThanOrEqual(laneY, fiveLayout.canvasHeight, "bottom lane stays inside canvas bottom padding")
+            botLaneYs.append(laneY)
+        }
+        XCTAssertGreaterThan(botLaneYs[1] - botLaneYs[0], 7, "bottom skip lanes 0 and 1 must stagger by ~8 pt")
+
+        // 4. Unobstructed skip edges (T6->T8 horizontal and T6->T11 diagonal below single-node T4)
+        //    keep direct curves within [min(start.y, end.y), max(start.y, end.y)] while obstructed
+        //    T1->T7 still detours above T4.
+        let sampleStyle = try decode(#"""
+        {"protocol":1,"project":"proj-1","folder":"~/code/notes","tasks":[
+          {"ref":"T1","title":"Notes page","stage":"done","after":[],"dependents":["T4","T7"],"layer":0,"rounds":0,"steps":[]},
+          {"ref":"T6","title":"Storage","stage":"done","after":[],"dependents":["T8","T11"],"layer":0,"rounds":0,"steps":[]},
+          {"ref":"T9","title":"Export","stage":"done","after":[],"dependents":[],"layer":0,"rounds":0,"steps":[]},
+          {"ref":"T4","title":"Search box","stage":"done","after":["T1"],"dependents":["T7"],"layer":1,"rounds":0,"steps":[]},
+          {"ref":"T7","title":"Search","stage":"working","after":["T1","T4"],"dependents":[],"layer":2,"rounds":0,"steps":[]},
+          {"ref":"T8","title":"Tags","stage":"working","after":["T6"],"dependents":[],"layer":2,"rounds":0,"steps":[]},
+          {"ref":"T11","title":"Archive","stage":"queued","after":["T6"],"dependents":[],"layer":2,"rounds":0,"steps":[]}
+        ]}
+        """#)
+        let sampleLayout = layoutRects(for: sampleStyle)
+        let samplePaths = FactoryTaskGraphView.edgePaths(graph: sampleStyle, rects: sampleLayout.rects)
+        let rectT4 = try XCTUnwrap(sampleLayout.rects["T4"])
+        let rectT6 = try XCTUnwrap(sampleLayout.rects["T6"])
+        let rectT8 = try XCTUnwrap(sampleLayout.rects["T8"])
+        let rectT11 = try XCTUnwrap(sampleLayout.rects["T11"])
+
+        let obstructedPts = sampledPoints(of: try XCTUnwrap(samplePaths[.init(from: "T1", to: "T7")]))
+        XCTAssertFalse(obstructedPts.contains(where: { rectT4.insetBy(dx: -1, dy: -1).contains($0) }))
+        XCTAssertLessThanOrEqual(
+            try XCTUnwrap(obstructedPts.filter { $0.x >= rectT4.minX && $0.x <= rectT4.maxX }.map(\.y).max()),
+            rectT4.minY - 10,
+            "obstructed T1->T7 detours above T4"
+        )
+
+        for (toRef, toRect) in [("T8", rectT8), ("T11", rectT11)] {
+            let pts = sampledPoints(of: try XCTUnwrap(samplePaths[.init(from: "T6", to: toRef)]))
+            let minY = min(rectT6.midY, toRect.midY)
+            let maxY = max(rectT6.midY, toRect.midY)
+            XCTAssertFalse(pts.contains(where: { rectT4.insetBy(dx: -1, dy: -1).contains($0) }))
+            for pt in pts {
+                XCTAssertGreaterThanOrEqual(pt.y, minY - 0.5, "unobstructed T6->\(toRef) must not detour above endpoints")
+                XCTAssertLessThanOrEqual(pt.y, maxY + 0.5, "unobstructed T6->\(toRef) must not detour below endpoints")
+            }
+        }
+        // 5. Vertical padding expands when skip-layer edges exist so bypass lanes stay inside canvas bounds.
+        let noSkipThreeLayer = try decode(#"""
+        {"protocol":1,"project":"proj-1","folder":"~/code/notes","tasks":[
+          {"ref":"T1","title":"Approve gate","stage":"owner_gate","after":[],"dependents":["T2"],"layer":0,"rounds":1,"steps":[]},
+          {"ref":"T2","title":"Wait on dep","stage":"waiting_on_dep","after":["T1"],"dependents":["T3"],"layer":1,"rounds":0,"steps":[]},
+          {"ref":"T3","title":"Ship it","stage":"done","after":["T2"],"dependents":[],"layer":2,"rounds":0,"steps":[]}
+        ]}
+        """#)
+        func hostedGraphContentHeight(_ graph: FactoryTaskGraph) throws -> CGFloat {
+            let host = UIHostingController(
+                rootView: VStack(spacing: 0) {
+                    FactoryTaskGraphView(graph: graph) { _ in }
+                    Spacer(minLength: 0)
+                }
+                .frame(width: 500, height: 300)
+            )
+            let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 500, height: 300))
+            window.rootViewController = host
+            window.makeKeyAndVisible()
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+            defer {
+                window.isHidden = true
+                window.rootViewController = nil
+                RunLoop.main.run(until: Date().addingTimeInterval(0.02))
+            }
+            func firstScrollView(in root: UIView) -> UIScrollView? {
+                if let sv = root as? UIScrollView { return sv }
+                for sub in root.subviews {
+                    if let found = firstScrollView(in: sub) { return found }
+                }
+                return nil
+            }
+            return try XCTUnwrap(firstScrollView(in: host.view)).contentSize.height
+        }
+        let noSkipHeight = try hostedGraphContentHeight(noSkipThreeLayer)
+        let withSkipHeight = try hostedGraphContentHeight(threeLayer)
+        XCTAssertGreaterThanOrEqual(
+            withSkipHeight, noSkipHeight + 16,
+            "graph with skip-layer edge must expand vertical padding for bypass lanes"
+        )
+    }
+
+    /// `FactoryTaskGraph(tasks:)` does not deduplicate task refs, so `FactoryTaskGraphView`'s
+    /// padding and `edgePaths` lookups must not trap with `Dictionary(uniqueKeysWithValues:)`
+    /// if a payload ever contains duplicate refs.
+    func testEdgePathsAndGraphViewTolerateDuplicateTaskRefs() throws {
+        let json = #"""
+        {"protocol":1,"project":"proj-1","folder":"~/code/notes","tasks":[
+          {"ref":"T1","title":"First","stage":"done","after":[],"dependents":["T2","T3"],"layer":0,"rounds":0,"steps":[]},
+          {"ref":"T1","title":"Duplicate","stage":"done","after":[],"dependents":["T2","T3"],"layer":0,"rounds":0,"steps":[]},
+          {"ref":"T2","title":"Middle","stage":"working","after":["T1"],"dependents":["T3"],"layer":1,"rounds":0,"steps":[]},
+          {"ref":"T3","title":"End","stage":"queued","after":["T1","T2"],"dependents":[],"layer":2,"rounds":0,"steps":[]}
+        ]}
+        """#
+        let view = try DaemonClient.decoder.decode(FactoryGraphView.self, from: Data(json.utf8))
+        let graph = FactoryTaskGraph(tasks: view.tasks)
+        let layout = layoutRects(for: graph)
+        let paths = FactoryTaskGraphView.edgePaths(graph: graph, rects: layout.rects)
+        XCTAssertNotNil(paths[.init(from: "T1", to: "T3")])
+
+        let host = UIHostingController(
+            rootView: FactoryTaskGraphView(graph: graph) { _ in }
+                .frame(width: 420, height: 200)
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 420, height: 200))
+        window.rootViewController = host
+        window.makeKeyAndVisible()
+        host.view.layoutIfNeeded()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            RunLoop.main.run(until: Date().addingTimeInterval(0.02))
         }
     }
 

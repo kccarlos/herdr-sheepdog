@@ -19,6 +19,11 @@ struct FactoryTaskGraphView: View {
 
     private var nodeWidth: CGFloat { min(scaledNodeWidth, 250) }
     private var activeRef: String? { hoveredRef ?? focusedRef }
+    private var verticalPadding: CGFloat {
+        let layerOf = Dictionary(graph.nodes.map { ($0.ref, $0.layerIndex) }, uniquingKeysWith: { _, new in new })
+        let skips = graph.edges.filter { (layerOf[$0.to] ?? 0) - (layerOf[$0.from] ?? 0) > 1 }.count
+        return skips > 0 ? 14 + CGFloat(min(skips, 5)) * 8 : 12
+    }
 
     var body: some View {
         let focus = graph.highlighted(focusing: activeRef)
@@ -45,22 +50,16 @@ struct FactoryTaskGraphView: View {
                         .accessibilityIdentifier("factoryProject.graph.layer.\(index)")
                     }
                 }
-                .padding(12)
+                .padding(.horizontal, 12)
+                .padding(.vertical, verticalPadding)
                 .backgroundPreferenceValue(GraphNodeBoundsKey.self) { anchors in
                     GeometryReader { proxy in
                         Canvas { context, _ in
+                            let paths = Self.edgePaths(graph: graph, rects: anchors.mapValues { proxy[$0] })
                             let ordered = graph.edges.filter { !focus.edges.contains($0) }
                                 + graph.edges.filter { focus.edges.contains($0) }
                             for edge in ordered {
-                                guard let fromA = anchors[edge.from], let toA = anchors[edge.to] else { continue }
-                                let from = proxy[fromA], to = proxy[toA]
-                                let start = CGPoint(x: from.maxX, y: from.midY)
-                                let end = CGPoint(x: to.minX, y: to.midY)
-                                let midX = (start.x + end.x) / 2
-                                var path = Path()
-                                path.move(to: start)
-                                path.addCurve(to: end, control1: CGPoint(x: midX, y: start.y),
-                                              control2: CGPoint(x: midX, y: end.y))
+                                guard let path = paths[edge] else { continue }
                                 let hot = focus.edges.contains(edge)
                                 let dim = activeRef != nil && !hot
                                 let color: Color = hot ? Theme.ink : Theme.chevron.opacity(dim ? 0.35 : 1)
@@ -100,11 +99,13 @@ struct FactoryTaskGraphView: View {
                 Text(node.statusWord)
                     .font(.caption)
                     .foregroundStyle(Theme.muted)
-                    .fixedSize(horizontal: false, vertical: true)
             }
+            .multilineTextAlignment(.leading)
+            .fixedSize(horizontal: false, vertical: true)
             .padding(.horizontal, 8)
             .padding(.vertical, 6)
-            .frame(minWidth: nodeWidth, maxWidth: nodeWidth, minHeight: 46, alignment: .leading)
+            .frame(width: nodeWidth, alignment: .leading)
+            .frame(minHeight: 46, alignment: .leading)
             .background(Theme.card, in: shape)
             .overlay(nodeBorder(node, shape: shape))
             .opacity(dim ? 0.45 : 1)
@@ -144,5 +145,46 @@ struct FactoryTaskGraphView: View {
         case .blocked: return Theme.blocked
         case .idle: return Theme.idle
         }
+    }
+
+    static func edgePaths(graph: FactoryTaskGraph, rects: [String: CGRect]) -> [FactoryTaskGraph.Edge: Path] {
+        let nodeByRef = Dictionary(graph.nodes.map { ($0.ref, $0) }, uniquingKeysWith: { _, new in new })
+        var paths: [FactoryTaskGraph.Edge: Path] = [:]
+        var topLanes = 0, bottomLanes = 0
+        for edge in graph.edges {
+            guard let fromNode = nodeByRef[edge.from], let toNode = nodeByRef[edge.to],
+                  let from = rects[edge.from], let to = rects[edge.to] else { continue }
+            let start = CGPoint(x: from.maxX, y: from.midY), end = CGPoint(x: to.minX, y: to.midY)
+            let inter = graph.nodes.compactMap {
+                $0.layerIndex > fromNode.layerIndex && $0.layerIndex < toNode.layerIndex ? rects[$0.ref] : nil
+            }
+            let loY = min(start.y, end.y) - 4, hiY = max(start.y, end.y) + 4
+            var path = Path()
+            path.move(to: start)
+            if inter.contains(where: { $0.minY <= hiY && $0.maxY >= loY }),
+               let minY = inter.map(\.minY).min(), let maxY = inter.map(\.maxY).max() {
+                let avgY = (start.y + end.y) / 2
+                let above = (fromNode.slotIndex == 0 && toNode.slotIndex == 0) || (avgY - minY <= maxY - avgY)
+                let lane = min(above ? topLanes : bottomLanes, 4)
+                if above { topLanes += 1 } else { bottomLanes += 1 }
+                let laneY = above ? minY - 12 - CGFloat(lane) * 8 : maxY + 12 + CGFloat(lane) * 8
+                let xL = from.maxX + 10, xR = to.minX - 10
+                let rL = min(8, abs(laneY - start.y) / 2), rR = min(8, abs(laneY - end.y) / 2)
+                if rL > 0.5 {
+                    path.addArc(tangent1End: CGPoint(x: xL, y: start.y), tangent2End: CGPoint(x: xL, y: laneY), radius: rL)
+                    path.addArc(tangent1End: CGPoint(x: xL, y: laneY), tangent2End: CGPoint(x: xR, y: laneY), radius: rL)
+                } else { path.addLine(to: CGPoint(x: xL, y: laneY)) }
+                if rR > 0.5 {
+                    path.addArc(tangent1End: CGPoint(x: xR, y: laneY), tangent2End: CGPoint(x: xR, y: end.y), radius: rR)
+                    path.addArc(tangent1End: CGPoint(x: xR, y: end.y), tangent2End: end, radius: rR)
+                } else { path.addLine(to: CGPoint(x: xR, y: laneY)) }
+                path.addLine(to: end)
+            } else {
+                let midX = (start.x + end.x) / 2
+                path.addCurve(to: end, control1: CGPoint(x: midX, y: start.y), control2: CGPoint(x: midX, y: end.y))
+            }
+            paths[edge] = path
+        }
+        return paths
     }
 }
