@@ -205,7 +205,6 @@ type App struct {
 	web            *web.Server
 	factory        *factory.Engine
 	prompts        *prompts.Loader
-	port           int
 
 	queryLazy *lazyQuerier // nil when --cli=off; filled in by Run after daemon.start
 
@@ -309,6 +308,9 @@ func Check(cfg config.Config, opts Options) error {
 	if opts.Brain != BrainOn && opts.Brain != BrainOff && opts.Brain != BrainFake {
 		return fmt.Errorf("app: --brain must be %s, %s or %s", BrainOn, BrainOff, BrainFake)
 	}
+	if opts.Port < 0 || opts.Port > 65535 {
+		return fmt.Errorf("app: --port=%d: want a port number", opts.Port)
+	}
 	// A missing voice key is not an error with the default --voice=on:
 	// the daemon starts in setup mode (web server up, voice off until
 	// `sheepdog setup` saves a key). Only a provider forced by the flag
@@ -335,9 +337,8 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 	if err := Check(cfg, opts); err != nil {
 		return nil, err
 	}
-	port := cfg.Web.Port
 	if opts.Port > 0 {
-		port = opts.Port
+		cfg.Web.Port = opts.Port
 	}
 
 	elog, err := eventlog.Open(cfg.DataDir, eventlog.Options{Stderr: opts.Stderr})
@@ -352,7 +353,7 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 		log = teeLogger{elog, opts.Echo}
 	}
 	ml := &mutedLogger{Logger: log}
-	a := &App{cfg: cfg, opts: opts, elog: elog, log: ml, mutedLog: ml, port: port, restart: make(chan string, 1)}
+	a := &App{cfg: cfg, opts: opts, elog: elog, log: ml, mutedLog: ml, restart: make(chan string, 1)}
 	if err := a.wire(); err != nil {
 		_ = elog.Close()
 		return nil, err
@@ -362,9 +363,24 @@ func Build(cfg config.Config, opts Options) (*App, error) {
 }
 
 // Listen binds web.bind:<port> (web.bind defaults to 127.0.0.1). URL is
-// valid afterwards.
+// valid afterwards, and cfg.Web.Port and factory RunEnv reflect the actual
+// bound port (including when port 0 picks an ephemeral port).
 func (a *App) Listen() error {
-	return a.web.Listen(net.JoinHostPort(a.cfg.Web.Bind, strconv.Itoa(a.port)))
+	if err := a.web.Listen(net.JoinHostPort(a.cfg.Web.Bind, strconv.Itoa(a.cfg.Web.Port))); err != nil {
+		return err
+	}
+	if _, p, err := net.SplitHostPort(a.web.Addr()); err == nil {
+		if port, err := strconv.Atoi(p); err == nil && port > 0 {
+			a.cfg.Web.Port = port
+			if a.factory != nil {
+				if a.factory.RunEnv == nil {
+					a.factory.RunEnv = map[string]string{}
+				}
+				a.factory.RunEnv["SHEEPDOG_WEB_PORT"] = p
+			}
+		}
+	}
+	return nil
 }
 
 // URL returns the base URL of the web server ("" before Listen).
