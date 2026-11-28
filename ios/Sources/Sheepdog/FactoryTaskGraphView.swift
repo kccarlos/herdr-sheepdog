@@ -20,7 +20,7 @@ struct FactoryTaskGraphView: View {
     private var nodeWidth: CGFloat { min(scaledNodeWidth, 250) }
     private var activeRef: String? { hoveredRef ?? focusedRef }
     private var verticalPadding: CGFloat {
-        let layerOf = Dictionary(uniqueKeysWithValues: graph.nodes.map { ($0.ref, $0.layerIndex) })
+        let layerOf = Dictionary(graph.nodes.map { ($0.ref, $0.layerIndex) }, uniquingKeysWith: { _, new in new })
         let skips = graph.edges.filter { (layerOf[$0.to] ?? 0) - (layerOf[$0.from] ?? 0) > 1 }.count
         return skips > 0 ? 14 + CGFloat(min(skips, 5)) * 8 : 12
     }
@@ -148,7 +148,7 @@ struct FactoryTaskGraphView: View {
     }
 
     static func edgePaths(graph: FactoryTaskGraph, rects: [String: CGRect]) -> [FactoryTaskGraph.Edge: Path] {
-        let nodeByRef = Dictionary(uniqueKeysWithValues: graph.nodes.map { ($0.ref, $0) })
+        let nodeByRef = Dictionary(graph.nodes.map { ($0.ref, $0) }, uniquingKeysWith: { _, new in new })
         var paths: [FactoryTaskGraph.Edge: Path] = [:]
         var topLanes = 0, bottomLanes = 0
         for edge in graph.edges {
